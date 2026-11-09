@@ -70,6 +70,7 @@ func (c *Config) loadFromEnv() {
 }
 
 // loadEnvFile loads key=value pairs from a file.
+// #nosec G304: path comes from operator --config flag or env, not untrusted input
 func loadEnvFile(path string, cfg *Config) error {
 	data, err := os.ReadFile(path)
 	if err != nil {

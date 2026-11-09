@@ -9,9 +9,10 @@ SHELL := /bin/bash
 
 GO ?= go
 GOFMT ?= gofmt
-GOLINT ?= $(GO) run github.com/golangci/golangci-lint@v2.19.2
+GOLINT ?= golangci-lint run ./...
 GOCOVER ?= $(GO) tool cover
-GOSEC ?= $(GO) run github.com/securego/gosec@v3.1.0
+GOSEC ?= $(GO) run github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+GOVULNCHECK ?= $(GO) run golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
 PREFIX ?= dist
 BINARIES ?= $(PREFIX)/ingest $(PREFIX)/export
@@ -27,7 +28,7 @@ fmt: ## Format Go files with gofmt (and goimports if available)
 
 # Lint
 lint: ## Run golangci-lint on all packages
-	$(GOLINT) run ./...
+	$(GOLINT)
 
 # Test
 test: ## Run vet and tests with race detector
@@ -40,8 +41,19 @@ coverage: ## Run tests with coverage report
 	$(GOCOVER) -func=coverage.out
 
 # Security
-security: ## Run gosec security scanner
+# Note: gosec and govulncheck require Go 1.27.2 compatibility. 
+# Current system uses Go 1.27.3. Tool binaries compiled with Go 1.27.2 
+# cannot read Go 1.27.3 cache format. 
+# Workaround: run with cache disabled after cleaning.
+security: ## Run gosec security scanner and govulncheck
+	@$(GO) clean -cache
 	$(GOSEC) ./...
+	@$(GO) clean -cache
+	$(GOVULNCHECK) ./...
+
+# Coverage check
+check-coverage: ## Enforce >=80% coverage on internal packages
+	@bash /tmp/coverage-check.sh
 
 # Build
 build: ## Build binaries to dist/
@@ -49,12 +61,13 @@ build: ## Build binaries to dist/
 	$(GO) build -o $(PREFIX)/ ./cmd/...
 
 # Check (CI pipeline)
-check: ## Run format, lint, test, coverage, and security checks
+check: ## Run format, lint, test, coverage check, and security checks
 	@set -e; \
 	$(MAKE) fmt; \
 	$(MAKE) lint; \
 	$(MAKE) test; \
 	$(MAKE) coverage; \
+	$(MAKE) check-coverage; \
 	$(MAKE) security; \
 	echo "All checks passed."
 
@@ -64,4 +77,4 @@ clean: ## Remove build artifacts
 	$(RM) coverage.out
 
 # Phony targets
-.PHONY: help fmt lint test coverage security build check clean
+.PHONY: help fmt lint test coverage check-coverage security build check clean

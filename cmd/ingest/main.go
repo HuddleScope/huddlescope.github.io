@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -55,7 +56,7 @@ func main() {
 		application.WithFeedFetchers(fetcher),
 	)
 
-	result := app.RunIngest(nil)
+	result := app.RunIngest(context.Background())
 
 	// Output result
 	if *dryRun {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -40,28 +41,34 @@ func main() {
 	// Build application with adapters
 	repo := storage.NewInMemoryRepository()
 	// Pre-populate with some stories for export
-	repo.Upsert(domain.Story{
+	if err := repo.Upsert(domain.Story{
 		ID:          "test-1",
 		Title:       "Test Story 1",
 		Source:      "test-feed",
 		PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		Summary:     "Summary 1",
 		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
-	repo.Upsert(domain.Story{
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to insert test story 1: %v\n", err)
+		os.Exit(1)
+	}
+	if err := repo.Upsert(domain.Story{
 		ID:          "test-2",
 		Title:       "Test Story 2",
 		Source:      "test-feed",
 		PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		Summary:     "Summary 2",
 		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to insert test story 2: %v\n", err)
+		os.Exit(1)
+	}
 
 	app := application.New(
 		application.WithRepository(repo),
 	)
 
-	result := app.RunExport(nil)
+	result := app.RunExport(context.Background())
 
 	// Output result
 	if *dryRun {

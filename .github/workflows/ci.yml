@@ -1,0 +1,155 @@
+# GitHub Actions CI/CD workflow for HuddleScope
+# See docs/ci-status.md for status and known issues
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run tests with race detector
+        run: go test ./... -race -timeout 60s
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run gofmt check
+        run: |
+          if [ "$(gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*') | wc -l)" -gt 0 ]; then
+            echo "Error: gofmt found files that need formatting"
+            gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*')
+            exit 1
+          fi
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v5
+        with:
+          version: v2.15.0
+          args: --timeout=5m
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run gosec
+        uses: securego/gosec@v2.29.0
+        with:
+          args: ./...
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          govulncheck ./...
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run coverage check
+        run: |
+          echo "Checking coverage of internal packages..."
+          for pkg in $(go list ./internal/...); do
+            go test -coverprofile=/tmp/cover.out "$pkg" >/dev/null 2>&1 || { echo "FAIL: $pkg - test failed"; exit 1; }
+            pct=$(go tool cover -func=/tmp/cover.out 2>/dev/null | grep "total:" | awk '{print $3}' | tr -d '%')
+            if awk "BEGIN {exit !($pct < 80)}"; then
+              echo "FAIL: $pkg has $pct% coverage (< 80%)"
+              exit 1
+            fi
+          done
+          echo "Coverage gate passed (all internal packages >= 80%)"
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          go build -o dist/ ./cmd/
+
+      - name: Verify binaries
+        run: |
+          ls -la dist/
+
+permissions:
+  contents: read
+  actions: read
