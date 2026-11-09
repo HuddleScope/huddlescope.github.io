@@ -356,6 +356,7 @@ func (c Config) Redacted() Config {
 }
 
 // MarshalJSON implements json.Marshaler to never include secrets.
+// Uses value receiver to ensure json.Marshal() works with both cfg and &cfg.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type SafeConfig struct {
 		ConfigFile     string   `json:"ConfigFile"`
