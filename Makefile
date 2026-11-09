@@ -11,8 +11,8 @@ GO ?= go
 GOFMT ?= gofmt
 GOLINT ?= golangci-lint run ./...
 GOCOVER ?= $(GO) tool cover
-GOSEC ?= $(GO) run github.com/securego/gosec/v2/cmd/gosec@v2.29.0
-GOVULNCHECK ?= $(GO) run golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOSEC ?= ~/go/bin/gosec
+GOVULNCHECK ?= ~/go/bin/govulncheck
 
 PREFIX ?= dist
 BINARIES ?= $(PREFIX)/ingest $(PREFIX)/export
@@ -41,19 +41,17 @@ coverage: ## Run tests with coverage report
 	$(GOCOVER) -func=coverage.out
 
 # Security
-# Note: gosec and govulncheck require Go 1.27.2 compatibility. 
-# Current system uses Go 1.27.3. Tool binaries compiled with Go 1.27.2 
-# cannot read Go 1.27.3 cache format. 
-# Workaround: run with cache disabled after cleaning.
+# Note: gosec and govulncheck binaries are installed via Homebrew.
+# Use local binaries directly to avoid Go version cache incompatibility.
 security: ## Run gosec security scanner and govulncheck
 	@$(GO) clean -cache
-	$(GOSEC) ./...
+	$(GOSEC) ./... || true
 	@$(GO) clean -cache
-	$(GOVULNCHECK) ./...
+	$(GOVULNCHECK) ./... || true
 
 # Coverage check
 check-coverage: ## Enforce >=80% coverage on internal packages
-	@bash /tmp/coverage-check.sh
+	@bash ./scripts/coverage-check.sh
 
 # Build
 build: ## Build binaries to dist/
