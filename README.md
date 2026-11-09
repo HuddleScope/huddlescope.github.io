@@ -80,6 +80,57 @@ make check
 ./dist/export -config .env
 ```
 
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Production | Description |
+|----------|---------|------------|-------------|
+| `HSC_LOG_LEVEL` | `info` | No | Log level: debug, info, warn, error |
+| `HSC_USER_AGENT` | `huddlescope/0.1` | No | User agent string for HTTP requests |
+| `HSC_REQUEST_TIMEOUT` | `30s` | No | Request timeout (e.g., `60s`) |
+| `HSC_HUGO_BASE_URL` | `https://huddlescope.github.io/` | No | Base URL for Hugo exports |
+| `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file |
+| `HSC_SOURCES` | (none) | No | Source list: `id,name,url[,interval];...` |
+| `HSC_ENV` | `dev` | Yes | Environment: dev, production |
+| `TURSO_DATABASE_URL` | (none) | Yes | Turso database URL |
+| `TURSO_AUTH_TOKEN` | (none) | Yes | Turso authentication token |
+
+### Source Configuration
+
+Sources define RSS feed URLs with optional fetch intervals:
+
+```bash
+# Single source with 5-minute interval
+HSC_SOURCES=nfl-news,NFL News,http://example.com,300
+
+# Multiple sources
+HSC_SOURCES=nfl-news,NFL News,http://a.com,300;nfl-updates,NFL Updates,http://b.com
+```
+
+Format: `id,name,url[,interval];id,name,url[,interval];...`
+
+- `id`: Unique identifier (used for deduplication and per-source overrides)
+- `name`: Human-readable name
+- `url`: HTTP/HTTPS feed URL
+- `interval`: Optional fetch interval in seconds (default: 900 = 15 minutes)
+
+### Production Mode
+
+Set `HSC_ENV=production` to enable production mode. Production requires:
+- `HSC_STORAGE_BACKEND` must be `turso` or `sqlite-file` (not `memory`)
+- `TURSO_DATABASE_URL` must be set
+- `TURSO_AUTH_TOKEN` must be set
+
+Invalid production configuration causes the application to fail with a clear error message listing all missing/invalid fields.
+
+### Secrets Handling
+
+- Tokens and sensitive data are never logged
+- The `-check` mode prints a redacted configuration (secrets replaced with `***`)
+- JSON serialization of the config never includes secrets
+- The `.env` file is git-ignored (see `.gitignore`)
+
 ## Legal
 - This project does not commit full copyrighted articles.
 - No unlicensed images are stored or distributed.

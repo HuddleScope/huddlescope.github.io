@@ -88,7 +88,7 @@ jobs:
 
       - name: Run gosec
         run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec ./...
 
       - name: Run govulncheck
