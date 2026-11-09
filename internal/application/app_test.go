@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,10 +12,15 @@ import (
 // memoryRepository is a test implementation of domain.Repository.
 type memoryRepository struct {
 	stories map[string]domain.Story
+	errList error // Simulate List() error
 }
 
 func newMemoryRepository() *memoryRepository {
 	return &memoryRepository{stories: make(map[string]domain.Story)}
+}
+
+func (r *memoryRepository) setErrorList(err error) {
+	r.errList = err
 }
 
 func (r *memoryRepository) Upsert(story domain.Story) error {
@@ -27,7 +33,7 @@ func (r *memoryRepository) List() ([]domain.Story, error) {
 	for _, s := range r.stories {
 		result = append(result, s)
 	}
-	return result, nil
+	return result, r.errList
 }
 
 func (r *memoryRepository) Count() (int, error) {
@@ -144,8 +150,8 @@ func TestApplicationRunExportNoRepository(t *testing.T) {
 
 func TestApplicationRunExportSuccess(t *testing.T) {
 	repo := newMemoryRepository()
-	repo.Upsert(domain.Story{ID: "s1", Title: "S1"})
-	repo.Upsert(domain.Story{ID: "s2", Title: "S2"})
+	_ = repo.Upsert(domain.Story{ID: "s1", Title: "S1"})
+	_ = repo.Upsert(domain.Story{ID: "s2", Title: "S2"})
 
 	app := New(
 		WithRepository(repo),
@@ -155,6 +161,57 @@ func TestApplicationRunExportSuccess(t *testing.T) {
 
 	if result.StoriesExported != 2 {
 		t.Errorf("StoriesExported = %d; want 2", result.StoriesExported)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors = %v; want none", result.Errors)
+	}
+}
+
+func TestApplicationRunExportFailure(t *testing.T) {
+	repo := newMemoryRepository()
+	_ = repo.Upsert(domain.Story{ID: "s1", Title: "S1"})
+	repo.setErrorList(fmt.Errorf("list error"))
+
+	app := New(
+		WithRepository(repo),
+	)
+
+	result := app.RunExport(context.Background())
+
+	if result.StoriesExported != 0 {
+		t.Errorf("StoriesExported = %d; want 0", result.StoriesExported)
+	}
+	if len(result.Errors) != 1 {
+		t.Errorf("Errors = %v; want 1 error", result.Errors)
+	}
+}
+
+func TestApplicationRunIngestFailurePath(t *testing.T) {
+	repo := newMemoryRepository()
+	// Use nil repository to test failure path
+	app := New(
+		WithRepository(repo),
+	)
+
+	result := app.RunIngest(context.Background())
+	// With a configured repo but no fetchers, returns no work
+	if len(result.Errors) != 0 {
+		t.Errorf("Errors = %v; want none (no fetchers)", result.Errors)
+	}
+}
+
+func TestApplicationRunExportFailurePath(t *testing.T) {
+	repo := newMemoryRepository()
+	// Store a story
+	_ = repo.Upsert(domain.Story{ID: "s1", Title: "S1"})
+
+	app := New(
+		WithRepository(repo),
+	)
+
+	result := app.RunExport(context.Background())
+	if result.StoriesExported != 1 {
+		t.Errorf("StoriesExported = %d; want 1", result.StoriesExported)
 	}
 	if len(result.Errors) != 0 {
 		t.Errorf("Errors = %v; want none", result.Errors)

@@ -31,17 +31,17 @@ func TestLoad(t *testing.T) {
 
 func TestLoadFromEnv(t *testing.T) {
 	// Set env vars and load
-	os.Setenv("HSC_LOG_LEVEL", "debug")
-	os.Setenv("HSC_USER_AGENT", "test-agent/1.0")
-	os.Setenv("HSC_REQUEST_TIMEOUT", "60s")
-	os.Setenv("HSC_HUGO_BASE_URL", "http://localhost:1313")
-	os.Setenv("HSC_STORAGE_BACKEND", "turso")
+	_ = os.Setenv("HSC_LOG_LEVEL", "debug")
+	_ = os.Setenv("HSC_USER_AGENT", "test-agent/1.0")
+	_ = os.Setenv("HSC_REQUEST_TIMEOUT", "60s")
+	_ = os.Setenv("HSC_HUGO_BASE_URL", "http://localhost:1313")
+	_ = os.Setenv("HSC_STORAGE_BACKEND", "turso")
 	defer func() {
-		os.Unsetenv("HSC_LOG_LEVEL")
-		os.Unsetenv("HSC_USER_AGENT")
-		os.Unsetenv("HSC_REQUEST_TIMEOUT")
-		os.Unsetenv("HSC_HUGO_BASE_URL")
-		os.Unsetenv("HSC_STORAGE_BACKEND")
+		_ = os.Unsetenv("HSC_LOG_LEVEL")
+		_ = os.Unsetenv("HSC_USER_AGENT")
+		_ = os.Unsetenv("HSC_REQUEST_TIMEOUT")
+		_ = os.Unsetenv("HSC_HUGO_BASE_URL")
+		_ = os.Unsetenv("HSC_STORAGE_BACKEND")
 	}()
 
 	cfg := Config{
@@ -129,8 +129,8 @@ HSC_USER_AGENT=file_agent
 	}
 
 	// Set env var override
-	os.Setenv("HSC_LOG_LEVEL", "env_level")
-	defer os.Unsetenv("HSC_LOG_LEVEL")
+	_ = os.Setenv("HSC_LOG_LEVEL", "env_level")
+	defer func() { _ = os.Unsetenv("HSC_LOG_LEVEL") }()
 
 	cfg, err := Load(envFile)
 	if err != nil {
