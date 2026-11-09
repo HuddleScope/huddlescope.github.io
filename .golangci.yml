@@ -1,0 +1,43 @@
+# HS-001 baseline; golangci-lint v2.19.2 minimal config
+run:
+  go: '1.24.11'
+  timeout: 5m
+  deadline: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - goimports
+    - govet
+    - staticcheck
+    - errcheck
+    - revive
+    - misspell
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/HuddleScope/huddlescope.github.io
+  revive:
+    rules:
+      - name: unused-parameter
+        disabled: true
+      - name: error-return
+        disabled: true
+      - name: redefines-builtin-id
+        disabled: true
+
+issues:
+  # Exclude test files from errcheck
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    # Exempt web/ from lint (Hugo will populate it, not Go code)
+    - path: web/
+      linters:
+        - goimports
+        - revive
+        - misspell
+
+output:
+  format: colored-line-number
