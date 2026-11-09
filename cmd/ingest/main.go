@@ -32,9 +32,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Check mode: print config and exit
+	// Check mode: print redacted config and exit
 	if *check {
-		data, _ := json.MarshalIndent(cfg, "", "  ")
+		data, _ := json.MarshalIndent(cfg.Redacted(), "", "  ")
 		fmt.Println(string(data))
 		os.Exit(0)
 	}
