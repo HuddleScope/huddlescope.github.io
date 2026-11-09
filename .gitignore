@@ -1,0 +1,23 @@
+# Build artifacts
+dist/
+coverage.out
+
+# Local secrets
+.env
+
+# Go cache
+go.sum
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+*.exe
+*.out
