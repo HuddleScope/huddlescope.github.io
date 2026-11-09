@@ -68,7 +68,6 @@ jobs:
         uses: golangci/golangci-lint-action@v5
         with:
           version: v2.15.0
-          args: --timeout=5m
 
   security:
     name: Security
@@ -144,7 +143,7 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-          go build -o dist/ ./cmd/
+          go build -o dist/ ./cmd/...
 
       - name: Verify binaries
         run: |
