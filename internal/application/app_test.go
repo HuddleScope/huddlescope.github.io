@@ -353,3 +353,93 @@ func TestRunIngestRegistryMultipleStories(t *testing.T) {
 		t.Errorf("expected 2 stories created, got %d", result.StoriesCreated)
 	}
 }
+
+func TestWithTeamRegistry(t *testing.T) {
+	teamReg := domain.DefaultTeamRegistry()
+	app := New(WithTeamRegistry(teamReg))
+	if app.teamRegistry != teamReg {
+		t.Error("team registry not set correctly")
+	}
+}
+
+func TestRunIngestWithTeamRegistry(t *testing.T) {
+	repo := &mockRepository{}
+	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "Giants win Super Bowl", Source: "test", PublishedAt: time.Now(), Summary: "The Giants defeated the Chiefs", URL: "https://test.com"},
+	})
+	teamReg := domain.DefaultTeamRegistry()
+	app := New(WithRepository(repo), WithFeedFetchers(fetcher), WithTeamRegistry(teamReg))
+	result := app.RunIngest(context.Background())
+	if result.StoriesCreated != 1 {
+		t.Errorf("expected 1 story created, got %d", result.StoriesCreated)
+	}
+	if len(repo.stories) != 1 {
+		t.Fatalf("expected 1 story in repo, got %d", len(repo.stories))
+	}
+	story := repo.stories[0]
+	// Check that teams were extracted
+	foundGiants := false
+	foundChiefs := false
+	for _, entity := range story.Entities {
+		if entity == "new-york-giants" {
+			foundGiants = true
+		}
+		if entity == "kansas-city-chiefs" {
+			foundChiefs = true
+		}
+	}
+	if !foundGiants {
+		t.Errorf("expected Giants entity in story, got %v", story.Entities)
+	}
+	if !foundChiefs {
+		t.Errorf("expected Chiefs entity in story, got %v", story.Entities)
+	}
+}
+
+func TestRunIngestWithTeamRegistryAndEntities(t *testing.T) {
+	repo := &mockRepository{}
+	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "49ers trade for WR", Source: "test", PublishedAt: time.Now(), Summary: "The 49ers make a trade", URL: "https://test.com", Entities: []string{"san-francisco-49ers"}},
+	})
+	teamReg := domain.DefaultTeamRegistry()
+	app := New(WithRepository(repo), WithFeedFetchers(fetcher), WithTeamRegistry(teamReg))
+	result := app.RunIngest(context.Background())
+	if result.StoriesCreated != 1 {
+		t.Errorf("expected 1 story created, got %d", result.StoriesCreated)
+	}
+	if len(repo.stories) != 1 {
+		t.Fatalf("expected 1 story in repo, got %d", len(repo.stories))
+	}
+	story := repo.stories[0]
+	// Check that 49ers is in entities (from existing Entities field)
+	found49ers := false
+	for _, entity := range story.Entities {
+		if entity == "san-francisco-49ers" {
+			found49ers = true
+		}
+	}
+	if !found49ers {
+		t.Errorf("expected 49ers entity in story, got %v", story.Entities)
+	}
+	// Check that other teams from title/summary were also extracted
+	found49ersAgain := false
+	for _, entity := range story.Entities {
+		if entity == "san-francisco-49ers" {
+			found49ersAgain = true
+			break
+		}
+	}
+	if !found49ersAgain {
+		t.Errorf("expected deduplication of 49ers entity, got %v", story.Entities)
+	}
+	// Count unique 49ers entries
+	count := 0
+	for _, entity := range story.Entities {
+		if entity == "san-francisco-49ers" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 49ers entity (deduplicated), got %d", count)
+	}
+}

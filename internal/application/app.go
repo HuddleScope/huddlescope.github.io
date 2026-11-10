@@ -100,6 +100,29 @@ func WithClusterer(engine *domain.Clusterer) Option {
 	}
 }
 
+// extractTeams extracts teams from story text and merges with existing entities.
+func extractTeams(story domain.Story, registry *domain.TeamRegistry) domain.Story {
+	if registry == nil {
+		return story
+	}
+
+	text := story.Title + " " + story.Summary
+	teamSlugs := registry.Extract(text)
+
+	// Merge entities, avoiding duplicates
+	existing := make(map[string]bool)
+	for _, e := range story.Entities {
+		existing[e] = true
+	}
+	for _, slug := range teamSlugs {
+		if !existing[slug] {
+			story.Entities = append(story.Entities, slug)
+		}
+	}
+
+	return story
+}
+
 // WithTeamRegistry sets the team registry for entity extraction (HS-011).
 func WithTeamRegistry(registry *domain.TeamRegistry) Option {
 	return func(a *Application) {
@@ -153,21 +176,8 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 			story := domain.Story{}.Canonicalize(entry)
 
 			// If a custom team registry is configured, re-extract teams
-			if a.teamRegistry != nil {
-				text := story.Title + " " + story.Summary
-				teamSlugs := a.teamRegistry.Extract(text)
-
-				// Merge entities, avoiding duplicates
-				existing := make(map[string]bool)
-				for _, e := range story.Entities {
-					existing[e] = true
-				}
-				for _, slug := range teamSlugs {
-					if !existing[slug] {
-						story.Entities = append(story.Entities, slug)
-					}
-				}
-			}
+			// Extract teams if custom registry is configured
+			story = extractTeams(story, a.teamRegistry)
 
 			status, err := a.repo.Upsert(story)
 			if err != nil {
