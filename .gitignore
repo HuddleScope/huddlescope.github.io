@@ -6,7 +6,7 @@ coverage.out
 .env
 
 # Go cache
-go.sum
+# go.sum is required for dependency verification and CI
 go.work
 go.work.sum
 

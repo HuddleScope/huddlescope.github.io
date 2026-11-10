@@ -1,3 +1,4 @@
+// Package storage provides storage backends.
 package storage
 
 import (
@@ -11,26 +12,21 @@ type Repository interface {
 	Count() (int, error)
 }
 
-// FeedFetcher interface for fetching entries from feeds.
-type FeedFetcher interface {
-	Fetch(sourceID string) ([]domain.FeedEntry, error)
-}
-
-// InMemoryRepository is an in-memory implementation of Repository for testing.
-type InMemoryRepository struct {
+// MemoryRepository is an in-memory implementation of Repository for testing.
+type MemoryRepository struct {
 	stories map[string]domain.Story
 }
 
-func NewInMemoryRepository() *InMemoryRepository {
-	return &InMemoryRepository{stories: make(map[string]domain.Story)}
+func NewMemoryRepository() *MemoryRepository {
+	return &MemoryRepository{stories: make(map[string]domain.Story)}
 }
 
-func (r *InMemoryRepository) Upsert(story domain.Story) error {
+func (r *MemoryRepository) Upsert(story domain.Story) error {
 	r.stories[story.ID] = story
 	return nil
 }
 
-func (r *InMemoryRepository) List() ([]domain.Story, error) {
+func (r *MemoryRepository) List() ([]domain.Story, error) {
 	result := make([]domain.Story, 0, len(r.stories))
 	for _, s := range r.stories {
 		result = append(result, s)
@@ -38,6 +34,6 @@ func (r *InMemoryRepository) List() ([]domain.Story, error) {
 	return result, nil
 }
 
-func (r *InMemoryRepository) Count() (int, error) {
+func (r *MemoryRepository) Count() (int, error) {
 	return len(r.stories), nil
 }
