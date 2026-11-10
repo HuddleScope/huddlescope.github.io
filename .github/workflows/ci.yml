@@ -39,6 +39,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install linters
+        # The Makefile expects golangci-lint, gosec and govulncheck on PATH
+        # (it documents local Homebrew installs). On a clean runner they are
+        # absent, so install them here.
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+
       - name: Test (race, vet)
         run: make test
 
