@@ -98,7 +98,45 @@ make check
 
 ### Source Configuration
 
-Sources define RSS feed URLs with optional fetch intervals and registry metadata:
+Sources define RSS feed URLs with optional fetch intervals and registry metadata.
+
+#### YAML Configuration (Recommended)
+
+Sources are configured in a YAML file (default: `conf/sources.yaml`).
+
+```yaml
+sources:
+  - id: espn-nfl
+    name: ESPN — NFL
+    url: https://www.espn.com/espn/rss/nfl/news
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    publication: ESPN NFL
+    priority: 1
+    language: en
+    license: RSS syndication permitted
+    acceptable_use: allowed
+```
+
+Available fields:
+- `id`: Unique identifier (snake_case)
+- `name`: Human-readable name
+- `url`: HTTP/HTTPS feed URL
+- `category`: Type of source (draft, national, aggregator, all-sports, team-official)
+- `enabled`: true to poll, false to skip
+- `verification`: How the feed was verified
+- `publication`: Publisher name for display (optional)
+- `priority`: Lower number polled first; tiebreak by ID
+- `team`: NFL team abbreviation (for team feeds, optional)
+- `language`: BCP-47 language tag (default: en)
+- `timeout`: HTTP timeout in seconds (default: 0 = global)
+- `license`: License or acceptable-use notes (optional)
+- `acceptable_use`: allowed/restricted/unknown (default: unknown)
+
+See `conf/sources.yaml` for the complete list of NFL sources.
+
+#### Environment Variable Configuration (Legacy)
 
 ```bash
 # Single source with 5-minute interval
@@ -110,19 +148,7 @@ HSC_SOURCES=nfl-news,NFL News,http://a.com,300,1,true,ESPN,en,60,RSS syndication
 
 Format: `id,name,url[,interval][,priority][,enabled][,publication][,language][,timeout][,license][,accept-use];...`
 
-- `id`: Unique identifier (used for deduplication and per-source overrides)
-- `name`: Human-readable name
-- `url`: HTTP/HTTPS feed URL
-- `interval`: Optional fetch interval in seconds (default: 900 = 15 minutes)
-- `priority`: Lower number polled first; tiebreak by ID (default: 0)
-- `enabled`: true to poll, false to skip (default: true)
-- `publication`: Publisher name for display (optional)
-- `language`: BCP-47 language tag (e.g., en, es) (default: en)
-- `timeout`: Per-source HTTP timeout in seconds (default: 0 = global)
-- `license`: License or acceptable-use notes (optional)
-- `accept-use`: allowed/restricted/unknown (default: unknown)
-
-See `internal/feeds/README.md` for the curated list of NFL feeds and instructions on how to add/remove feeds without code changes.
+Environment variables take precedence over YAML configuration.
 
 ### Runtime Status
 

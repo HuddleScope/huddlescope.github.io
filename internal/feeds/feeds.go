@@ -1,7 +1,7 @@
 // Package feeds provides curated NFL feed sources for HuddleScope.
 //
-// To add a feed: append a new FeedSource to SeededSources.
-// To remove a feed: delete its line from SeededSources.
+// Sources are loaded from conf/sources.yaml at startup.
+// To add/remove sources, edit conf/sources.yaml instead of this file.
 // No other code changes are needed.
 //
 // Field notes:
@@ -20,11 +20,16 @@
 package feeds
 
 import (
+	"fmt"
+	"os"
+
+	"gopkg.in/yaml.v3"
+
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
 // SeededSources contains the initial curated list of NFL RSS/Atom feeds.
-// Update this slice to add/remove feeds without code changes elsewhere.
+// This is kept for backward compatibility if conf/sources.yaml is not found.
 var SeededSources = []domain.FeedSource{
 	{
 		ID:            "espn-nfl",
@@ -148,19 +153,84 @@ var SeededSources = []domain.FeedSource{
 	},
 }
 
-// Load returns a FeedRegistry populated with SeededSources.
+// YAMLSource represents a source as defined in the YAML file.
+type YAMLSource struct {
+	ID            string `yaml:"id"`
+	Name          string `yaml:"name"`
+	URL           string `yaml:"url"`
+	Category      string `yaml:"category,omitempty"`
+	Enabled       bool   `yaml:"enabled,omitempty"`
+	Verification  string `yaml:"verification,omitempty"`
+	Publication   string `yaml:"publication,omitempty"`
+	Priority      int    `yaml:"priority,omitempty"`
+	Team          string `yaml:"team,omitempty"`
+	Language      string `yaml:"language,omitempty"`
+	Timeout       int    `yaml:"timeout,omitempty"`
+	License       string `yaml:"license,omitempty"`
+	AcceptableUse string `yaml:"acceptable_use,omitempty"`
+}
+
+// YAMLConfig represents the root of the sources YAML file.
+type YAMLConfig struct {
+	Sources []YAMLSource `yaml:"sources"`
+}
+
+// Load returns a FeedRegistry populated with sources from conf/sources.yaml.
+// Falls back to SeededSources if the YAML file is not found or empty.
 // The registry is pre-validated and ready for polling.
 func Load() (*domain.FeedRegistry, error) {
+	// Try to load from YAML file
+	// Try conf/sources.yaml relative to current directory first
+	data, err := os.ReadFile("conf/sources.yaml")
+	if err != nil {
+		// If that fails, try relative to parent directory (for tests)
+		data, err = os.ReadFile("../../conf/sources.yaml")
+		if err != nil {
+			// Fall back to SeededSources
+			return domain.NewFeedRegistry(SeededSources...)
+		}
+	}
+
+	var cfg YAMLConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse sources.yaml: %w", err)
+	}
+
+	if len(cfg.Sources) > 0 {
+		// Convert YAML sources to domain.FeedSource
+		feeds := make([]domain.FeedSource, 0, len(cfg.Sources))
+		for _, ys := range cfg.Sources {
+			fs := domain.FeedSource{
+				ID:          ys.ID,
+				URL:         ys.URL,
+				Publication: ys.Publication,
+				Priority:    ys.Priority,
+				Enabled:     ys.Enabled,
+				Language:    ys.Language,
+			}
+			switch ys.AcceptableUse {
+			case "allowed":
+				fs.AcceptableUse = domain.AcceptanceAllowed
+			case "restricted":
+				fs.AcceptableUse = domain.AcceptanceRestricted
+			default:
+				fs.AcceptableUse = domain.AcceptanceUnknown
+			}
+			feeds = append(feeds, fs)
+		}
+
+		return domain.NewFeedRegistry(feeds...)
+	}
+
+	// Fall back to SeededSources
 	return domain.NewFeedRegistry(SeededSources...)
 }
 
-// EnabledCount returns the number of enabled seeds.
+// EnabledCount returns the number of enabled seeds from the loaded sources.
 func EnabledCount() int {
-	count := 0
-	for _, s := range SeededSources {
-		if s.Enabled {
-			count++
-		}
+	registry, err := Load()
+	if err != nil {
+		return 0
 	}
-	return count
+	return registry.CountEnabled()
 }

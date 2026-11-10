@@ -12,6 +12,8 @@ import (
 
 import "encoding/json"
 
+import "gopkg.in/yaml.v3"
+
 import "github.com/HuddleScope/huddlescope.github.io/internal/domain"
 
 // Source represents a news source or feed.
@@ -33,6 +35,7 @@ type Source struct {
 // Config holds the application configuration.
 type Config struct {
 	ConfigFile       string
+	SourcesFile      string // Path to YAML sources file (optional)
 	LogLevel         string
 	UserAgent        string
 	RequestTimeout   time.Duration
@@ -122,13 +125,39 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("HSC_ENV"); v != "" {
 		c.Env = v
 	}
+	if v := os.Getenv("HSC_SOURCES_FILE"); v != "" {
+		c.SourcesFile = v
+	}
 }
 
-// parseSources parses sources from the parsed Sources field (set by loadFromEnv)
+// parseSources parses sources from the parsed Sources field (set by loadFromEnv).
+// Sources are loaded in this priority order:
+//  1. HSC_SOURCES environment variable (highest priority)
+//  2. Sources file (from SourcesFile or default conf/sources.yaml)
+//  3. Default sources from internal/feeds (lowest priority)
 func (c *Config) parseSources() error {
 	if len(c.Sources) > 0 {
 		return nil // already parsed
 	}
+
+	// Try HSC_SOURCES_FILE if no env sources
+	if c.SourcesFile == "" {
+		c.SourcesFile = "conf/sources.yaml"
+	}
+
+	// Try loading from YAML file
+	if sources, err := c.loadSourcesFromYAML(); err == nil && len(sources) > 0 {
+		c.Sources = sources
+		return nil
+	}
+
+	// Fall back to env var
+	if v := os.Getenv("HSC_SOURCES"); v != "" {
+		if err := c.parseSourcesRaw(v); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -261,6 +290,96 @@ func (c *Config) parseSourcesRaw(raw string) error {
 	}
 
 	return nil
+}
+
+// loadSourcesFromYAML loads sources from a YAML file.
+// Returns empty slice if file doesn't exist or is empty.
+func (c *Config) loadSourcesFromYAML() ([]Source, error) {
+	data, err := os.ReadFile(c.SourcesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File not found - return empty slice to allow fallback
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read sources file %q: %w", c.SourcesFile, err)
+	}
+
+	type YAMLSource struct {
+		ID            string `yaml:"id"`
+		Name          string `yaml:"name"`
+		URL           string `yaml:"url"`
+		Category      string `yaml:"category,omitempty"`
+		Enabled       bool   `yaml:"enabled,omitempty"`
+		Verification  string `yaml:"verification,omitempty"`
+		Publication   string `yaml:"publication,omitempty"`
+		Priority      int    `yaml:"priority,omitempty"`
+		Team          string `yaml:"team,omitempty"`
+		Language      string `yaml:"language,omitempty"`
+		Timeout       int    `yaml:"timeout,omitempty"`
+		License       string `yaml:"license,omitempty"`
+		AcceptableUse string `yaml:"acceptable_use,omitempty"`
+	}
+
+	type YAMLConfig struct {
+		Sources []YAMLSource `yaml:"sources"`
+	}
+
+	var cfg YAMLConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse sources file %q: %w", c.SourcesFile, err)
+	}
+
+	if len(cfg.Sources) == 0 {
+		return nil, nil
+	}
+
+	// Validate and convert to Source
+	sources := make([]Source, 0, len(cfg.Sources))
+	seenIDs := make(map[string]bool)
+
+	for i, ys := range cfg.Sources {
+		if ys.ID == "" {
+			return nil, fmt.Errorf("source %d: missing required field 'id'", i+1)
+		}
+		if ys.URL == "" {
+			return nil, fmt.Errorf("source %d (%s): missing required field 'url'", i+1, ys.ID)
+		}
+
+		if seenIDs[ys.ID] {
+			return nil, fmt.Errorf("duplicate source ID %q", ys.ID)
+		}
+		seenIDs[ys.ID] = true
+
+		// Validate URL scheme
+		u, err := url.Parse(ys.URL)
+		if err != nil {
+			return nil, fmt.Errorf("source %d (%s): invalid URL %q: %v", i+1, ys.ID, ys.URL, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("source %d (%s): URL must use http or https, got %s", i+1, ys.ID, u.Scheme)
+		}
+
+		// Validate AcceptableUse if provided
+		if ys.AcceptableUse != "" && ys.AcceptableUse != "allowed" && ys.AcceptableUse != "restricted" && ys.AcceptableUse != "unknown" {
+			return nil, fmt.Errorf("source %d (%s): acceptable_use must be allowed/restricted/unknown, got %s", i+1, ys.ID, ys.AcceptableUse)
+		}
+
+		sources = append(sources, Source{
+			ID:            ys.ID,
+			Name:          ys.Name,
+			URL:           ys.URL,
+			FetchSeconds:  15 * 60, // default 15 minutes
+			Publication:   ys.Publication,
+			Priority:      ys.Priority,
+			Enabled:       ys.Enabled,
+			Language:      ys.Language,
+			Timeout:       ys.Timeout,
+			License:       ys.License,
+			AcceptableUse: ys.AcceptableUse,
+		})
+	}
+
+	return sources, nil
 }
 
 // loadEnvFile loads key=value pairs from a file.
