@@ -216,6 +216,122 @@ func TestLoadFromYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_NonExistentFile(t *testing.T) {
+	_, err := LoadFrom("/nonexistent/path/sources.yaml")
+	if err != nil {
+		t.Errorf("LoadFrom() on nonexistent file should return nil, got error: %v", err)
+	}
+}
+
+func TestLoadFrom_EmptyFile(t *testing.T) {
+	tmpFile := t.TempDir() + "/empty.yaml"
+	if err := os.WriteFile(tmpFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() on empty file error = %v", err)
+	}
+	if registry != nil {
+		t.Error("LoadFrom() on empty file should return nil registry")
+	}
+}
+
+func TestLoadFrom_EmptySources(t *testing.T) {
+	tmpFile := t.TempDir() + "/empty-sources.yaml"
+	if err := os.WriteFile(tmpFile, []byte("sources: []\n"), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() on empty sources error = %v", err)
+	}
+	if registry != nil {
+		t.Error("LoadFrom() on empty sources should return nil registry")
+	}
+}
+
+func TestLoadFrom_MultipleSources(t *testing.T) {
+	tmpFile := t.TempDir() + "/multi-sources.yaml"
+	yamlContent := `sources:
+  - id: source1
+    url: https://example.com/1
+    publication: Source 1
+    enabled: true
+    priority: 10
+  - id: source2
+    url: https://example.com/2
+    publication: Source 2
+    enabled: false
+    priority: 5
+  - id: source3
+    url: https://example.com/3
+    publication: Source 3
+    enabled: true
+    priority: 15
+`
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	if registry == nil {
+		t.Fatal("LoadFrom() returned nil registry")
+	}
+
+	// Verify all sources are present
+	src1, ok := registry.Get("source1")
+	if !ok {
+		t.Fatal("Get(\"source1\") not found")
+	}
+	if src1.Publication != "Source 1" {
+		t.Errorf("source1 Publication = %s; want Source 1", src1.Publication)
+	}
+
+	src2, ok := registry.Get("source2")
+	if !ok {
+		t.Fatal("Get(\"source2\") not found")
+	}
+	if src2.Enabled {
+		t.Error("source2 should be disabled")
+	}
+
+	src3, ok := registry.Get("source3")
+	if !ok {
+		t.Fatal("Get(\"source3\") not found")
+	}
+	if src3.Publication != "Source 3" {
+		t.Errorf("source3 Publication = %s; want Source 3", src3.Publication)
+	}
+
+	// Verify count
+	if registry.Count() != 3 {
+		t.Errorf("registry Count() = %d; want 3", registry.Count())
+	}
+
+	// Verify enabled count
+	if registry.CountEnabled() != 2 {
+		t.Errorf("registry CountEnabled() = %d; want 2", registry.CountEnabled())
+	}
+}
+
+func TestLoadFrom_BadYAML(t *testing.T) {
+	tmpFile := t.TempDir() + "/bad.yaml"
+	if err := os.WriteFile(tmpFile, []byte("invalid: yaml: ["), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	_, err := LoadFrom(tmpFile)
+	if err == nil {
+		t.Error("LoadFrom() on bad YAML should return error")
+	}
+}
+
 func TestLoadFrom_TimeoutAndLicense(t *testing.T) {
 	// Create a temporary YAML file with timeout and license
 	tmpFile := t.TempDir() + "/sources.yaml"
@@ -253,5 +369,98 @@ func TestLoadFrom_TimeoutAndLicense(t *testing.T) {
 	}
 	if src.License != "CC-BY-NC-ND 4.0" {
 		t.Errorf("License = %q; want CC-BY-NC-ND 4.0", src.License)
+	}
+}
+
+func TestLoadFrom_AcceptableUseAllowed(t *testing.T) {
+	tmpFile := t.TempDir() + "/acceptable-use.yaml"
+	yamlContent := `sources:
+  - id: test-allowed
+    url: https://example.com/allowed
+    publication: Allowed Feed
+    enabled: true
+    priority: 10
+    acceptable_use: allowed
+`
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	if registry == nil {
+		t.Fatal("LoadFrom() returned nil registry")
+	}
+
+	src, ok := registry.Get("test-allowed")
+	if !ok {
+		t.Fatal("Get(\"test-allowed\") not found")
+	}
+	if src.AcceptableUse != domain.AcceptanceAllowed {
+		t.Errorf("AcceptableUse = %s; want allowed", src.AcceptableUse.String())
+	}
+}
+
+func TestLoadFrom_AcceptableUseRestricted(t *testing.T) {
+	tmpFile := t.TempDir() + "/acceptable-use.yaml"
+	yamlContent := `sources:
+  - id: test-restricted
+    url: https://example.com/restricted
+    publication: Restricted Feed
+    enabled: true
+    priority: 10
+    acceptable_use: restricted
+`
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	if registry == nil {
+		t.Fatal("LoadFrom() returned nil registry")
+	}
+
+	src, ok := registry.Get("test-restricted")
+	if !ok {
+		t.Fatal("Get(\"test-restricted\") not found")
+	}
+	if src.AcceptableUse != domain.AcceptanceRestricted {
+		t.Errorf("AcceptableUse = %s; want restricted", src.AcceptableUse.String())
+	}
+}
+
+func TestLoadFrom_AcceptableUseUnknown(t *testing.T) {
+	tmpFile := t.TempDir() + "/acceptable-use.yaml"
+	yamlContent := `sources:
+  - id: test-unknown
+    url: https://example.com/unknown
+    publication: Unknown Feed
+    enabled: true
+    priority: 10
+    acceptable_use: unknown-value
+`
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+	if registry == nil {
+		t.Fatal("LoadFrom() returned nil registry")
+	}
+
+	src, ok := registry.Get("test-unknown")
+	if !ok {
+		t.Fatal("Get(\"test-unknown\") not found")
+	}
+	if src.AcceptableUse != domain.AcceptanceUnknown {
+		t.Errorf("AcceptableUse = %s; want unknown", src.AcceptableUse.String())
 	}
 }
