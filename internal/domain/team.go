@@ -9,18 +9,18 @@ import (
 
 // Team represents an NFL team with all its identifying information.
 type Team struct {
-	Slug           string   // Stable URL slug (e.g., "new-york-giants")
-	Name           string   // Full legal name (e.g., "New York Giants")
-	ShortName      string   // Short name (e.g., "Giants")
-	Abbreviation   string   // Official abbreviation (e.g., "NYG")
-	Aliases        []string // Common alternative names and nicknames
+	Slug         string   // Stable URL slug (e.g., "new-york-giants")
+	Name         string   // Full legal name (e.g., "New York Giants")
+	ShortName    string   // Short name (e.g., "Giants")
+	Abbreviation string   // Official abbreviation (e.g., "NYG")
+	Aliases      []string // Common alternative names and nicknames
 }
 
 // TeamRegistry holds a lookup map for all known team names/aliases to slugs.
 type TeamRegistry struct {
-	mu       sync.RWMutex
-	bySlug   map[string]*Team
-	byAlias  map[string]string // normalized alias → slug
+	mu      sync.RWMutex
+	bySlug  map[string]*Team
+	byAlias map[string]string // normalized alias → slug
 }
 
 // NewTeamRegistry creates a new registry from a slice of Team.

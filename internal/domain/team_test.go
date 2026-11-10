@@ -230,9 +230,9 @@ func TestTeamRegistry_Get(t *testing.T) {
 	registry := DefaultTeamRegistry()
 
 	tests := []struct {
-		name     string
-		slug     string
-		check    func(t *testing.T, team *Team)
+		name  string
+		slug  string
+		check func(t *testing.T, team *Team)
 	}{
 		{
 			"existing team",
@@ -610,9 +610,9 @@ func TestTeamRegistry_Extract_ShortNames(t *testing.T) {
 
 	// Test that short names are included
 	tests := []struct {
-		name     string
-		shortName string
-		text     string
+		name        string
+		shortName   string
+		text        string
 		shouldMatch bool
 	}{
 		{"Giants short name", "Giants", "The Giants played", true},
@@ -2039,35 +2039,35 @@ func TestTeamRegistry_Extract_FullNFLTeamList(t *testing.T) {
 	expectedSlugs := map[string]bool{
 		"arizona-cardinals":     true,
 		"atlanta-falcons":       true,
-		"baltimore-ravens":    true,
-		"buffalo-bills":       true,
-		"carolina-panthers":   true,
-		"chicago-bears":       true,
-		"cincinnati-bengals":  true,
-		"cleveland-browns":    true,
-		"dallas-cowboys":      true,
-		"denver-broncos":      true,
-		"detroit-lions":       true,
-		"green-bay-packers":   true,
-		"houston-texans":      true,
-		"indianapolis-colts":  true,
-		"jacksonville-jaguars": true,
-		"kansas-city-chiefs":  true,
-		"las-vegas-raiders":   true,
-		"los-angeles-chargers": true,
-		"los-angeles-rams":    true,
-		"miami-dolphins":      true,
-		"minnesota-vikings":   true,
-		"new-england-patriots": true,
-		"new-orleans-saints":  true,
-		"new-york-giants":     true,
-		"new-york-jets":       true,
-		"philadelphia-eagles": true,
-		"pittsburgh-steelers": true,
-		"san-francisco-49ers": true,
-		"seattle-seahawks":    true,
-		"tampa-bay-buccaneers": true,
-		"tennessee-titans":    true,
+		"baltimore-ravens":      true,
+		"buffalo-bills":         true,
+		"carolina-panthers":     true,
+		"chicago-bears":         true,
+		"cincinnati-bengals":    true,
+		"cleveland-browns":      true,
+		"dallas-cowboys":        true,
+		"denver-broncos":        true,
+		"detroit-lions":         true,
+		"green-bay-packers":     true,
+		"houston-texans":        true,
+		"indianapolis-colts":    true,
+		"jacksonville-jaguars":  true,
+		"kansas-city-chiefs":    true,
+		"las-vegas-raiders":     true,
+		"los-angeles-chargers":  true,
+		"los-angeles-rams":      true,
+		"miami-dolphins":        true,
+		"minnesota-vikings":     true,
+		"new-england-patriots":  true,
+		"new-orleans-saints":    true,
+		"new-york-giants":       true,
+		"new-york-jets":         true,
+		"philadelphia-eagles":   true,
+		"pittsburgh-steelers":   true,
+		"san-francisco-49ers":   true,
+		"seattle-seahawks":      true,
+		"tampa-bay-buccaneers":  true,
+		"tennessee-titans":      true,
 		"washington-commanders": true,
 	}
 

@@ -125,7 +125,12 @@ func TestRunIngestFailureIsolation(t *testing.T) {
 	}
 }
 
-func TestRunIngestWithRegistry(t *testing.T) {
+func TestRunIngestWithRegistryWithTeamRegistry(t *testing.T) {
+	// Test RunIngestWithRegistry with teamRegistry configured (full flow with team extraction)
+	repo := &mockRepository{}
+	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "Giants win Super Bowl", Source: "test-feed", PublishedAt: time.Now(), Summary: "The Giants defeated the Chiefs", URL: "https://f1.com", GUID: "guid1"},
+	})
 	registry, err := domain.NewFeedRegistry(domain.FeedSource{
 		ID:          "test-feed",
 		URL:         "https://example.com/feed.xml",
@@ -136,9 +141,33 @@ func TestRunIngestWithRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create registry: %v", err)
 	}
-	app := New(WithRepository(&mockRepository{}), WithRegistry(registry))
+	teamReg := domain.DefaultTeamRegistry()
+	app := New(WithRepository(repo), WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}), WithRegistry(registry), WithTeamRegistry(teamReg))
 	result := app.RunIngest(context.Background())
-	_ = result
+	if result.StoriesCreated != 1 {
+		t.Errorf("expected 1 story created, got %d", result.StoriesCreated)
+	}
+	if len(repo.stories) != 1 {
+		t.Fatalf("expected 1 story in repo, got %d", len(repo.stories))
+	}
+	story := repo.stories[0]
+	// Check that teams were extracted from title+summary
+	foundGiants := false
+	foundChiefs := false
+	for _, entity := range story.Entities {
+		if entity == "new-york-giants" {
+			foundGiants = true
+		}
+		if entity == "kansas-city-chiefs" {
+			foundChiefs = true
+		}
+	}
+	if !foundGiants {
+		t.Errorf("expected Giants entity in story, got %v", story.Entities)
+	}
+	if !foundChiefs {
+		t.Errorf("expected Chiefs entity in story, got %v", story.Entities)
+	}
 }
 
 func TestRunIngestRegistryNoEnabledSources(t *testing.T) {
@@ -441,5 +470,72 @@ func TestRunIngestWithTeamRegistryAndEntities(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 49ers entity (deduplicated), got %d", count)
+	}
+}
+
+func TestExtractTeams_NilRegistry(t *testing.T) {
+	// Test extractTeams with nil registry (should return story unchanged)
+	story := domain.Story{
+		ID:       "test-story",
+		Title:    "Giants win Super Bowl",
+		Source:   "test",
+		Summary:  "The Giants defeated the Chiefs",
+		Entities: []string{"existing-entity"},
+	}
+	result := extractTeams(story, nil)
+	if len(result.Entities) != 1 || result.Entities[0] != "existing-entity" {
+		t.Errorf("expected unchanged entities with nil registry, got %v", result.Entities)
+	}
+}
+
+func TestExtractTeams_WithRegistry(t *testing.T) {
+	// Test extractTeams with non-nil registry (should extract teams from title+summary)
+	story := domain.Story{
+		ID:       "test-story",
+		Title:    "Giants win Super Bowl",
+		Source:   "test",
+		Summary:  "The Giants defeated the Chiefs",
+		Entities: []string{},
+	}
+	teamReg := domain.DefaultTeamRegistry()
+	result := extractTeams(story, teamReg)
+	if len(result.Entities) != 2 {
+		t.Errorf("expected 2 entities extracted, got %v", result.Entities)
+	}
+	foundGiants := false
+	foundChiefs := false
+	for _, entity := range result.Entities {
+		if entity == "new-york-giants" {
+			foundGiants = true
+		}
+		if entity == "kansas-city-chiefs" {
+			foundChiefs = true
+		}
+	}
+	if !foundGiants || !foundChiefs {
+		t.Errorf("expected Giants and Chiefs entities, got %v", result.Entities)
+	}
+}
+
+func TestExtractTeams_Deduplication(t *testing.T) {
+	// Test extractTeams with duplicate prevention
+	story := domain.Story{
+		ID:       "test-story",
+		Title:    "Giants win Super Bowl",
+		Source:   "test",
+		Summary:  "The Giants are great",
+		Entities: []string{"new-york-giants"},
+	}
+	teamReg := domain.DefaultTeamRegistry()
+	result := extractTeams(story, teamReg)
+	// Should not add duplicate Giants
+	count := 0
+	for _, entity := range result.Entities {
+		if entity == "new-york-giants" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 Giants entity (no duplicate), got %d: %v", count, result.Entities)
 	}
 }
