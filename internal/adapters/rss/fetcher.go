@@ -416,6 +416,7 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 			PublishedAt: parseTime(item.PublishedParsed, item.UpdatedParsed),
 			Summary:     strings.TrimSpace(item.Description),
 			URL:         item.Link,
+			GUID:        item.GUID,
 		}
 		if entry.URL == "" && item.GUID != "" {
 			entry.URL = item.GUID
