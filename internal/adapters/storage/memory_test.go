@@ -252,9 +252,10 @@ func TestMemoryRepository_ConcurrentUpdates(t *testing.T) {
 				return
 			}
 			mu.Lock()
-			if status == domain.UpsertUpdated {
+			switch status {
+			case domain.UpsertUpdated:
 				updatedCount++
-			} else if status == domain.UpsertUnchanged {
+			case domain.UpsertUnchanged:
 				unchangedCount++
 			}
 			mu.Unlock()
