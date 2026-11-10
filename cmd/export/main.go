@@ -41,24 +41,22 @@ func main() {
 	// Build application with adapters
 	repo := storage.NewMemoryRepository()
 	// Pre-populate with some stories for export
-	if err := repo.Upsert(domain.Story{
+	if _, err := repo.Upsert(domain.Story{
 		ID:          "test-1",
 		Title:       "Test Story 1",
 		Source:      "test-feed",
 		PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		Summary:     "Summary 1",
-		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to insert test story 1: %v\n", err)
 		os.Exit(1)
 	}
-	if err := repo.Upsert(domain.Story{
+	if _, err := repo.Upsert(domain.Story{
 		ID:          "test-2",
 		Title:       "Test Story 2",
 		Source:      "test-feed",
 		PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		Summary:     "Summary 2",
-		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to insert test story 2: %v\n", err)
 		os.Exit(1)

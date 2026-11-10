@@ -123,15 +123,21 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 			story := domain.Story{}.Canonicalize(entry)
 
 			// Try to upsert
-			err := a.repo.Upsert(story)
+			status, err := a.repo.Upsert(story)
 			if err != nil {
 				result.Errors = append(result.Errors, err)
 				continue
 			}
 
-			result.StoriesCreated += 1
-			result.StoriesUpdated += 0
-			result.StoriesSkipped += 0
+			// Count by status
+			switch status {
+			case domain.UpsertCreated:
+				result.StoriesCreated += 1
+			case domain.UpsertUpdated:
+				result.StoriesUpdated += 1
+			case domain.UpsertUnchanged:
+				result.StoriesSkipped += 1
+			}
 		}
 	}
 
@@ -179,15 +185,21 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 			story := domain.Story{}.Canonicalize(entry)
 
 			// Try to upsert
-			err := a.repo.Upsert(story)
+			status, err := a.repo.Upsert(story)
 			if err != nil {
 				result.Errors = append(result.Errors, err)
 				continue
 			}
 
-			result.StoriesCreated += 1
-			result.StoriesUpdated += 0
-			result.StoriesSkipped += 0
+			// Count by status
+			switch status {
+			case domain.UpsertCreated:
+				result.StoriesCreated += 1
+			case domain.UpsertUpdated:
+				result.StoriesUpdated += 1
+			case domain.UpsertUnchanged:
+				result.StoriesSkipped += 1
+			}
 		}
 	}
 

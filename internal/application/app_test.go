@@ -97,8 +97,8 @@ func TestRunIngestFailureIsolation(t *testing.T) {
 // mockRepository implements domain.Repository for testing.
 type mockRepository struct{}
 
-func (r *mockRepository) Upsert(story domain.Story) error {
-	return nil
+func (r *mockRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
+	return domain.UpsertCreated, nil
 }
 
 func (r *mockRepository) List() ([]domain.Story, error) {

@@ -25,7 +25,7 @@ type ExportResult struct {
 
 // Repository interface for story storage.
 type Repository interface {
-	Upsert(story Story) error
+	Upsert(story Story) (UpsertStatus, error)
 	List() ([]Story, error)
 	Count() (int, error)
 }
@@ -281,17 +281,53 @@ func ComputeStoryID(title, source string, publishedAt time.Time) string {
 	return fmt.Sprintf("%s|%s|%s", normalizedTitle, sourceLower, publishedStr)
 }
 
-// Canonicalize creates a canonical Story from a FeedEntry with first-seen timestamp.
+// DedupeKey computes a stable deduplication key for a story.
+// Priority: normalized GUID (when non-empty and valid); otherwise normalized canonical URL.
+func DedupeKey(sourceID, guid, url string) string {
+	if guid != "" && strings.TrimSpace(guid) != "" {
+		// Use GUID when present
+		return NormalizeSourceID(sourceID) + "|" + strings.TrimSpace(guid)
+	}
+	// Fall back to canonical URL
+	return NormalizeSourceID(sourceID) + "|" + CanonicalURLEntry(url)
+}
+
+// Canonicalize creates a canonical Story from a FeedEntry.
+// FirstSeenAt is set by the Repository on first insertion; callers should leave it zero.
 func (s Story) Canonicalize(entry FeedEntry) Story {
 	return Story{
-		ID:          ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt),
-		Title:       NormalizeTitle(entry.Title),
-		Source:      NormalizeSourceID(entry.Source),
-		PublishedAt: NormalizeTimestamp(entry.PublishedAt),
-		Summary:     SanitizeHTML(entry.Summary, 1024),
-		URL:         CanonicalURLEntry(entry.URL),
-		FirstSeenAt: time.Now().UTC(),
+		ID:           ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt),
+		Title:        NormalizeTitle(entry.Title),
+		Source:       NormalizeSourceID(entry.Source),
+		PublishedAt:  NormalizeTimestamp(entry.PublishedAt),
+		Summary:      SanitizeHTML(entry.Summary, 1024),
+		URL:          CanonicalURLEntry(entry.URL),
+		GUID:         strings.TrimSpace(entry.GUID),
+		CanonicalURL: CanonicalURLEntry(entry.URL),
+		DedupeKey:    DedupeKey(entry.Source, entry.GUID, entry.URL),
 	}
+}
+
+// MeaningfulFieldsChanged returns true if some meaningful fields changed.
+// Compares title, summary, canonical URL, publishedAt, and GUID.
+// Ignores FirstSeenAt, UpdatedAt, and ID (identity fields).
+func (s Story) MeaningfulFieldsChanged(other Story) bool {
+	if s.Title != other.Title {
+		return true
+	}
+	if s.Summary != other.Summary {
+		return true
+	}
+	if s.CanonicalURL != other.CanonicalURL {
+		return true
+	}
+	if !s.PublishedAt.Equal(other.PublishedAt) {
+		return true
+	}
+	if s.GUID != other.GUID {
+		return true
+	}
+	return false
 }
 
 // IsEqual checks if two stories are the same by ID.
