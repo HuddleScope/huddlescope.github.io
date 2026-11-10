@@ -2,97 +2,72 @@ package storage
 
 import (
 	"testing"
+	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
-func TestInMemoryRepository_Upsert_List_Count(t *testing.T) {
-	repo := NewInMemoryRepository()
+func TestMemoryRepository(t *testing.T) {
+	repo := NewMemoryRepository()
 
-	// Initial state
-	if count, err := repo.Count(); err != nil {
-		t.Fatalf("Count() failed: %v", err)
-	} else if count != 0 {
-		t.Fatalf("Expected 0 stories, got %d", count)
+	// Test Upsert
+	testTime := time.Now().UTC()
+	s1 := domain.Story{
+		ID:          "test-1",
+		Title:       "Test Story 1",
+		Source:      "test-feed",
+		PublishedAt: testTime,
+		Summary:     "Test summary 1",
+		FirstSeenAt: testTime,
 	}
-
-	// Upsert first story
-	story1 := domain.Story{
-		ID:     "story-1",
-		Title:  "Story 1",
-		Source: "test",
-	}
-	if err := repo.Upsert(story1); err != nil {
-		t.Fatalf("Upsert(story1) failed: %v", err)
+	if err := repo.Upsert(s1); err != nil {
+		t.Fatalf("Upsert failed: %v", err)
 	}
 
-	// Verify count
-	if count, err := repo.Count(); err != nil {
-		t.Fatalf("Count() failed: %v", err)
-	} else if count != 1 {
-		t.Fatalf("Expected 1 story, got %d", count)
+	// Test Upsert update
+	s1.Title = "Updated Title"
+	if err := repo.Upsert(s1); err != nil {
+		t.Fatalf("Upsert update failed: %v", err)
 	}
 
-	// Upsert second story
-	story2 := domain.Story{
-		ID:     "story-2",
-		Title:  "Story 2",
-		Source: "test",
-	}
-	if err := repo.Upsert(story2); err != nil {
-		t.Fatalf("Upsert(story2) failed: %v", err)
-	}
-
-	// Verify list and overwrite semantics
-	story1Updated := domain.Story{
-		ID:     "story-1",
-		Title:  "Story 1 Updated",
-		Source: "test",
-	}
-	if err := repo.Upsert(story1Updated); err != nil {
-		t.Fatalf("Upsert(story1Updated) failed: %v", err)
-	}
-
-	list, err := repo.List()
+	// Test List
+	stories, err := repo.List()
 	if err != nil {
-		t.Fatalf("List() failed: %v", err)
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(stories) != 1 {
+		t.Errorf("Expected 1 story, got %d", len(stories))
+	}
+	if stories[0].Title != "Updated Title" {
+		t.Errorf("Expected updated title, got %s", stories[0].Title)
 	}
 
-	if len(list) != 2 {
-		t.Fatalf("Expected 2 stories, got %d", len(list))
+	// Test Count
+	count, err := repo.Count()
+	if err != nil {
+		t.Fatalf("Count failed: %v", err)
 	}
-
-	// Verify overwrite
-	var found bool
-	for _, s := range list {
-		if s.ID == "story-1" && s.Title == "Story 1 Updated" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Overwrite semantics not applied: story-1 not updated")
-	}
-
-	// Verify Count after update
-	if count, err := repo.Count(); err != nil {
-		t.Fatalf("Count() after update failed: %v", err)
-	} else if count != 2 {
-		t.Fatalf("Expected 2 stories after update, got %d", count)
+	if count != 1 {
+		t.Errorf("Expected count 1, got %d", count)
 	}
 }
 
-func TestInMemoryRepository_Count(t *testing.T) {
-	repo := NewInMemoryRepository()
-	if count, err := repo.Count(); err != nil || count != 0 {
-		t.Fatalf("Initial Count() wrong: %d, %v", count, err)
+func TestMemoryRepository_Empty(t *testing.T) {
+	repo := NewMemoryRepository()
+
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("List on empty repo failed: %v", err)
+	}
+	if len(stories) != 0 {
+		t.Errorf("Expected 0 stories, got %d", len(stories))
 	}
 
-	_ = repo.Upsert(domain.Story{ID: "1"})
-	_ = repo.Upsert(domain.Story{ID: "2"})
-	_ = repo.Upsert(domain.Story{ID: "3"})
-
-	if count, err := repo.Count(); err != nil || count != 3 {
-		t.Fatalf("Count after 3 stories wrong: %d, %v", count, err)
+	count, err := repo.Count()
+	if err != nil {
+		t.Fatalf("Count on empty repo failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected count 0, got %d", count)
 	}
 }

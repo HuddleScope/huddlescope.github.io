@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// Build application with adapters
-	repo := storage.NewInMemoryRepository()
+	repo := storage.NewMemoryRepository()
 	// Pre-populate with some stories for export
 	if err := repo.Upsert(domain.Story{
 		ID:          "test-1",

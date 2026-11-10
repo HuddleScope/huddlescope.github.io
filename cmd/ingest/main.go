@@ -40,7 +40,7 @@ func main() {
 	}
 
 	// Build application with adapters
-	repo := storage.NewInMemoryRepository()
+	repo := storage.NewMemoryRepository()
 	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
 		{
 			Title:       "Test Story",
