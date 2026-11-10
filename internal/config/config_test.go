@@ -760,3 +760,113 @@ func TestConfig_ToDomain(t *testing.T) {
 		t.Errorf("domain AcceptableUse = %s; want allowed", dom.AcceptableUse.String())
 	}
 }
+
+func TestLoadSourcesFromYAML(t *testing.T) {
+	tests := []struct {
+		name      string
+		yaml      string
+		errMatch  string
+		wantCount int
+		wantFirst Source
+	}{
+		{"empty-file", "", "", 0, Source{}},
+		{"single-source", `sources:
+  - id: test
+    name: Test
+    url: https://example.com/feed`, "", 1, Source{ID: "test", Name: "Test", URL: "https://example.com/feed", Enabled: false}},
+		{"multiple-sources", `sources:
+  - id: a
+    name: A
+    url: https://a.com
+  - id: b
+    name: B
+    url: https://b.com`, "", 2, Source{ID: "a"}},
+		{"all-fields", `sources:
+  - id: test
+    name: Test
+    url: https://example.com
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    publication: Test Pub
+    priority: 5
+    team: NYJ
+    language: en
+    timeout: 60
+    license: RSS allowed
+    acceptable_use: allowed`, "", 1, Source{ID: "test", Name: "Test", URL: "https://example.com", Enabled: true, Publication: "Test Pub", Priority: 5, Language: "en", Timeout: 60, License: "RSS allowed", AcceptableUse: "allowed"}},
+		{"missing-id", `sources:
+  - name: No ID
+    url: https://example.com`, "missing required field 'id'", 0, Source{}},
+		{"missing-url", `sources:
+  - id: no-url
+    name: No URL`, "missing required field 'url'", 0, Source{}},
+		{"invalid-url", `sources:
+  - id: bad
+    name: Bad
+    url: not-a-url`, "URL must use", 0, Source{}},
+		{"duplicate-id", `sources:
+  - id: dup
+    name: First
+    url: https://a.com
+  - id: dup
+    name: Second
+    url: https://b.com`, "duplicate source ID", 0, Source{}},
+		{"invalid-accept-use", `sources:
+  - id: bad
+    name: Bad
+    url: https://a.com
+    acceptable_use: invalid`, "acceptable_use must be", 0, Source{}},
+		{"file-not-found", "", "", 0, Source{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Write YAML to temp file
+			tmpfile, err := os.CreateTemp("", "sources-*.yaml")
+			if err != nil {
+				t.Fatalf("failed to create temp file: %v", err)
+			}
+			defer func() { _ = os.Remove(tmpfile.Name()) }()
+
+			if tt.yaml != "" {
+				if _, err := tmpfile.Write([]byte(tt.yaml)); err != nil {
+					t.Fatalf("failed to write temp file: %v", err)
+				}
+			}
+			_ = tmpfile.Close()
+
+			cfg := Config{SourcesFile: tmpfile.Name()}
+			got, err := cfg.loadSourcesFromYAML()
+
+			if tt.errMatch != "" {
+				if err == nil {
+					t.Errorf("loadSourcesFromYAML() error = nil; want error containing %q", tt.errMatch)
+				} else if !contains(err.Error(), tt.errMatch) {
+					t.Errorf("loadSourcesFromYAML() error = %v; want error containing %q", err, tt.errMatch)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("loadSourcesFromYAML() error = %v; want nil", err)
+			}
+
+			if len(got) != tt.wantCount {
+				t.Errorf("len(Sources) = %d; want %d", len(got), tt.wantCount)
+			}
+
+			if tt.wantCount > 0 && tt.wantFirst.ID != "" {
+				if got[0].ID != tt.wantFirst.ID {
+					t.Errorf("first ID = %q; want %q", got[0].ID, tt.wantFirst.ID)
+				}
+				if tt.wantFirst.URL != "" && got[0].URL != tt.wantFirst.URL {
+					t.Errorf("first URL = %q; want %q", got[0].URL, tt.wantFirst.URL)
+				}
+				if got[0].Enabled != tt.wantFirst.Enabled {
+					t.Errorf("first Enabled = %v; want %v", got[0].Enabled, tt.wantFirst.Enabled)
+				}
+			}
+		})
+	}
+}

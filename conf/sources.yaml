@@ -1,0 +1,416 @@
+# HuddleScope NFL Feed Sources Configuration
+# 
+# This file defines all NFL RSS/Atom feed sources for HuddleScope.
+# Sources are polled in priority order (lower number polled first).
+# 
+# Field descriptions:
+#   id: Unique identifier for the source (snake_case, e.g., espn-nfl)
+#   name: Display name for the source
+#   url: Full RSS/Atom feed URL (must start with http:// or https://)
+#   category: Type of source (draft, national, aggregator, all-sports, team-official)
+#   enabled: true to poll this source, false to skip
+#   verification: How the feed was verified (directory_listed, confirmed_xml, etc.)
+#   publication: Publisher name for display (optional, defaults to name)
+#   priority: Lower number polled first (default: 0)
+#   team: NFL team abbreviation for team-specific feeds (optional)
+#   language: BCP-47 language tag (default: en)
+#   timeout: HTTP timeout in seconds (default: 0 = global default)
+#   license: License or acceptable-use notes (default: "")
+#   acceptable_use: allowed, restricted, or unknown (default: unknown)
+#
+# Note: This file is read at startup. Changes require application restart.
+
+sources:
+  # === National/League-Wide Sources ===
+  - id: walterfootball
+    name: WalterFootball
+    publication: WalterFootball
+    url: https://walterfootball.com/feed
+    category: draft
+    enabled: true
+    verification: directory_listed
+    priority: 10
+    acceptable_use: allowed
+
+  - id: espn-nfl
+    name: ESPN — NFL
+    publication: ESPN  NFL
+    url: https://www.espn.com/espn/rss/nfl/news
+    category: national
+    enabled: false
+    verification: bot_protection
+    priority: 1
+    acceptable_use: allowed
+
+  - id: espn-fantasy
+    name: ESPN Fantasy
+    publication: ESPN Fantasy
+    url: https://www.espn.com/fantasy/football/rss
+    category: all-sports
+    enabled: true
+    verification: confirmed_xml
+    priority: 2
+    acceptable_use: allowed
+
+  - id: cbs-nfl
+    name: CBS Sports NFL
+    publication: CBS Sports NFL
+    url: https://www.cbssports.com/nfl/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 1
+    acceptable_use: allowed
+
+  - id: fox-nfl
+    name: FOX Sports NFL
+    publication: FOX Sports NFL
+    url: https://www.foxsports.com/nfl/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 2
+    acceptable_use: allowed
+
+  - id: nfl-com
+    name: NFL.com News
+    publication: NFLcom News
+    url: https://www.nfl.com/news/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 1
+    acceptable_use: allowed
+
+  - id: nfl-com-boxscore
+    name: NFL.com Boxscore
+    publication: NFLcom Boxscore
+    url: https://www.nfl.com/scoreboard/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 3
+    acceptable_use: allowed
+
+  - id: bleacherreport
+    name: Bleacher Report — all sports
+    publication: Bleacher Report  all sports
+    url: https://feeds.bleacherreport.com/articles
+    category: all-sports
+    enabled: false
+    verification: requires_nfl_filter
+    priority: 2
+    acceptable_use: allowed
+
+  - id: sportsillustrated
+    name: Sports Illustrated — all sports
+    publication: Sports Illustrated  all sports
+    url: https://www.si.com/feed
+    category: all-sports
+    enabled: false
+    verification: requires_nfl_filter
+    priority: 3
+    acceptable_use: allowed
+
+  - id: usa-today-nfl
+    name: USA Today Sports NFL
+    publication: USA Today Sports NFL
+    url: https://www.usatoday.com/rss-sports/nfl
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 3
+    acceptable_use: allowed
+
+  - id: the-score
+    name: The Score NFL
+    publication: The Score NFL
+    url: https://www.thescore.com/nfl/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 4
+    acceptable_use: allowed
+
+  - id: the-athletic-nfl
+    name: The Athletic NFL
+    publication: The Athletic NFL
+    url: https://theathletic.com/nfl/rss
+    category: national
+    enabled: false
+    verification: requires_subscription
+    priority: 5
+    acceptable_use: restricted
+
+  - id: reddit-r-nfl
+    name: Reddit r/nfl
+    publication: Reddit rnfl
+    url: https://www.reddit.com/r/nfl/.rss
+    category: aggregator
+    enabled: true
+    verification: confirmed_xml
+    priority: 6
+    acceptable_use: allowed
+
+  # === Aggregators ===
+  - id: yardbarker-nfl
+    name: Yardbarker — NFL
+    publication: Yardbarker  NFL
+    url: https://www.yardbarker.com/rss/sport/2
+    category: aggregator
+    enabled: false
+    verification: directory_listed
+    priority: 15
+
+  # === Team Official Feeds ===
+  - id: official-ari
+    name: Arizona Cardinals (official)
+    publication: Arizona Cardinals official
+    url: https://www.azcardinals.com/rss/news
+    category: team-official
+    team: ARI
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-atl
+    name: Atlanta Falcons (official)
+    publication: Atlanta Falcons official
+    url: https://www.atlantafalcons.com/rss/news
+    category: team-official
+    team: ATL
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-bal
+    name: Baltimore Ravens (official)
+    publication: Baltimore Ravens official
+    url: https://www.baltimoreravens.com/rss/news
+    category: team-official
+    team: BAL
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-buf
+    name: Buffalo Bills (official)
+    publication: Buffalo Bills official
+    url: https://www.buffalobills.com/rss/news
+    category: team-official
+    team: BUF
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-car
+    name: Carolina Panthers (official)
+    publication: Carolina Panthers official
+    url: https://www.panthers.com/rss/news
+    category: team-official
+    team: CAR
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-chi
+    name: Chicago Bears (official)
+    publication: Chicago Bears official
+    url: https://www.chicagobears.com/rss/news
+    category: team-official
+    team: CHI
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-cin
+    name: Cincinnati Bengals (official)
+    publication: Cincinnati Bengals official
+    url: https://www.bengals.com/rss/news
+    category: team-official
+    team: CIN
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-cle
+    name: Cleveland Browns (official)
+    publication: Cleveland Browns official
+    url: https://www.clevelandbrowns.com/rss/news
+    category: team-official
+    team: CLE
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-dal
+    name: Dallas Cowboys (official)
+    publication: Dallas Cowboys official
+    url: https://www.dallascowboys.com/rss/news
+    category: team-official
+    team: DAL
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-den
+    name: Denver Broncos (official)
+    publication: Denver Broncos official
+    url: https://www.denverbroncos.com/rss/news
+    category: team-official
+    team: DEN
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-det
+    name: Detroit Lions (official)
+    publication: Detroit Lions official
+    url: https://www.detroitlions.com/rss/news
+    category: team-official
+    team: DET
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-gb
+    name: Green Bay Packers (official)
+    publication: Green Bay Packers official
+    url: https://www.packers.com/rss/news
+    category: team-official
+    team: GB
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-hou
+    name: Houston Texans (official)
+    publication: Houston Texans official
+    url: https://www.houstontexans.com/rss/news
+    category: team-official
+    team: HOU
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-ind
+    name: Indianapolis Colts (official)
+    publication: Indianapolis Colts official
+    url: https://www.colts.com/rss/news
+    category: team-official
+    team: IND
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-jax
+    name: Jacksonville Jaguars (official)
+    publication: Jacksonville Jaguars official
+    url: https://www.jaguars.com/rss/news
+    category: team-official
+    team: JAX
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-kc
+    name: Kansas City Chiefs (official)
+    publication: Kansas City Chiefs official
+    url: https://www.chiefs.com/rss/news
+    category: team-official
+    team: KC
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-lac
+    name: Los Angeles Chargers (official)
+    publication: Los Angeles Chargers official
+    url: https://www.chargers.com/rss/news
+    category: team-official
+    team: LAC
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-lar
+    name: Los Angeles Rams (official)
+    publication: Los Angeles Rams official
+    url: https://www.therams.com/rss/news
+    category: team-official
+    team: LAR
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-lv
+    name: Las Vegas Raiders (official)
+    publication: Las Vegas Raiders official
+    url: https://www.raiders.com/rss/news
+    category: team-official
+    team: LV
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-mia
+    name: Miami Dolphins (official)
+    publication: Miami Dolphins official
+    url: https://www.miamidolphins.com/rss/news
+    category: team-official
+    team: MIA
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-min
+    name: Minnesota Vikings (official)
+    publication: Minnesota Vikings official
+    url: https://www.vikings.com/rss/news
+    category: team-official
+    team: MIN
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-ne
+    name: New England Patriots (official)
+    publication: New England Patriots official
+    url: https://www.patriots.com/rss/news
+    category: team-official
+    team: NE
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-no
+    name: New Orleans Saints (official)
+    publication: New Orleans Saints official
+    url: https://www.neworleanssaints.com/rss/news
+    category: team-official
+    team: NO
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
