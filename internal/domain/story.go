@@ -9,5 +9,6 @@ type Story struct {
 	Source      string
 	PublishedAt time.Time
 	Summary     string
+	URL         string
 	FirstSeenAt time.Time
 }

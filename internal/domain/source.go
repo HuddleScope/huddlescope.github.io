@@ -42,6 +42,7 @@ type FeedEntry struct {
 	PublishedAt time.Time
 	Summary     string
 	URL         string
+	GUID        string
 }
 
 // Source represents a news source or feed.
@@ -272,16 +273,6 @@ func (r *FeedRegistry) CountEnabled() int {
 	return count
 }
 
-// NormalizeTitle normalizes a title for stable ID generation.
-func NormalizeTitle(title string) string {
-	// Trim whitespace
-	s := strings.TrimSpace(title)
-	// Collapse multiple spaces
-	s = strings.Join(strings.Fields(s), " ")
-	// Convert to lowercase for comparison
-	return strings.ToLower(s)
-}
-
 // ComputeStoryID computes a stable ID for a story based on normalized metadata.
 func ComputeStoryID(title, source string, publishedAt time.Time) string {
 	normalizedTitle := NormalizeTitle(title)
@@ -294,10 +285,11 @@ func ComputeStoryID(title, source string, publishedAt time.Time) string {
 func (s Story) Canonicalize(entry FeedEntry) Story {
 	return Story{
 		ID:          ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt),
-		Title:       entry.Title,
-		Source:      entry.Source,
-		PublishedAt: entry.PublishedAt,
-		Summary:     entry.Summary,
+		Title:       NormalizeTitle(entry.Title),
+		Source:      NormalizeSourceID(entry.Source),
+		PublishedAt: NormalizeTimestamp(entry.PublishedAt),
+		Summary:     SanitizeHTML(entry.Summary, 1024),
+		URL:         CanonicalURLEntry(entry.URL),
 		FirstSeenAt: time.Now().UTC(),
 	}
 }
