@@ -12,12 +12,22 @@ import (
 
 import "encoding/json"
 
+import "github.com/HuddleScope/huddlescope.github.io/internal/domain"
+
 // Source represents a news source or feed.
 type Source struct {
 	ID           string
 	Name         string
 	URL          string
 	FetchSeconds int
+	// Additional registry fields (HS-006)
+	Publication   string
+	Priority      int
+	Enabled       bool
+	Language      string
+	Timeout       int // seconds
+	License       string
+	AcceptableUse string
 }
 
 // Config holds the application configuration.
@@ -123,8 +133,10 @@ func (c *Config) parseSources() error {
 }
 
 // parseSourcesRaw parses HSC_SOURCES environment value into Sources.
-// Format: "id1,name1,http://url1[,interval];id2,name2,http://url2[,interval];..."
-// e.g., "nfl-news,NFL News,http://example.com,300;nfl-updates,NFL Updates,http://other.com"
+// Format: "id,name,url[,interval][,priority][,enabled][,publication][,language][,timeout][,license][,accept-use];..."
+// e.g., "nfl-news,NFL News,http://example.com,300,1,true,ESPN,en,60,allowed"
+// Optional fields after URL are parsed positionally; omitted fields use defaults.
+// Defaults: interval=900, priority=0, enabled=true, publication="", language="en", timeout=0, license="", accept-use="unknown"
 func (c *Config) parseSourcesRaw(raw string) error {
 	if raw == "" {
 		return nil
@@ -152,7 +164,15 @@ func (c *Config) parseSourcesRaw(raw string) error {
 		name := strings.TrimSpace(parts[1])
 		urlStr := strings.TrimSpace(parts[2])
 		fetchSeconds := 15 * 60 // default 15 minutes
+		priority := 0
+		enabled := true
+		publication := ""
+		language := "en"
+		timeout := 0
+		license := ""
+		acceptableUse := "unknown"
 
+		// Parse optional fields
 		if len(parts) >= 4 {
 			// Optional fetch interval in seconds
 			if d, err := time.ParseDuration(strings.TrimSpace(parts[3])); err == nil {
@@ -161,6 +181,49 @@ func (c *Config) parseSourcesRaw(raw string) error {
 				// Already in seconds
 			} else {
 				return fmt.Errorf("source entry %d invalid fetch interval: %q", i+1, parts[3])
+			}
+		}
+
+		if len(parts) >= 5 {
+			if v, err := fmt.Sscanf(strings.TrimSpace(parts[4]), "%d", &priority); err == nil && v == 1 && priority >= 0 {
+				// priority parsed
+			} else {
+				return fmt.Errorf("source entry %d invalid priority: %q", i+1, parts[4])
+			}
+		}
+
+		if len(parts) >= 6 {
+			if strings.ToLower(strings.TrimSpace(parts[5])) == "false" {
+				enabled = false
+			} else if strings.ToLower(strings.TrimSpace(parts[5])) != "true" {
+				return fmt.Errorf("source entry %d invalid enabled value: %q (expected true/false)", i+1, parts[5])
+			}
+		}
+
+		if len(parts) >= 7 {
+			publication = strings.TrimSpace(parts[6])
+		}
+
+		if len(parts) >= 8 {
+			language = strings.TrimSpace(parts[7])
+		}
+
+		if len(parts) >= 9 {
+			if v, err := fmt.Sscanf(strings.TrimSpace(parts[8]), "%d", &timeout); err == nil && v == 1 && timeout >= 0 {
+				// timeout parsed (seconds)
+			} else {
+				return fmt.Errorf("source entry %d invalid timeout: %q", i+1, parts[8])
+			}
+		}
+
+		if len(parts) >= 10 {
+			license = strings.TrimSpace(parts[9])
+		}
+
+		if len(parts) >= 11 {
+			acceptableUse = strings.TrimSpace(parts[10])
+			if acceptableUse != "allowed" && acceptableUse != "restricted" && acceptableUse != "unknown" {
+				return fmt.Errorf("source entry %d invalid accept-use value: %q (expected allowed/restricted/unknown)", i+1, parts[10])
 			}
 		}
 
@@ -183,10 +246,17 @@ func (c *Config) parseSourcesRaw(raw string) error {
 		}
 
 		c.Sources = append(c.Sources, Source{
-			ID:           id,
-			Name:         name,
-			URL:          urlStr,
-			FetchSeconds: fetchSeconds,
+			ID:            id,
+			Name:          name,
+			URL:           urlStr,
+			FetchSeconds:  fetchSeconds,
+			Publication:   publication,
+			Priority:      priority,
+			Enabled:       enabled,
+			Language:      language,
+			Timeout:       timeout,
+			License:       license,
+			AcceptableUse: acceptableUse,
 		})
 	}
 
@@ -323,6 +393,18 @@ func (c Config) Validate() error {
 		if src.FetchSeconds < 0 {
 			errs = append(errs, fmt.Errorf("source %d (%s) FetchSeconds must be >= 0", i+1, src.ID))
 		}
+
+		if src.Priority < 0 {
+			errs = append(errs, fmt.Errorf("source %d (%s) Priority must be >= 0", i+1, src.ID))
+		}
+
+		if src.Timeout < 0 {
+			errs = append(errs, fmt.Errorf("source %d (%s) Timeout must be >= 0", i+1, src.ID))
+		}
+
+		if src.AcceptableUse != "" && src.AcceptableUse != "allowed" && src.AcceptableUse != "restricted" && src.AcceptableUse != "unknown" {
+			errs = append(errs, fmt.Errorf("source %d (%s) AcceptableUse must be allowed/restricted/unknown; got %s", i+1, src.ID, src.AcceptableUse))
+		}
 	}
 
 	// Validate Env
@@ -379,4 +461,32 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Sources:        c.Sources,
 	}
 	return json.Marshal(safe)
+}
+
+// ToDomain converts config Sources to domain FeedSources.
+// This is used to wire the registry when the application starts.
+func (c Config) ToDomain() []domain.FeedSource {
+	sources := make([]domain.FeedSource, 0, len(c.Sources))
+	for _, s := range c.Sources {
+		fs := domain.FeedSource{
+			ID:          s.ID,
+			URL:         s.URL,
+			Publication: s.Publication,
+			Priority:    s.Priority,
+			Enabled:     s.Enabled,
+			Language:    s.Language,
+			Timeout:     time.Duration(s.Timeout) * time.Second,
+			License:     s.License,
+		}
+		switch s.AcceptableUse {
+		case "allowed":
+			fs.AcceptableUse = domain.AcceptanceAllowed
+		case "restricted":
+			fs.AcceptableUse = domain.AcceptanceRestricted
+		default:
+			fs.AcceptableUse = domain.AcceptanceUnknown
+		}
+		sources = append(sources, fs)
+	}
+	return sources
 }
