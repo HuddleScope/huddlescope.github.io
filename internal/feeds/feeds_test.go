@@ -1,7 +1,9 @@
 package feeds
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
@@ -211,5 +213,45 @@ func TestLoadFromYAML(t *testing.T) {
 	}
 	if registry == nil {
 		t.Fatal("Load() returned nil registry")
+	}
+}
+
+func TestLoadFrom_TimeoutAndLicense(t *testing.T) {
+	// Create a temporary YAML file with timeout and license
+	tmpFile := t.TempDir() + "/sources.yaml"
+	yamlContent := `sources:
+  - id: test-timeout
+    url: https://example.com/test
+    publication: Test Feed
+    enabled: true
+    priority: 10
+    timeout: 45
+    license: "CC-BY-NC-ND 4.0"
+`
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	registry, err := LoadFrom(tmpFile)
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if registry == nil {
+		t.Fatal("LoadFrom() returned nil registry")
+	}
+
+	// Get the test source
+	src, ok := registry.Get("test-timeout")
+	if !ok {
+		t.Fatal("Get(\"test-timeout\") not found")
+	}
+
+	// Verify timeout and license are preserved
+	if src.Timeout != 45*time.Second {
+		t.Errorf("Timeout = %v; want 45s", src.Timeout)
+	}
+	if src.License != "CC-BY-NC-ND 4.0" {
+		t.Errorf("License = %q; want CC-BY-NC-ND 4.0", src.License)
 	}
 }

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test RSS Feed</title>
+    <link>https://example.com/rss</link>
+    <description>A test RSS feed</description>
+    <item>
+      <title>Test Entry 1</title>
+      <link>https://example.com/entry1</link>
+      <description>Test summary 1</description>
+      <pubDate>Mon, 10 Nov 2026 12:00:00 GMT</pubDate>
+      <guid>https://example.com/entry1</guid>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Test Author</dc:creator>
+    </item>
+    <item>
+      <title>Test Entry 2</title>
+      <link>https://example.com/entry2</link>
+      <description>Test summary 2</description>
+      <pubDate>Tue, 11 Nov 2026 14:30:00 GMT</pubDate>
+      <guid>https://example.com/entry2</guid>
+    </item>
+  </channel>
+</rss>
