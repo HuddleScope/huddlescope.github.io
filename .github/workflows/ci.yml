@@ -4,152 +4,64 @@
 name: CI
 
 on:
+  # Branches that have an open PR are covered by pull_request; push only
+  # checks main so each commit runs CI once and a merge commit to main does
+  # not duplicate the PR run. (master is the legacy alias of main.)
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
 
+# A newer commit on the same PR (or branch) cancels the run in progress, so
+# queued and in-flight runs do not run concurrently.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
-jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run tests with race detector
-        run: go test ./... -race -timeout 60s
-
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Run gofmt check
-        run: |
-          if [ "$(gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*') | wc -l)" -gt 0 ]; then
-            echo "Error: gofmt found files that need formatting"
-            gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*')
-            exit 1
-          fi
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run golangci-lint
-        run: |
-          go env -w GOPATH="$HOME/go"
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-          $HOME/go/bin/golangci-lint run ./...
-
-  security:
-    name: Security
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run gosec
-        run: |
-          go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec ./...
-
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          govulncheck ./...
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Run coverage check
-        run: |
-          echo "Checking coverage of internal packages..."
-          for pkg in $(go list ./internal/...); do
-            go test -coverprofile=/tmp/cover.out "$pkg" >/dev/null 2>&1 || { echo "FAIL: $pkg - test failed"; exit 1; }
-            pct=$(go tool cover -func=/tmp/cover.out 2>/dev/null | grep "total:" | awk '{print $3}' | tr -d '%')
-            if awk "BEGIN {exit !($pct < 80)}"; then
-              echo "FAIL: $pkg has $pct% coverage (< 80%)"
-              exit 1
-            fi
-          done
-          echo "Coverage gate passed (all internal packages >= 80%)"
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binaries
-        run: |
-          mkdir -p dist
-          go build -o dist/ ./cmd/...
-
-      - name: Verify binaries
-        run: |
-          ls -la dist/
 
 permissions:
   contents: read
-  actions: read
+
+jobs:
+  # The job name is the required status check of the main-branch ruleset
+  # ("Require CI before merging to main"): merges to main are blocked until
+  # this check passes.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test (race, vet)
+        run: make test
+
+      - name: Format (gofmt)
+        run: |
+          files=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*'))
+          if [ -n "$files" ]; then
+            echo "Error: gofmt found files that need formatting:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: Lint
+        run: make lint
+
+      - name: Security (gosec, govulncheck)
+        run: make security
+
+      - name: Coverage gate (>= 80% on internal packages)
+        run: make check-coverage
+
+      - name: Build binaries
+        run: make build
+
+      - name: Verify binaries
+        run: ls -la dist/
