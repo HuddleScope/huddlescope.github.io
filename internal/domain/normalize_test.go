@@ -193,8 +193,9 @@ func TestCanonicalize(t *testing.T) {
 			if story.URL != tt.checkURL {
 				t.Errorf("URL: got %q, want %q", story.URL, tt.checkURL)
 			}
-			if story.FirstSeenAt.IsZero() {
-				t.Error("FirstSeenAt should be set")
+			// FirstSeenAt is set by Repository on first insertion, not by Canonicalize
+			if !story.FirstSeenAt.IsZero() {
+				t.Errorf("FirstSeenAt should be zero after Canonicalize (set by Repository), got %v", story.FirstSeenAt)
 			}
 		})
 	}

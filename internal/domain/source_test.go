@@ -250,3 +250,82 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestUpsertStatus_String(t *testing.T) {
+	tests := []struct {
+		s        UpsertStatus
+		expected string
+	}{
+		{UpsertCreated, "created"},
+		{UpsertUpdated, "updated"},
+		{UpsertUnchanged, "unchanged"},
+	}
+
+	for _, tt := range tests {
+		if tt.s.String() != tt.expected {
+			t.Errorf("UpsertStatus(%d).String() = %s; want %s", tt.s, tt.s.String(), tt.expected)
+		}
+	}
+}
+
+func TestDedupeKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		sourceID string
+		guid     string
+		url      string
+		expected string
+	}{
+		{"guid present", "feed-1", "guid-123", "https://example.com/article", "feed-1|guid-123"},
+		{"guid with whitespace", "feed-1", "  guid-456  ", "https://example.com/article", "feed-1|guid-456"},
+		{"url fallback", "feed-2", "", "https://example.com/article", "feed-2|https://example.com/article"},
+		{"url with trailing slash", "feed-3", "", "https://example.com/article/", "feed-3|https://example.com/article/"},
+		{"source ID normalized", "FEED_1", "guid-789", "https://example.com", "feed-1|guid-789"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DedupeKey(tt.sourceID, tt.guid, tt.url)
+			if got != tt.expected {
+				t.Errorf("DedupeKey(%q, %q, %q) = %q; want %q", tt.sourceID, tt.guid, tt.url, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestStory_MeaningfulFieldsChanged(t *testing.T) {
+	base := Story{
+		ID:          "id-1",
+		Title:       "Original Title",
+		Source:      "source-1",
+		PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Summary:     "Original summary",
+		URL:         "https://example.com/original",
+		GUID:        "guid-1",
+		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	tests := []struct {
+		name     string
+		incoming Story
+		want     bool
+	}{
+		{"unchanged", base, false},
+		{"title changed", Story{Title: "New Title", Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"summary changed", Story{Summary: "New Summary", Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"url changed", Story{URL: "https://example.com/new", CanonicalURL: "https://example.com/new", Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"publishedAt changed", Story{PublishedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), Title: base.Title, Source: base.Source, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"guid changed", Story{GUID: "guid-2", Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"firstSeenAt changed (ignored)", Story{FirstSeenAt: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, UpdatedAt: base.UpdatedAt}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := base.MeaningfulFieldsChanged(tt.incoming)
+			if got != tt.want {
+				t.Errorf("MeaningfulFieldsChanged() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
