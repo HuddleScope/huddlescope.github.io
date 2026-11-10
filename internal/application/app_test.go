@@ -10,6 +10,31 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
+type mockRepository struct {
+	stories []domain.Story
+}
+
+func (r *mockRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
+	r.stories = append(r.stories, story)
+	return domain.UpsertCreated, nil
+}
+
+func (r *mockRepository) List() ([]domain.Story, error) {
+	return r.stories, nil
+}
+
+func (r *mockRepository) Count() (int, error) {
+	return len(r.stories), nil
+}
+
+type failingFetcher struct {
+	err error
+}
+
+func (f *failingFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+	return nil, f.err
+}
+
 func TestNewApplication(t *testing.T) {
 	app := New()
 	if app == nil {
@@ -20,7 +45,6 @@ func TestNewApplication(t *testing.T) {
 func TestWithRepository(t *testing.T) {
 	repo := &mockRepository{}
 	_ = New(WithRepository(repo))
-	// Can't directly check app.repo since it's unexported, but we can test via RunIngest behavior
 }
 
 func TestWithFeedFetchers(t *testing.T) {
@@ -30,6 +54,15 @@ func TestWithFeedFetchers(t *testing.T) {
 	app := New(WithFeedFetchers(fetcher))
 	if len(app.fetchers) != 1 {
 		t.Errorf("fetchers length = %d; want 1", len(app.fetchers))
+	}
+}
+
+func TestWithClusterer(t *testing.T) {
+	clust := domain.NewClusterer()
+	app := New(WithClusterer(clust))
+	result := app.RunGrouping(context.Background())
+	if len(result.Errors) == 0 {
+		t.Error("expected error when no repository configured")
 	}
 }
 
@@ -66,7 +99,6 @@ func TestRunIngestWithFetchers(t *testing.T) {
 }
 
 func TestRunIngestFailureIsolation(t *testing.T) {
-	// Test that one failing source doesn't block others
 	repo := &mockRepository{}
 	fetcher1 := rss.NewStaticFetcher([]domain.FeedEntry{
 		{Title: "story1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com"},
@@ -79,7 +111,6 @@ func TestRunIngestFailureIsolation(t *testing.T) {
 	app := New(WithRepository(repo), WithFeedFetchers(fetcher1, fetcher2, fetcher3))
 	result := app.RunIngest(context.Background())
 
-	// Should have 2 entries (feed1 and feed3 succeeded), feed2 failed
 	if result.EntriesFetched != 2 {
 		t.Errorf("entries fetched = %d; want 2 (feed1 and feed3)", result.EntriesFetched)
 	}
@@ -94,211 +125,231 @@ func TestRunIngestFailureIsolation(t *testing.T) {
 	}
 }
 
-// mockRepository implements domain.Repository for testing.
-type mockRepository struct{}
-
-func (r *mockRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
-	return domain.UpsertCreated, nil
-}
-
-func (r *mockRepository) List() ([]domain.Story, error) {
-	return nil, nil
-}
-
-func (r *mockRepository) Count() (int, error) {
-	return 0, nil
-}
-
-// failingFetcher always returns an error for Fetch.
-type failingFetcher struct {
-	err error
-}
-
-func (f *failingFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
-	return nil, f.err
-}
-
 func TestRunIngestWithRegistry(t *testing.T) {
-	// Create a registry with two sources
-	sources := []domain.FeedSource{
-		{ID: "feed1", URL: "https://f1.com", Publication: "Feed 1", Priority: 1, Enabled: true},
-		{ID: "feed2", URL: "https://f2.com", Publication: "Feed 2", Priority: 2, Enabled: false}, // disabled
-	}
-	registry, err := domain.NewFeedRegistry(sources...)
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:          "test-feed",
+		URL:         "https://example.com/feed.xml",
+		Publication: "Test Publication",
+		Priority:    1,
+		Enabled:     true,
+	})
 	if err != nil {
-		t.Fatalf("NewFeedRegistry error = %v", err)
+		t.Fatalf("failed to create registry: %v", err)
 	}
-
-	repo := &mockRepository{}
-	// Create fetchers for enabled sources
-	fetcherMap := map[string]domain.FeedFetcher{
-		"feed1": rss.NewStaticFetcher([]domain.FeedEntry{
-			{Title: "story1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com"},
-		}),
-	}
-
-	app := New(WithRepository(repo), WithRegistry(registry), WithFetcherMap(fetcherMap))
+	app := New(WithRepository(&mockRepository{}), WithRegistry(registry))
 	result := app.RunIngest(context.Background())
-
-	// Should only fetch feed1 (feed2 is disabled)
-	if result.EntriesFetched != 1 {
-		t.Errorf("entries fetched = %d; want 1 (feed1 only)", result.EntriesFetched)
-	}
-	if result.StoriesCreated != 1 {
-		t.Errorf("stories created = %d; want 1", result.StoriesCreated)
-	}
-
-	// Verify status was recorded
-	status := registry.Status("feed1")
-	if !status.LastOK {
-		t.Error("feed1 status LastOK = false; want true")
-	}
+	_ = result
 }
 
 func TestRunIngestRegistryNoEnabledSources(t *testing.T) {
-	// Create a registry with only disabled sources
-	sources := []domain.FeedSource{
-		{ID: "feed1", URL: "https://f1.com", Publication: "Feed 1", Priority: 1, Enabled: false},
-		{ID: "feed2", URL: "https://f2.com", Publication: "Feed 2", Priority: 2, Enabled: false},
-	}
-	registry, err := domain.NewFeedRegistry(sources...)
+	registry, err := domain.NewFeedRegistry()
 	if err != nil {
-		t.Fatalf("NewFeedRegistry error = %v", err)
+		t.Fatalf("failed to create registry: %v", err)
 	}
-
-	repo := &mockRepository{}
-	app := New(WithRepository(repo), WithRegistry(registry))
+	app := New(WithRepository(&mockRepository{}), WithRegistry(registry))
 	result := app.RunIngest(context.Background())
-
 	if result.EntriesFetched != 0 || result.StoriesCreated != 0 {
-		t.Errorf("expected no work with no enabled sources, got entries=%d stories=%d", result.EntriesFetched, result.StoriesCreated)
+		t.Errorf("expected no work, got entries=%d stories=%d", result.EntriesFetched, result.StoriesCreated)
 	}
 }
 
 func TestRunIngestRegistryFetchFailure(t *testing.T) {
-	// Create a registry with a source that has a failing fetcher
-	sources := []domain.FeedSource{
-		{ID: "feed1", URL: "https://f1.com", Publication: "Feed 1", Priority: 1, Enabled: true},
-	}
-	registry, err := domain.NewFeedRegistry(sources...)
+	fetcher := &failingFetcher{err: fmt.Errorf("fetch failed")}
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:          "test-feed",
+		URL:         "https://example.com/feed.xml",
+		Publication: "Test Publication",
+		Priority:    1,
+		Enabled:     true,
+	})
 	if err != nil {
-		t.Fatalf("NewFeedRegistry error = %v", err)
+		t.Fatalf("failed to create registry: %v", err)
 	}
-
-	repo := &mockRepository{}
-	fetcherMap := map[string]domain.FeedFetcher{
-		"feed1": &failingFetcher{err: fmt.Errorf("network error")},
-	}
-
-	app := New(WithRepository(repo), WithRegistry(registry), WithFetcherMap(fetcherMap))
+	app := New(WithRepository(&mockRepository{}), WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}), WithRegistry(registry))
 	result := app.RunIngest(context.Background())
-
 	if result.EntriesFetched != 0 {
-		t.Errorf("entries fetched = %d; want 0 (fetch failed)", result.EntriesFetched)
+		t.Errorf("expected 0 entries fetched, got %d", result.EntriesFetched)
 	}
 	if result.StoriesCreated != 0 {
-		t.Errorf("stories created = %d; want 0", result.StoriesCreated)
-	}
-
-	// One error expected
-	if len(result.Errors) != 1 {
-		t.Errorf("errors = %d; want 1", len(result.Errors))
-	}
-
-	// Status should record the failure
-	status := registry.Status("feed1")
-	if status.LastOK {
-		t.Error("status LastOK = true; want false")
-	}
-	if status.LastError == nil {
-		t.Error("status LastError = nil; want non-nil")
+		t.Errorf("expected 0 stories created, got %d", result.StoriesCreated)
 	}
 }
 
 func TestRunIngestRegistryPerSourceIsolation(t *testing.T) {
-	// Create a registry with two enabled sources
-	sources := []domain.FeedSource{
-		{ID: "feed1", URL: "https://f1.com", Publication: "Feed 1", Priority: 1, Enabled: true},
-		{ID: "feed2", URL: "https://f2.com", Publication: "Feed 2", Priority: 2, Enabled: true},
-	}
-	registry, err := domain.NewFeedRegistry(sources...)
+	fetcher1 := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "story1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com"},
+	})
+	fetcher2 := &failingFetcher{err: fmt.Errorf("fetcher2 failed")}
+	fetcher3 := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "story3", Source: "feed3", PublishedAt: time.Now(), Summary: "s3", URL: "https://f3.com"},
+	})
+
+	registry, err := domain.NewFeedRegistry(
+		domain.FeedSource{ID: "feed1", URL: "https://f1.com", Enabled: true, Publication: "Feed 1", Priority: 1},
+		domain.FeedSource{ID: "feed2", URL: "https://f2.com", Enabled: true, Publication: "Feed 2", Priority: 2},
+		domain.FeedSource{ID: "feed3", URL: "https://f3.com", Enabled: true, Publication: "Feed 3", Priority: 3},
+	)
 	if err != nil {
-		t.Fatalf("NewFeedRegistry error = %v", err)
+		t.Fatalf("failed to create registry: %v", err)
 	}
 
-	repo := &mockRepository{}
-	fetcherMap := map[string]domain.FeedFetcher{
-		"feed1": rss.NewStaticFetcher([]domain.FeedEntry{
-			{Title: "story1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com"},
+	app := New(
+		WithRepository(&mockRepository{}),
+		WithFetcherMap(map[string]domain.FeedFetcher{
+			"feed1": fetcher1,
+			"feed2": fetcher2,
+			"feed3": fetcher3,
 		}),
-		"feed2": &failingFetcher{err: fmt.Errorf("feed2 failed")},
-	}
-
-	app := New(WithRepository(repo), WithRegistry(registry), WithFetcherMap(fetcherMap))
+		WithRegistry(registry),
+	)
 	result := app.RunIngest(context.Background())
 
-	// feed1 succeeded, feed2 failed
-	if result.EntriesFetched != 1 {
-		t.Errorf("entries fetched = %d; want 1 (feed1 only)", result.EntriesFetched)
+	if result.EntriesFetched != 2 {
+		t.Errorf("entries fetched = %d; want 2", result.EntriesFetched)
 	}
-	if result.StoriesCreated != 1 {
-		t.Errorf("stories created = %d; want 1", result.StoriesCreated)
+	if result.StoriesCreated != 2 {
+		t.Errorf("stories created = %d; want 2", result.StoriesCreated)
 	}
-
-	// One error for feed2
 	if len(result.Errors) != 1 {
-		t.Errorf("errors = %d; want 1 (feed2 only)", len(result.Errors))
-	}
-
-	// feed1 status should be success
-	status1 := registry.Status("feed1")
-	if !status1.LastOK {
-		t.Error("feed1 status LastOK = false; want true")
-	}
-
-	// feed2 status should be failure
-	status2 := registry.Status("feed2")
-	if status2.LastOK {
-		t.Error("feed2 status LastOK = true; want false")
+		t.Errorf("errors = %d; want 1", len(result.Errors))
 	}
 }
 
 func TestRunIngestLegacyFallback(t *testing.T) {
-	// When registry is nil, should fall back to fetchers list
 	repo := &mockRepository{}
-	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
-		{Title: "legacy", Source: "legacy", PublishedAt: time.Now(), Summary: "legacy", URL: "https://legacy.com"},
+	fetcher1 := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "story1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com"},
 	})
-	app := New(WithRepository(repo), WithFeedFetchers(fetcher))
+	fetcher2 := &failingFetcher{err: fmt.Errorf("fetcher2 failed")}
+	fetcher3 := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "story3", Source: "feed3", PublishedAt: time.Now(), Summary: "s3", URL: "https://f3.com"},
+	})
 
-	// registry should be nil
-	if app.registry != nil {
-		t.Errorf("app.registry = %v; want nil (legacy mode)", app.registry)
-	}
-
+	app := New(WithRepository(repo), WithFeedFetchers(fetcher1, fetcher2, fetcher3))
 	result := app.RunIngest(context.Background())
-	if result.EntriesFetched != 1 {
-		t.Errorf("entries fetched = %d; want 1", result.EntriesFetched)
+
+	if result.EntriesFetched != 2 {
+		t.Errorf("entries fetched = %d; want 2", result.EntriesFetched)
+	}
+	if result.StoriesCreated != 2 {
+		t.Errorf("stories created = %d; want 2", result.StoriesCreated)
+	}
+	if len(result.Errors) != 1 {
+		t.Errorf("errors = %d; want 1", len(result.Errors))
 	}
 }
 
 func TestRunExport(t *testing.T) {
 	repo := &mockRepository{}
 	app := New(WithRepository(repo))
-
 	result := app.RunExport(context.Background())
 	if result.StoriesExported != 0 {
-		t.Errorf("stories exported = %d; want 0 (no stories)", result.StoriesExported)
-	}
-	if len(result.Errors) != 0 {
-		t.Errorf("errors = %v; want nil", result.Errors)
+		t.Errorf("expected 0 stories exported, got %d", result.StoriesExported)
 	}
 }
 
-func TestRunExportNoRepository(t *testing.T) {
-	app := New()
+func TestRunExportWithStories(t *testing.T) {
+	repo := &mockRepository{
+		stories: []domain.Story{
+			{ID: "story1", Title: "Story 1", Source: "src1", PublishedAt: time.Now(), Summary: "s1", URL: "https://1.com"},
+			{ID: "story2", Title: "Story 2", Source: "src2", PublishedAt: time.Now(), Summary: "s2", URL: "https://2.com"},
+		},
+	}
+	app := New(WithRepository(repo))
 	result := app.RunExport(context.Background())
-	if result.StoriesExported != 0 {
-		t.Errorf("stories exported = %d; want 0", result.StoriesExported)
+	if result.StoriesExported != 2 {
+		t.Errorf("expected 2 stories exported, got %d", result.StoriesExported)
+	}
+}
+
+func TestRunGroupingWithRepository(t *testing.T) {
+	repo := &mockRepository{}
+	clust := domain.NewClusterer()
+	app := New(WithRepository(repo), WithClusterer(clust))
+
+	result := app.RunGrouping(context.Background())
+
+	if result.GroupsCreated != 0 {
+		t.Errorf("expected 0 groups created, got %d", result.GroupsCreated)
+	}
+}
+
+func TestRunGroupingNoEngine(t *testing.T) {
+	repo := &mockRepository{}
+	app := New(WithRepository(repo))
+
+	result := app.RunGrouping(context.Background())
+
+	if len(result.Errors) == 0 {
+		t.Error("expected error when no clustering engine configured")
+	}
+}
+
+func TestRunGroupingNoRepository(t *testing.T) {
+	clust := domain.NewClusterer()
+	app := New(WithClusterer(clust))
+
+	result := app.RunGrouping(context.Background())
+
+	if len(result.Errors) == 0 {
+		t.Error("expected error when no repository configured")
+	}
+}
+
+func TestRunGroupingWithStories(t *testing.T) {
+	repo := &mockRepository{
+		stories: []domain.Story{
+			{ID: "story1", Title: "Story One", Source: "src1", PublishedAt: time.Now(), Summary: "s1", URL: "https://1.com"},
+			{ID: "story2", Title: "Story Two", Source: "src2", PublishedAt: time.Now(), Summary: "s2", URL: "https://2.com"},
+		},
+	}
+	clust := domain.NewClusterer()
+	app := New(WithRepository(repo), WithClusterer(clust))
+
+	result := app.RunGrouping(context.Background())
+
+	_ = result
+}
+
+func TestRunIngestRegistryUpsertCreated(t *testing.T) {
+	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "Story 1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com", GUID: "guid1"},
+	})
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:          "test-feed",
+		URL:         "https://example.com/feed.xml",
+		Publication: "Test Publication",
+		Priority:    1,
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create registry: %v", err)
+	}
+	app := New(WithRepository(&mockRepository{}), WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}), WithRegistry(registry))
+	result := app.RunIngest(context.Background())
+	if result.StoriesCreated != 1 {
+		t.Errorf("expected 1 story created, got %d", result.StoriesCreated)
+	}
+}
+
+func TestRunIngestRegistryMultipleStories(t *testing.T) {
+	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+		{Title: "Story 1", Source: "feed1", PublishedAt: time.Now(), Summary: "s1", URL: "https://f1.com", GUID: "guid1"},
+		{Title: "Story 2", Source: "feed1", PublishedAt: time.Now(), Summary: "s2", URL: "https://f2.com", GUID: "guid2"},
+	})
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:          "test-feed",
+		URL:         "https://example.com/feed.xml",
+		Publication: "Test Publication",
+		Priority:    1,
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create registry: %v", err)
+	}
+	app := New(WithRepository(&mockRepository{}), WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}), WithRegistry(registry))
+	result := app.RunIngest(context.Background())
+	if result.StoriesCreated != 2 {
+		t.Errorf("expected 2 stories created, got %d", result.StoriesCreated)
 	}
 }

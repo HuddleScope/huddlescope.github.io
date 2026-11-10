@@ -43,6 +43,7 @@ type FeedEntry struct {
 	Summary     string
 	URL         string
 	GUID        string
+	Entities    []string // normalized team slugs, player names
 }
 
 // Source represents a news source or feed.
