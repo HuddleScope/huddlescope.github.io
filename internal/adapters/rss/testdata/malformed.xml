@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Broken Feed</title>
+    <link>https://example.com/broken</link>
+    <description>A broken RSS feed for testing malformed feed handling</description>
+    <item>
+      <title>Valid Entry</title>
+      <link>https://example.com/entry</link>
+      <description>Valid description</description>
+    </item>
+  </channel>
+  <invalid element>broken</invalid element>
+</rss>

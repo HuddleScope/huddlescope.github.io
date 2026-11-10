@@ -22,6 +22,7 @@ package feeds
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -175,6 +176,52 @@ type YAMLConfig struct {
 	Sources []YAMLSource `yaml:"sources"`
 }
 
+// LoadFrom loads sources from the given file path.
+// Returns nil registry if file doesn't exist or is empty.
+func LoadFrom(path string) (*domain.FeedRegistry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read sources file %q: %w", path, err)
+	}
+
+	var cfg YAMLConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse sources file %q: %w", path, err)
+	}
+
+	if len(cfg.Sources) == 0 {
+		return nil, nil
+	}
+
+	feeds := make([]domain.FeedSource, 0, len(cfg.Sources))
+	for _, ys := range cfg.Sources {
+		fs := domain.FeedSource{
+			ID:          ys.ID,
+			URL:         ys.URL,
+			Publication: ys.Publication,
+			Priority:    ys.Priority,
+			Enabled:     ys.Enabled,
+			Language:    ys.Language,
+			Timeout:     time.Duration(ys.Timeout) * time.Second,
+			License:     ys.License,
+		}
+		switch ys.AcceptableUse {
+		case "allowed":
+			fs.AcceptableUse = domain.AcceptanceAllowed
+		case "restricted":
+			fs.AcceptableUse = domain.AcceptanceRestricted
+		default:
+			fs.AcceptableUse = domain.AcceptanceUnknown
+		}
+		feeds = append(feeds, fs)
+	}
+
+	return domain.NewFeedRegistry(feeds...)
+}
+
 // Load returns a FeedRegistry populated with sources from conf/sources.yaml.
 // Falls back to SeededSources if the YAML file is not found or empty.
 // The registry is pre-validated and ready for polling.
@@ -207,6 +254,8 @@ func Load() (*domain.FeedRegistry, error) {
 				Priority:    ys.Priority,
 				Enabled:     ys.Enabled,
 				Language:    ys.Language,
+				Timeout:     time.Duration(ys.Timeout) * time.Second,
+				License:     ys.License,
 			}
 			switch ys.AcceptableUse {
 			case "allowed":

@@ -1,0 +1,22 @@
+{
+  "version": "https://jsonfeed.org/version/1",
+  "title": "Test JSON Feed",
+  "home_page_url": "https://example.com/json",
+  "feed_url": "https://example.com/json/feed.json",
+  "items": [
+    {
+      "id": "https://example.com/entry1",
+      "title": "Test Entry 1",
+      "url": "https://example.com/entry1",
+      "content_html": "<p>Test summary 1</p>",
+      "date_published": "2026-11-10T12:00:00Z"
+    },
+    {
+      "id": "https://example.com/entry2",
+      "title": "Test Entry 2",
+      "url": "https://example.com/entry2",
+      "content_html": "<p>Test summary 2</p>",
+      "date_published": "2026-11-11T14:30:00Z"
+    }
+  ]
+}

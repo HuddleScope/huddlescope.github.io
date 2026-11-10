@@ -53,25 +53,21 @@ func main() {
 	appOpts = append(appOpts, application.WithRepository(repo))
 
 	if registry != nil {
-		// Use registry-driven ingestion
-		// For now, map all sources to the same StaticFetcher (placeholder for HTTP fetcher)
-		// Each source gets its own fetcher to enable per-source isolation
+		// Use registry-driven ingestion with real HTTP fetchers
+		// Create a shared rate limiter and ETag cache across all fetchers
+		rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+		etagCache := rss.NewETagCache()
+
 		sourceFetchers := make(map[string]domain.FeedFetcher)
-		for _, src := range registry.All() {
-			// For demo, use a fetcher that returns the source metadata as a single entry
-			// In production, this would resolve a real HTTP fetcher
-			feedEntries := make([]domain.FeedEntry, 0)
-			// If this is a known enabled source, return some sample entries
-			if src.Enabled {
-				feedEntries = append(feedEntries, domain.FeedEntry{
-					Title:       src.Publication + " Feed Entry",
-					Source:      src.ID,
-					PublishedAt: time.Now().UTC(),
-					Summary:     "Sample feed entry from " + src.Publication,
-					URL:         src.URL,
-				})
-			}
-			sourceFetchers[src.ID] = rss.NewStaticFetcher(feedEntries)
+		for _, src := range registry.Enabled() {
+			// Build HTTP fetcher per enabled source with shared rate limiter and ETag cache
+			fetcher := rss.NewHTTPFetcher(src,
+				rss.WithUserAgent(cfg.UserAgent),
+				rss.WithDefaultTimeout(cfg.RequestTimeout),
+				rss.WithRateLimiter(rateLimiter),
+				rss.WithETagCache(etagCache),
+			)
+			sourceFetchers[src.ID] = fetcher
 		}
 		appOpts = append(appOpts, application.WithRegistry(registry))
 		appOpts = append(appOpts, application.WithFetcherMap(sourceFetchers))

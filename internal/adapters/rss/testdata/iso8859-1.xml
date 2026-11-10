@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Feed con Acentos</title>
+    <link>https://example.com/iso8859-1</link>
+    <description>Prueba con caracteres acentuados</description>
+    <item>
+      <title>Café y Señor</title>
+      <link>https://example.com/spanish-entry</link>
+      <description>Texto con caracteres latinos: áéíóúñ</description>
+      <pubDate>Mon, 10 Nov 2026 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

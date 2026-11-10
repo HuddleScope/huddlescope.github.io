@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Feed Without Dates</title>
+    <link>https://example.com/nodates</link>
+    <description>A feed without date elements</description>
+    <item>
+      <title>No Date Entry</title>
+      <link>https://example.com/no-date-entry</link>
+      <description>Entry with no date</description>
+    </item>
+  </channel>
+</rss>
