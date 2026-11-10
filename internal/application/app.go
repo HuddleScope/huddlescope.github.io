@@ -23,6 +23,26 @@ type ExportResult struct {
 	Errors          []error
 }
 
+// GroupingResult represents the result of a grouping operation.
+type GroupingResult struct {
+	GroupsCreated   int
+	GroupsMerged    int
+	ArticlesGrouped int
+	ArticlesSolo    int
+	Errors          []error
+}
+
+// NewGroupingResult creates a new GroupingResult.
+func NewGroupingResult() GroupingResult {
+	return GroupingResult{
+		GroupsCreated:   0,
+		GroupsMerged:    0,
+		ArticlesGrouped: 0,
+		ArticlesSolo:    0,
+		Errors:          nil,
+	}
+}
+
 // Application holds the core business logic components.
 type Application struct {
 	repo     domain.Repository
@@ -30,6 +50,8 @@ type Application struct {
 	// New for HS-006: registry-driven fetcher resolution
 	registry   *domain.FeedRegistry
 	fetcherMap map[string]domain.FeedFetcher // ID -> fetcher
+	// New for HS-010: clustering engine
+	clusteringEngine *domain.Clusterer
 }
 
 // Option configures the Application.
@@ -50,7 +72,6 @@ func WithFeedFetchers(fetchers ...domain.FeedFetcher) Option {
 }
 
 // WithRegistry sets the feed registry (HS-006).
-// The registry provides sources and enables per-source failure isolation.
 func WithRegistry(registry *domain.FeedRegistry) Option {
 	return func(a *Application) {
 		a.registry = registry
@@ -58,19 +79,22 @@ func WithRegistry(registry *domain.FeedRegistry) Option {
 }
 
 // WithFetcherResolver sets a function to resolve a FeedFetcher for a source ID.
-// This is called for each enabled source during RunIngest.
 func WithFetcherResolver(resolver func(sourceID string) domain.FeedFetcher) Option {
 	return func(a *Application) {
-		// Convert resolver to a map for RunIngest to use
-		// This is a temporary bridge; in the future, resolver becomes primary
 	}
 }
 
 // WithFetcherMap sets a map of sourceID -> FeedFetcher (HS-006).
-// This is used by cmd/ingest to wire per-source fetchers.
 func WithFetcherMap(fetcherMap map[string]domain.FeedFetcher) Option {
 	return func(a *Application) {
 		a.fetcherMap = fetcherMap
+	}
+}
+
+// WithClusterer sets the clustering engine (HS-010).
+func WithClusterer(engine *domain.Clusterer) Option {
+	return func(a *Application) {
+		a.clusteringEngine = engine
 	}
 }
 
@@ -90,7 +114,6 @@ func New(opts ...Option) *Application {
 func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 	result := domain.IngestionResult{}
 
-	// If no repository is configured, return "no work"
 	if a.repo == nil {
 		return domain.IngestionResult{
 			StoriesSkipped: 0,
@@ -98,12 +121,10 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 		}
 	}
 
-	// If registry is provided, use it; otherwise fall back to legacy fetchers
 	if a.registry != nil {
 		return a.runIngestWithRegistry(ctx, result)
 	}
 
-	// Legacy path: use the original fetchers list
 	if len(a.fetchers) == 0 {
 		return domain.IngestionResult{
 			StoriesSkipped: 0,
@@ -122,14 +143,12 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 		for _, entry := range entries {
 			story := domain.Story{}.Canonicalize(entry)
 
-			// Try to upsert
 			status, err := a.repo.Upsert(story)
 			if err != nil {
 				result.Errors = append(result.Errors, err)
 				continue
 			}
 
-			// Count by status
 			switch status {
 			case domain.UpsertCreated:
 				result.StoriesCreated += 1
@@ -148,7 +167,6 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.IngestionResult) domain.IngestionResult {
 	enabledSources := a.registry.Enabled()
 
-	// If no enabled sources, return "no work"
 	if len(enabledSources) == 0 {
 		return domain.IngestionResult{
 			EntriesFetched: 0,
@@ -159,12 +177,9 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 		}
 	}
 
-	// For each enabled source, resolve a fetcher and fetch
 	for _, src := range enabledSources {
-		// Resolve fetcher for this source
 		fetcher, err := a.resolveFetcher(src.ID)
 		if err != nil {
-			// Record failure and continue
 			a.registry.RecordStatus(src.ID, false, err)
 			result.Errors = append(result.Errors, fmt.Errorf("failed to resolve fetcher for %s: %w", src.ID, err))
 			continue
@@ -175,7 +190,6 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("source %s: %w", src.ID, err))
-			// Continue with next source
 			continue
 		}
 
@@ -184,14 +198,12 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 		for _, entry := range entries {
 			story := domain.Story{}.Canonicalize(entry)
 
-			// Try to upsert
 			status, err := a.repo.Upsert(story)
 			if err != nil {
 				result.Errors = append(result.Errors, err)
 				continue
 			}
 
-			// Count by status
 			switch status {
 			case domain.UpsertCreated:
 				result.StoriesCreated += 1
@@ -206,14 +218,75 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 	return result
 }
 
+// RunGrouping performs cross-source story grouping (HS-010).
+func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
+	result := domain.NewGroupingResult()
+
+	if a.clusteringEngine == nil {
+		result.Errors = append(result.Errors, fmt.Errorf("clustering engine not configured"))
+		return result
+	}
+
+	if a.repo == nil {
+		result.Errors = append(result.Errors, fmt.Errorf("repository not configured"))
+		return result
+	}
+
+	stories, err := a.repo.List()
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("failed to list stories: %w", err))
+		return result
+	}
+
+	articles := make([]domain.Article, 0, len(stories))
+	for _, story := range stories {
+		articles = append(articles, domain.Article{
+			ID:          story.ID,
+			SourceID:    story.Source,
+			Title:       story.Title,
+			Summary:     story.Summary,
+			URL:         story.URL,
+			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:    story.Entities,
+		})
+	}
+
+	groups := a.clusteringEngine.Cluster(articles)
+
+	// Persist grouping results back to database
+	newStories := make([]domain.Story, 0, len(groups))
+	for _, g := range groups {
+		newStory := domain.NewStoryFromGroup(g)
+		newStories = append(newStories, newStory)
+	}
+
+	// Upsert all grouped stories
+	for _, story := range newStories {
+		if _, err := a.repo.Upsert(story); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("failed to upsert story %s: %w", story.ID, err))
+		}
+	}
+
+	groupCount := 0
+	for _, g := range groups {
+		if g.Size() == 1 {
+			result.ArticlesSolo += 1
+		} else {
+			result.ArticlesGrouped += g.Size()
+		}
+		groupCount++
+	}
+	result.GroupsCreated = groupCount
+
+	return result
+}
+
 // resolveFetcher returns a FeedFetcher for the given source ID.
-// Uses fetcherMap if populated; otherwise returns a StaticFetcher with empty entries.
 func (a *Application) resolveFetcher(sourceID string) (domain.FeedFetcher, error) {
 	if fetcher, ok := a.fetcherMap[sourceID]; ok {
 		return fetcher, nil
 	}
-	// Default: return a fetcher that returns no entries
-	// This allows the test to work without configuring every source
 	return rss.NewStaticFetcher([]domain.FeedEntry{}), nil
 }
 
@@ -221,7 +294,6 @@ func (a *Application) resolveFetcher(sourceID string) (domain.FeedFetcher, error
 func (a *Application) RunExport(ctx context.Context) ExportResult {
 	result := ExportResult{}
 
-	// If no repository is configured, return "no work"
 	if a.repo == nil {
 		return ExportResult{
 			StoriesExported: 0,
@@ -235,7 +307,6 @@ func (a *Application) RunExport(ctx context.Context) ExportResult {
 		return result
 	}
 
-	// In this placeholder, just count stories
 	result.StoriesExported = len(stories)
 
 	return result

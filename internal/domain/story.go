@@ -35,9 +35,12 @@ type Story struct {
 	PublishedAt  time.Time
 	Summary      string
 	URL          string
+	ArticleIDs   []string // IDs of articles in this story group (HS-010)
+	Headline     string   // normalized headline for the story (HS-010)
 	GUID         string
 	CanonicalURL string
 	DedupeKey    string
+	Entities     []string // normalized team slugs, player names (HS-010)
 	FirstSeenAt  time.Time
 	UpdatedAt    time.Time
 }
