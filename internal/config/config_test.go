@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
 func TestLoad(t *testing.T) {
@@ -597,4 +599,164 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestParseSourcesRawExtendedFields tests the extended field parsing.
+func TestParseSourcesRawExtendedFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		errMatch  string
+		wantCount int
+		checks    func([]Source)
+	}{
+		{
+			"basic only",
+			"id,name,http://url.com",
+			"", 1,
+			func(srcs []Source) {
+				if len(srcs) != 1 || srcs[0].ID != "id" {
+					t.Errorf("basic: parsed incorrectly")
+				}
+			},
+		},
+		{
+			"with interval",
+			"id,name,http://url.com,300",
+			"", 1,
+			func(srcs []Source) {
+				if srcs[0].FetchSeconds != 300 {
+					t.Errorf("FetchSeconds = %d; want 300", srcs[0].FetchSeconds)
+				}
+			},
+		},
+		{
+			"with all fields",
+			"espn-nfl,ESPN NFL,https://espn.com/nfl/rss,300,1,true,ESPN,en,60,RSS syndication permitted,allowed",
+			"", 1,
+			func(srcs []Source) {
+				src := srcs[0]
+				if src.ID != "espn-nfl" {
+					t.Errorf("ID = %s; want espn-nfl", src.ID)
+				}
+				if src.Publication != "ESPN" {
+					t.Errorf("Publication = %s; want ESPN", src.Publication)
+				}
+				if src.Priority != 1 {
+					t.Errorf("Priority = %d; want 1", src.Priority)
+				}
+				if !src.Enabled {
+					t.Error("Enabled = false; want true")
+				}
+				if src.Language != "en" {
+					t.Errorf("Language = %s; want en", src.Language)
+				}
+				if src.Timeout != 60 {
+					t.Errorf("Timeout = %d; want 60", src.Timeout)
+				}
+				if src.License != "RSS syndication permitted" {
+					t.Errorf("License = %s; want RSS syndication permitted", src.License)
+				}
+				if src.AcceptableUse != "allowed" {
+					t.Errorf("AcceptableUse = %s; want allowed", src.AcceptableUse)
+				}
+			},
+		},
+		{
+			"only required and enabled",
+			"id,name,http://url.com,0,0,false",
+			"", 1,
+			func(srcs []Source) {
+				if srcs[0].Enabled {
+					t.Error("Enabled should be false")
+				}
+			},
+		},
+		{
+			"invalid enabled value",
+			"id,name,http://url.com,0,0,maybe", // enabled=maybe (invalid)
+			"enabled", 0,
+			func(srcs []Source) {},
+		},
+		{
+			"invalid accept-use",
+			"id,name,http://url.com,0,0,false,\"\",en,0,,invalid", // priority=0, enabled=false, pub="", lang=en, timeout=0, license="", accept-use=invalid
+			"accept-use", 0,
+			func(srcs []Source) {},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{}
+			err := cfg.parseSourcesRaw(tt.raw)
+			if tt.errMatch == "" {
+				if err != nil {
+					t.Errorf("parseSourcesRaw(%q) error = %v; want nil", tt.raw, err)
+				}
+				if len(cfg.Sources) != tt.wantCount {
+					t.Errorf("len(Sources) = %d; want %d", len(cfg.Sources), tt.wantCount)
+				}
+				if tt.checks != nil {
+					tt.checks(cfg.Sources)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("parseSourcesRaw(%q) error = nil; want error containing %q", tt.raw, tt.errMatch)
+				} else if !contains(err.Error(), tt.errMatch) {
+					t.Errorf("parseSourcesRaw(%q) error = %v; want error containing %q", tt.raw, err, tt.errMatch)
+				}
+			}
+		})
+	}
+}
+
+// TestConfig_ToDomain tests the ToDomain mapping.
+func TestConfig_ToDomain(t *testing.T) {
+	cfg := Config{
+		Sources: []Source{
+			{
+				ID:            "test",
+				URL:           "https://example.com",
+				Publication:   "Test Publication",
+				Priority:      1,
+				Enabled:       true,
+				Language:      "en",
+				Timeout:       60,
+				License:       "Free to syndicate",
+				AcceptableUse: "allowed",
+			},
+		},
+	}
+
+	domainSrcs := cfg.ToDomain()
+	if len(domainSrcs) != 1 {
+		t.Fatalf("ToDomain() returned %d sources; want 1", len(domainSrcs))
+	}
+
+	dom := domainSrcs[0]
+	if dom.ID != "test" {
+		t.Errorf("domain ID = %s; want test", dom.ID)
+	}
+	if dom.Publication != "Test Publication" {
+		t.Errorf("domain Publication = %s; want Test Publication", dom.Publication)
+	}
+	if dom.Priority != 1 {
+		t.Errorf("domain Priority = %d; want 1", dom.Priority)
+	}
+	if !dom.Enabled {
+		t.Error("domain Enabled = false; want true")
+	}
+	if dom.Language != "en" {
+		t.Errorf("domain Language = %s; want en", dom.Language)
+	}
+	if dom.Timeout != 60*time.Second {
+		t.Errorf("domain Timeout = %v; want 60s", dom.Timeout)
+	}
+	if dom.License != "Free to syndicate" {
+		t.Errorf("domain License = %s; want Free to syndicate", dom.License)
+	}
+	if dom.AcceptableUse != domain.AcceptanceAllowed {
+		t.Errorf("domain AcceptableUse = %s; want allowed", dom.AcceptableUse.String())
+	}
 }

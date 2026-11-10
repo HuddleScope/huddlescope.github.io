@@ -98,22 +98,51 @@ make check
 
 ### Source Configuration
 
-Sources define RSS feed URLs with optional fetch intervals:
+Sources define RSS feed URLs with optional fetch intervals and registry metadata:
 
 ```bash
 # Single source with 5-minute interval
 HSC_SOURCES=nfl-news,NFL News,http://example.com,300
 
-# Multiple sources
-HSC_SOURCES=nfl-news,NFL News,http://a.com,300;nfl-updates,NFL Updates,http://b.com
+# Multiple sources with registry fields
+HSC_SOURCES=nfl-news,NFL News,http://a.com,300,1,true,ESPN,en,60,RSS syndication permitted,allowed
 ```
 
-Format: `id,name,url[,interval];id,name,url[,interval];...`
+Format: `id,name,url[,interval][,priority][,enabled][,publication][,language][,timeout][,license][,accept-use];...`
 
 - `id`: Unique identifier (used for deduplication and per-source overrides)
 - `name`: Human-readable name
 - `url`: HTTP/HTTPS feed URL
 - `interval`: Optional fetch interval in seconds (default: 900 = 15 minutes)
+- `priority`: Lower number polled first; tiebreak by ID (default: 0)
+- `enabled`: true to poll, false to skip (default: true)
+- `publication`: Publisher name for display (optional)
+- `language`: BCP-47 language tag (e.g., en, es) (default: en)
+- `timeout`: Per-source HTTP timeout in seconds (default: 0 = global)
+- `license`: License or acceptable-use notes (optional)
+- `accept-use`: allowed/restricted/unknown (default: unknown)
+
+See `internal/feeds/README.md` for the curated list of NFL feeds and instructions on how to add/remove feeds without code changes.
+
+### Runtime Status
+
+The application tracks runtime polling status for each source:
+- Last attempt timestamp
+- Success/failure flag
+- Error details (if failed)
+
+Status is recorded in memory and logged. For persistent tracking, check application logs or integrate with monitoring.
+
+### Feed Registry
+
+HuddleScope includes a curated list of NFL RSS/Atom feeds in `internal/feeds/`. The registry supports:
+
+- **Per-source failure isolation**: One failing source never blocks others
+- **Priority-based ordering**: Sources polled in priority order
+- **Selective disabling**: Set `enabled=false` to skip a source without deleting it
+- **Acceptable-use policy**: Mark restricted/paywalled feeds appropriately
+
+See `internal/feeds/README.md` for how to add or remove feeds without code changes.
 
 ### Production Mode
 

@@ -13,6 +13,7 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
 	"github.com/HuddleScope/huddlescope.github.io/internal/config"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
+	"github.com/HuddleScope/huddlescope.github.io/internal/feeds"
 )
 
 func main() {
@@ -41,20 +42,54 @@ func main() {
 
 	// Build application with adapters
 	repo := storage.NewMemoryRepository()
-	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
-		{
-			Title:       "Test Story",
-			Source:      "test-feed",
-			PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-			Summary:     "Test summary",
-			URL:         "https://example.com/test",
-		},
-	})
 
-	app := application.New(
-		application.WithRepository(repo),
-		application.WithFeedFetchers(fetcher),
-	)
+	// Try to load registry from feeds seed data
+	registry, registryErr := feeds.Load()
+	if registryErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load feed registry: %v\n", registryErr)
+	}
+
+	var appOpts []application.Option
+	appOpts = append(appOpts, application.WithRepository(repo))
+
+	if registry != nil {
+		// Use registry-driven ingestion
+		// For now, map all sources to the same StaticFetcher (placeholder for HTTP fetcher)
+		// Each source gets its own fetcher to enable per-source isolation
+		sourceFetchers := make(map[string]domain.FeedFetcher)
+		for _, src := range registry.All() {
+			// For demo, use a fetcher that returns the source metadata as a single entry
+			// In production, this would resolve a real HTTP fetcher
+			feedEntries := make([]domain.FeedEntry, 0)
+			// If this is a known enabled source, return some sample entries
+			if src.Enabled {
+				feedEntries = append(feedEntries, domain.FeedEntry{
+					Title:       src.Publication + " Feed Entry",
+					Source:      src.ID,
+					PublishedAt: time.Now().UTC(),
+					Summary:     "Sample feed entry from " + src.Publication,
+					URL:         src.URL,
+				})
+			}
+			sourceFetchers[src.ID] = rss.NewStaticFetcher(feedEntries)
+		}
+		appOpts = append(appOpts, application.WithRegistry(registry))
+		appOpts = append(appOpts, application.WithFetcherMap(sourceFetchers))
+	} else {
+		// Fallback to legacy static fetcher
+		fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
+			{
+				Title:       "Test Story",
+				Source:      "test-feed",
+				PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+				Summary:     "Test summary",
+				URL:         "https://example.com/test",
+			},
+		})
+		appOpts = append(appOpts, application.WithFeedFetchers(fetcher))
+	}
+
+	app := application.New(appOpts...)
 
 	result := app.RunIngest(context.Background())
 
