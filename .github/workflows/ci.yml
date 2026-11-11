@@ -64,7 +64,7 @@ jobs:
         run: make lint
 
       - name: Security (gosec, govulncheck)
-        run: make security GOVULNCHECK="go run golang.org/x/vuln/cmd/govulncheck@v1.9.0"
+        run: make security
 
       - name: Coverage gate (>= 80% on internal packages)
         run: make check-coverage
