@@ -2,12 +2,110 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
+
+// TestExtractTeams tests the extractTeams helper function
+func TestExtractTeams(t *testing.T) {
+	teamRegistry := domain.NewTeamRegistry(
+		domain.Team{
+			Slug:         "packers",
+			Name:         "Green Bay Packers",
+			ShortName:    "Packers",
+			Abbreviation: "GB",
+		},
+	)
+
+	tests := []struct {
+		name             string
+		story            domain.Story
+		registry         *domain.TeamRegistry
+		expectedEntities []string
+	}{
+		{
+			name: "nil registry returns unchanged story",
+			story: domain.Story{
+				ID:       "test",
+				Title:    "Test",
+				Summary:  "Summary",
+				Entities: []string{"entity-1"},
+			},
+			registry:         nil,
+			expectedEntities: []string{"entity-1"},
+		},
+		{
+			name: "extracts teams from title",
+			story: domain.Story{
+				ID:       "test",
+				Title:    "Packers win",
+				Summary:  "Summary",
+				Entities: []string{},
+			},
+			registry:         teamRegistry,
+			expectedEntities: []string{"packers"},
+		},
+		{
+			name: "extracts teams from summary",
+			story: domain.Story{
+				ID:       "test",
+				Title:    "Game",
+				Summary:  "Packers win",
+				Entities: []string{},
+			},
+			registry:         teamRegistry,
+			expectedEntities: []string{"packers"},
+		},
+		{
+			name: "merges existing entities with extracted",
+			story: domain.Story{
+				ID:       "test",
+				Title:    "Packers game",
+				Summary:  "vs Bears",
+				Entities: []string{"existing-entity"},
+			},
+			registry:         teamRegistry,
+			expectedEntities: []string{"existing-entity", "packers"},
+		},
+		{
+			name: "no duplicates when entity exists",
+			story: domain.Story{
+				ID:       "test",
+				Title:    "Packers game",
+				Summary:  "Summary",
+				Entities: []string{"packers"},
+			},
+			registry:         teamRegistry,
+			expectedEntities: []string{"packers"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractTeams(tt.story, tt.registry)
+
+			if !slicesEqual(result.Entities, tt.expectedEntities) {
+				t.Errorf("Entities mismatch: got %v, want %v", result.Entities, tt.expectedEntities)
+			}
+		})
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
 func TestNewGroupingResult(t *testing.T) {
 	result := NewGroupingResult()
@@ -356,8 +454,194 @@ func TestRunIngestWithRegistry(t *testing.T) {
 // mockFetcher is a mock FeedFetcher that returns predefined entries
 type mockFetcher struct {
 	entries []domain.FeedEntry
+	fail    bool
+	failMsg string
 }
 
 func (m *mockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+	if m.fail {
+		return nil, fmt.Errorf("fetcher error: %s", m.failMsg)
+	}
 	return m.entries, nil
+}
+
+// TestRunIngestWithRegistryFetchError tests the error path in runIngestWithRegistry
+func TestRunIngestWithRegistryFetchError(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:            "failing-feed",
+		URL:           "https://example.com/fail",
+		Publication:   "Failing Feed",
+		Priority:      1,
+		Enabled:       true,
+		Language:      "en",
+		License:       "Test license",
+		AcceptableUse: domain.AcceptanceAllowed,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create registry: %v", err)
+	}
+
+	// Create fetcher that fails
+	fetcher := &mockFetcher{fail: true, failMsg: "network error"}
+
+	app := New(
+		WithRepository(repo),
+		WithRegistry(registry),
+		WithFetcherMap(map[string]domain.FeedFetcher{"failing-feed": fetcher}),
+	)
+	result := app.RunIngest(context.Background())
+
+	// Should have errors from fetch failure
+	if len(result.Errors) == 0 {
+		t.Errorf("Expected errors from fetch failure, got none")
+	}
+	if result.EntriesFetched != 0 {
+		t.Errorf("Expected 0 entries fetched on failure, got %d", result.EntriesFetched)
+	}
+	if result.StoriesCreated != 0 {
+		t.Errorf("Expected 0 stories created on failure, got %d", result.StoriesCreated)
+	}
+}
+
+func TestRunIngestWithMissingFetcherInMap(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// Create registry with source that is NOT in fetcherMap
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:            "missing-feed",
+		URL:           "https://example.com/missing",
+		Publication:   "Missing Feed",
+		Priority:      1,
+		Enabled:       true,
+		Language:      "en",
+		License:       "Test license",
+		AcceptableUse: domain.AcceptanceAllowed,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create registry: %v", err)
+	}
+
+	// Empty fetcher map - missing-feed will get fallback fetcher
+	app := New(
+		WithRepository(repo),
+		WithRegistry(registry),
+		WithFetcherMap(map[string]domain.FeedFetcher{}),
+	)
+	result := app.RunIngest(context.Background())
+
+	// Should NOT have errors since fallback fetcher is used
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected no errors (fallback fetcher used), got %v", result.Errors)
+	}
+	// Fallback fetcher returns empty entries
+	if result.EntriesFetched != 0 {
+		t.Errorf("Expected 0 entries with fallback fetcher, got %d", result.EntriesFetched)
+	}
+	if result.StoriesCreated != 0 {
+		t.Errorf("Expected 0 stories created, got %d", result.StoriesCreated)
+	}
+}
+
+// TestRunIngestWithTeamRegistry tests extractTeams path
+func TestRunIngestWithTeamRegistry(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// Create a registry with known team patterns
+	teamRegistry := domain.NewTeamRegistry(
+		domain.Team{
+			Slug:         "packers",
+			Name:         "Green Bay Packers",
+			ShortName:    "Packers",
+			Abbreviation: "GB",
+			Aliases:      []string{"GB Packers"},
+		},
+		domain.Team{
+			Slug:         "bears",
+			Name:         "Chicago Bears",
+			ShortName:    "Bears",
+			Abbreviation: "CHI",
+			Aliases:      []string{"Chicago Football Club"},
+		},
+	)
+
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:            "nfl-feed",
+		URL:           "https://example.com/nfl",
+		Publication:   "NFL News",
+		Priority:      1,
+		Enabled:       true,
+		Language:      "en",
+		License:       "Test license",
+		AcceptableUse: domain.AcceptanceAllowed,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create registry: %v", err)
+	}
+
+	fetcher := &mockFetcher{entries: []domain.FeedEntry{
+		{
+			Title:       "Packers beat Bears",
+			Source:      "nfl-feed",
+			PublishedAt: time.Now().UTC(),
+			Summary:     "Green Bay won against Chicago",
+			URL:         "https://example.com/1",
+			GUID:        "guid-1",
+		},
+	}}
+
+	app := New(
+		WithRepository(repo),
+		WithRegistry(registry),
+		WithFetcherMap(map[string]domain.FeedFetcher{"nfl-feed": fetcher}),
+		WithTeamRegistry(teamRegistry),
+	)
+	result := app.RunIngest(context.Background())
+
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected no errors, got %v", result.Errors)
+	}
+	if result.StoriesCreated != 1 {
+		t.Errorf("Expected 1 story created, got %d", result.StoriesCreated)
+	}
+
+	// Check that team entities were extracted
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("Failed to list: %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("Expected 1 story, got %d", len(stories))
+	}
+
+	// The story should have both original entities and extracted teams
+	var hasPackers, hasBears bool
+	for _, e := range stories[0].Entities {
+		if e == "packers" {
+			hasPackers = true
+		}
+		if e == "bears" {
+			hasBears = true
+		}
+	}
+	if !hasPackers {
+		t.Errorf("Expected 'packers' entity from team extraction, got %v", stories[0].Entities)
+	}
+	if !hasBears {
+		t.Errorf("Expected 'bears' entity from team extraction, got %v", stories[0].Entities)
+	}
+}
+
+func TestRunExportEmptyRepository(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	app := New(WithRepository(repo))
+	result := app.RunExport(context.Background())
+
+	if result.StoriesExported != 0 {
+		t.Errorf("Expected 0 stories exported for empty repo, got %d", result.StoriesExported)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected no errors for empty repo, got %v", result.Errors)
+	}
 }
