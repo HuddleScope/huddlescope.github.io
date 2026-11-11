@@ -24,7 +24,7 @@ teams:
       - balt ravs
       - balt ravens
       - ravens
-    division: afc east
+    division: afc north
 
   - slug: buffalo-bills
     name: Buffalo Bills
@@ -201,7 +201,7 @@ teams:
       - n y jets
       - new york jets
       - jets
-    division: nfc east
+    division: afc east
 
   - slug: philadelphia-eagles
     name: Philadelphia Eagles
