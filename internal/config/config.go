@@ -506,7 +506,6 @@ func (c *Config) loadTeamsFromYAML() ([]Team, error) {
 	return teams, nil
 }
 
-
 // loadEnvFile loads key=value pairs from a file.
 // #nosec G304: path comes from operator --config flag or env, not untrusted input
 func loadEnvFile(path string, cfg *Config) error {
