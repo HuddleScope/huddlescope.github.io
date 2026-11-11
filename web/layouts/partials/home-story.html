@@ -10,7 +10,7 @@
       <a href="{{ $primary.url }}" rel="noopener nofollow" aria-label="{{ $story.title }} — read original article">{{ $story.title }}</a>
     </h{{ if .featured }}1{{ else }}2{{ end }}>
     {{ if $story.evidenceLevel }}
-      <span class="story-evidence story-evidence-{{ $story.evidenceLevel }}" role="img" aria-label="{{ $story.evidenceLevel }}: {{ i18n (printf "evidence.%s" $story.evidenceLevel) }}">
+      <span class="story-evidence story-evidence-{{ $story.evidenceLevel }}" role="img" aria-label="Evidence: {{ $story.evidenceLevel }}">
         {{ if eq $story.evidenceLevel "unverified" }}⚠️{{ end }}
         {{ if eq $story.evidenceLevel "confirmed" }}✅{{ end }}
         {{ if eq $story.evidenceLevel "unknown" }}ℹ️{{ end }}

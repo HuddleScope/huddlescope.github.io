@@ -12,16 +12,17 @@
       </p>
 
       {{ $stories := .stories }}
-      {{ $len := len $stories }}
+      {{ $sorted := sort $stories "score" "desc" }}
+      {{ $len := len $sorted }}
 
       {{ if gt $len 0 }}
-        {{ $featured := index $stories 0 }}
+        {{ $featured := index $sorted 0 }}
         <section class="featured-story" aria-labelledby="featured-heading">
           <h2 id="featured-heading">Featured story</h2>
           {{ partial "home-story.html" (dict "featured" true "story" $featured) }}
         </section>
 
-        {{ $ranked := first 10 $stories }}
+        {{ $ranked := first 10 $sorted }}
         {{ if gt (len $ranked) 1 }}
           <section class="ranked-stories" aria-labelledby="ranked-heading">
             <h2 id="ranked-heading">Top ranked stories</h2>
@@ -54,11 +55,6 @@
           <p>Check back soon for the latest NFL news stories.</p>
         </div>
       {{ end }}
-
-      <p class="content-meta">
-        Data as of {{ .Site.Data.homepage.generatedAt }}.
-        This is not a live or real-time dashboard.
-      </p>
     {{ else }}
       <div class="no-content">
         <p>Story data unavailable. Please check back soon.</p>

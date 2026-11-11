@@ -8,7 +8,7 @@ This directory contains the Hugo source for the HuddleScope web site.
 - `layouts/` — Hugo templates (base, home, list, single, partials)
 - `assets/css/main.css` — responsive, mobile-first styles with dark mode
 - `assets/js/main.js` — minimal, no tracking
-- `data/` — data files consumed by Hugo (see `data/README.md`)
+- `data/` — data files consumed by Hugo (see `README-data.md`)
 - `static/` — static assets (favicon, etc.)
 - `hugo.toml` — site configuration
 

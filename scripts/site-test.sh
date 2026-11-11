@@ -207,7 +207,15 @@ if ! grep -q 'aria-labelledby' "$WEB_DIR/public/index.html"; then
   exit 1
 fi
 
-log "PASS: HS-015 homepage assertions"
+# HS-015: Verify featured story is top-scored (score sort F1 guard)
+FEATURED_SCORE=$(grep -o 'class="story-score"[^>]*>[0-9.]*' "$WEB_DIR/public/index.html" | head -1 | sed 's/.*>//')
+MAX_SCORE=$(grep -o 'class="story-score"[^>]*>[0-9.]*' "$WEB_DIR/public/index.html" | sed 's/.*>//g' | sort -n | tail -1)
+if [ "$FEATURED_SCORE" != "$MAX_SCORE" ]; then
+  log "FAIL: featured story score ($FEATURED_SCORE) != max score ($MAX_SCORE)"
+  exit 1
+fi
+
+log "PASS: HS-015 homepage assertions (featured is top-scored)"
 # SUMMARY
 # =============================================================================
 log "=== All site tests passed ==="
