@@ -22,23 +22,23 @@ type StoryPageKey string
 
 // StoryDetailPage represents a single, canonical story page with metadata from all sources.
 type StoryDetailPage struct {
-	Slug         StorySlug
-	Path         StoryPath
-	StoryID      string
-	Headline     string
+	Slug             StorySlug
+	Path             StoryPath
+	StoryID          string
+	Headline         string
 	FirstPublishedAt time.Time
-	LastPublishedAt time.Time
-	FirstSeenAt  time.Time
-	Articles     []PublisherArticle
+	LastPublishedAt  time.Time
+	FirstSeenAt      time.Time
+	Articles         []PublisherArticle
 }
 
 // PublisherArticle is a metadata-only representation of a source article.
 // It intentionally omits full article body/content to avoid publishing copyrighted material.
 type PublisherArticle struct {
-	SourceID   string
-	SourceName string // resolved via SourceNameResolver
-	Title      string
-	URL        string
+	SourceID    string
+	SourceName  string // resolved via SourceNameResolver
+	Title       string
+	URL         string
 	PublishedAt time.Time
 }
 
@@ -110,14 +110,14 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 	slug := StorySlug(ComputeStorySlugFromHeadline(rep.Title))
 
 	page := StoryDetailPage{
-		Slug:              slug,
-		Path:              StoryPath("/stories/" + string(slug) + "/"),
-		StoryID:           group.ID,
-		Headline:          group.Headline,
-		FirstPublishedAt:  group.FirstPublishedAt,
-		LastPublishedAt:   group.LastPublishedAt,
-		FirstSeenAt:       now.UTC(),
-		Articles:          articles,
+		Slug:             slug,
+		Path:             StoryPath("/stories/" + string(slug) + "/"),
+		StoryID:          group.ID,
+		Headline:         group.Headline,
+		FirstPublishedAt: group.FirstPublishedAt,
+		LastPublishedAt:  group.LastPublishedAt,
+		FirstSeenAt:      now.UTC(),
+		Articles:         articles,
 	}
 
 	return page, nil
@@ -198,7 +198,7 @@ type StoryPagePublisher interface {
 
 // StoryPageResult captures the result of a page build operation.
 type StoryPageResult struct {
-	Page      StoryDetailPage
-	BuildTime time.Time
+	Page         StoryDetailPage
+	BuildTime    time.Time
 	ArticleCount int
 }

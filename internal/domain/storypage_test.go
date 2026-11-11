@@ -203,10 +203,10 @@ func TestBuildEmptyGroupErrors(t *testing.T) {
 	resolver := NewStaticSourceResolver(map[string]string{})
 
 	group := StoryGroup{
-		ID:          "empty-group",
-		Headline:    "Empty Group",
-		Articles:    []Article{},
-		CreatedAt:   time.Now(),
+		ID:        "empty-group",
+		Headline:  "Empty Group",
+		Articles:  []Article{},
+		CreatedAt: time.Now(),
 	}
 
 	_, err := BuildStoryDetailPage(group, resolver, time.Now())
@@ -240,10 +240,10 @@ func TestBuildAllInvalidErrors(t *testing.T) {
 	resolver := NewStaticSourceResolver(map[string]string{})
 
 	group := StoryGroup{
-		ID:          "invalid-group",
-		Headline:    "Invalid Group",
-		Articles:    articles,
-		CreatedAt:   time.Now(),
+		ID:        "invalid-group",
+		Headline:  "Invalid Group",
+		Articles:  articles,
+		CreatedAt: time.Now(),
 	}
 
 	_, err := BuildStoryDetailPage(group, resolver, time.Now())

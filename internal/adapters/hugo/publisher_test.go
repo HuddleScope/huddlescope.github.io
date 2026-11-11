@@ -21,17 +21,17 @@ func TestRenderMarkdown(t *testing.T) {
 		FirstSeenAt:      time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC),
 		Articles: []domain.PublisherArticle{
 			{
-				SourceID:   "espn-nfl",
-				SourceName: "ESPN",
-				Title:      "Test Article 1",
-				URL:        "https://espn.com/1",
+				SourceID:    "espn-nfl",
+				SourceName:  "ESPN",
+				Title:       "Test Article 1",
+				URL:         "https://espn.com/1",
 				PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
 			},
 			{
-				SourceID:   "nfl-com",
-				SourceName: "NFL.com",
-				Title:      "Test Article 2",
-				URL:        "https://nfl.com/2",
+				SourceID:    "nfl-com",
+				SourceName:  "NFL.com",
+				Title:       "Test Article 2",
+				URL:         "https://nfl.com/2",
 				PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
 			},
 		},
@@ -86,11 +86,11 @@ func TestRenderMarkdown(t *testing.T) {
 func TestRenderMarkdownNoBodyOrImages(t *testing.T) {
 	// AC3: metadata only - no article body or unlicensed images
 	page := domain.StoryDetailPage{
-		Slug:          "test-page",
-		Path:          "/stories/test-page/",
-		StoryID:       "test-123",
-		Headline:      "Test",
-		Articles:      []domain.PublisherArticle{{Title: "Art", URL: "https://example.com"}},
+		Slug:     "test-page",
+		Path:     "/stories/test-page/",
+		StoryID:  "test-123",
+		Headline: "Test",
+		Articles: []domain.PublisherArticle{{Title: "Art", URL: "https://example.com"}},
 	}
 
 	markdown, _ := RenderMarkdown(page, "")
@@ -115,10 +115,10 @@ func TestPublishSuccess(t *testing.T) {
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
 
 	page := domain.StoryDetailPage{
-		Slug:          "test-page",
-		Path:          "/stories/test-page/",
-		StoryID:       "test-123",
-		Headline:      "Test Page",
+		Slug:             "test-page",
+		Path:             "/stories/test-page/",
+		StoryID:          "test-123",
+		Headline:         "Test Page",
 		FirstPublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		LastPublishedAt:  time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		FirstSeenAt:      time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -149,10 +149,10 @@ func TestPublishIdempotent(t *testing.T) {
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
 
 	page := domain.StoryDetailPage{
-		Slug:          "test-page",
-		Path:          "/stories/test-page/",
-		StoryID:       "test-123",
-		Headline:      "Test Page",
+		Slug:             "test-page",
+		Path:             "/stories/test-page/",
+		StoryID:          "test-123",
+		Headline:         "Test Page",
 		FirstPublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		LastPublishedAt:  time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		FirstSeenAt:      time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -193,10 +193,10 @@ func TestPublishIdempotent(t *testing.T) {
 func TestPublishEmptyErrors(t *testing.T) {
 	p := NewPublisher("", "https://huddlescope.github.io")
 	page := domain.StoryDetailPage{
-		Slug:          "test",
-		Path:          "/stories/test/",
-		StoryID:       "test",
-		Headline:      "Test",
+		Slug:     "test",
+		Path:     "/stories/test/",
+		StoryID:  "test",
+		Headline: "Test",
 	}
 
 	err := p.Publish(context.Background(), page)
@@ -208,10 +208,10 @@ func TestPublishEmptyErrors(t *testing.T) {
 func TestPublishBadDir(t *testing.T) {
 	p := NewPublisher("/nonexistent/path/that/should/not/exist", "https://huddlescope.github.io")
 	page := domain.StoryDetailPage{
-		Slug:          "test",
-		Path:          "/stories/test/",
-		StoryID:       "test",
-		Headline:      "Test",
+		Slug:     "test",
+		Path:     "/stories/test/",
+		StoryID:  "test",
+		Headline: "Test",
 	}
 
 	err := p.Publish(context.Background(), page)
@@ -223,10 +223,10 @@ func TestPublishBadDir(t *testing.T) {
 func TestNoopPublisher(t *testing.T) {
 	var p NoopPublisher
 	page := domain.StoryDetailPage{
-		Slug:          "test",
-		Path:          "/stories/test/",
-		StoryID:       "test",
-		Headline:      "Test",
+		Slug:     "test",
+		Path:     "/stories/test/",
+		StoryID:  "test",
+		Headline: "Test",
 	}
 
 	// Should succeed without writing anything
@@ -247,10 +247,10 @@ func TestPublishEmptyPageErrors(t *testing.T) {
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
 
 	page := domain.StoryDetailPage{
-		Slug:          "", // Empty slug
-		Path:          "",
-		StoryID:       "",
-		Headline:      "",
+		Slug:     "", // Empty slug
+		Path:     "",
+		StoryID:  "",
+		Headline: "",
 	}
 
 	err = p.Publish(context.Background(), page)
