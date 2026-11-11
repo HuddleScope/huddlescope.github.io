@@ -27,7 +27,7 @@ Exponential decay based on age since first article publication.
 
 ```
 decay = age / halfLife
-FreshnessScore = 100 × (1 - 1/(1 + decay))
+FreshnessScore = 100 × (1 / (1 + decay))
 ```
 
 Default half-life: 12 hours.
