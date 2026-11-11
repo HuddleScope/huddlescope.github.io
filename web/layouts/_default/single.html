@@ -1,0 +1,31 @@
+{{ define "main" }}
+  <section class="content-single">
+    <article>
+      <header>
+        <h1 class="content-title">{{ .Title }}</h1>
+        {{ if .Params.source }}
+        <p class="content-source">Source: {{ .Params.source }}</p>
+        {{ end }}
+        <time class="content-date" datetime="{{ .PublishDate.Format "2006-01-02T15:04:05Z07:00" }}">
+          {{ .PublishDate.Format "January 2, 2006" }}
+        </time>
+      </header>
+      <div class="content-body">
+        {{ .Content }}
+      </div>
+      {{ if .Params.entities }}
+      <aside class="content-entities">
+        <h3>Entities</h3>
+        <ul>
+          {{ range .Params.entities }}
+            <li>{{ . }}</li>
+          {{ end }}
+        </ul>
+      </aside>
+      {{ end }}
+      <nav class="content-links">
+        <a href="{{ .Params.url }}" target="_blank" rel="noopener noreferrer">Read original article</a>
+      </nav>
+    </article>
+  </section>
+{{ end }}

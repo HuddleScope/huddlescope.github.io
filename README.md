@@ -25,7 +25,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 | `internal/adapters/rss` | RSS feed fetching adapter |
 | `internal/adapters/storage` | Storage adapters (in-memory, Turso, file) |
 | `internal/config` | Configuration loading and validation |
-| `web/` | Hugo site source (generated) |
+| `web/` | Hugo site source (see Website section below) |
 | `scheduler/` | Scheduled tasks (TBD) |
 | `migrations/` | Database migrations (TBD) |
 | `docs/` | Project documentation |
@@ -57,6 +57,8 @@ make check
 ```
 
 ### Available Make targets
+
+**Go targets**
 - `make help` — Show all available targets
 - `make fmt` — Format Go files with gofmt
 - `make lint` — Run golangci-lint
@@ -65,6 +67,12 @@ make check
 - `make security` — Run gosec security scanner
 - `make build` — Build binaries to dist/
 - `make clean` — Remove build artifacts
+- `make check` — Run fmt, lint, test, coverage, security
+
+**Site targets**
+- `make site` — Build Hugo site to web/public/
+- `make site-test` — Run site verification (success/failure/idempotency)
+- `make site-watch` — Run Hugo server locally
 
 ### Run ingest (fetch feeds)
 ```sh
@@ -79,6 +87,50 @@ make check
 # or with config:
 ./dist/export -config .env
 ```
+
+## Website (Hugo)
+
+The site is built with Hugo and hosted as a static site.
+
+### Prerequisites
+- Hugo 0.169.0+ (extended build recommended)
+
+### Build
+```sh
+make site
+# Site builds to web/public/
+```
+
+### Verify (CI tests: success/failure/idempotency)
+```sh
+make site-test
+```
+
+### Local development
+```sh
+make site-watch
+# Runs Hugo server on http://localhost:1313
+```
+
+### Available site Make targets
+- `make site` — Build site to web/public/
+- `make site-test` — Run site verification tests
+- `make site-watch` — Run Hugo server in watch mode
+
+### Content structure
+- `web/content/_index.md` — Homepage
+- `web/content/stories/*.md` — Story pages
+- `web/content/sources/*.md` — Source pages
+- `web/content/about.md` — About page
+
+### Customization
+- Edit `web/layouts/` for template changes
+- Edit `web/assets/css/main.css` for styles
+- Edit `web/static/js/main.js` for JS enhancements (minimal, no tracking)
+
+### Deployment
+The built site in `web/public/` can be deployed to GitHub Pages, Netlify, Vercel, or any static host.
+See issue #17 for Turso→Hugo JSON export and automated deployment.
 
 ## Configuration
 
@@ -187,6 +239,15 @@ Invalid production configuration causes the application to fail with a clear err
 - The `.env` file is git-ignored (see `.gitignore`)
 
 ## Legal
+
+### Content
 - This project does not commit full copyrighted articles.
 - No unlicensed images are stored or distributed.
 - All data comes from publicly available RSS feeds; users are responsible for complying with feed source terms of service.
+
+### Privacy
+- No external tracking scripts (Google Analytics, Facebook Pixel, etc.)
+- No cookies or persistent storage beyond browser caching
+- No user profiling or behavioral tracking
+
+See `web/content/about.md` for more details.

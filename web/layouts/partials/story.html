@@ -1,0 +1,28 @@
+<article class="story-card">
+  <header class="story-header">
+    <h2 class="story-title">
+      <a href="{{ .Permalink }}">{{ .Title }}</a>
+    </h2>
+    {{ if .Params.source }}
+    <p class="story-source">
+      <a href="{{ .Params.sourceURL | default "/sources/" }}">{{ .Params.source }}</a>
+    </p>
+    {{ end }}
+    <time class="story-date" datetime="{{ .PublishDate.Format "2006-01-02T15:04:05Z07:00" }}">
+      {{ .PublishDate.Format "January 2, 2006" }}
+    </time>
+  </header>
+  <div class="story-summary">
+    {{ .Summary }}
+  </div>
+  <div class="story-meta">
+    {{ if .Params.entities }}
+    <ul class="story-entities">
+      {{ range .Params.entities }}
+        <li class="entity">{{ . }}</li>
+      {{ end }}
+    </ul>
+    {{ end }}
+    <a class="read-more" href="{{ .Permalink }}" aria-label="Read more: {{ .Title }}">Read more</a>
+  </div>
+</article>

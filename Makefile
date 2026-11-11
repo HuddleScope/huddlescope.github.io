@@ -74,5 +74,21 @@ clean: ## Remove build artifacts
 	$(RM) -r $(PREFIX)
 	$(RM) coverage.out
 
+# Site (Hugo)
+site: ## Build Hugo site from web/ directory
+	$(MAKE) site-check-hugo
+	hugo -s web
+
+site-check-hugo:
+	@command -v hugo >/dev/null 2>&1 || { echo "Error: hugo not found in PATH"; exit 1; }
+	@echo "Hugo version: $$(hugo version | head -1)"
+
+site-test: ## Run site build verification (success/failure/idempotency)
+	@bash scripts/site-test.sh
+
+site-watch: ## Run Hugo in watch mode for local development
+	$(MAKE) site-check-hugo
+	hugo server -s web
+
 # Phony targets
-.PHONY: help fmt lint test coverage check-coverage security build check clean
+.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-watch

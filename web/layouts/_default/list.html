@@ -1,0 +1,18 @@
+{{ define "main" }}
+  <section class="content-list">
+    <h1 class="content-title">{{ .Title }}</h1>
+    <p class="content-intro">{{ .Params.description | default "" }}</p>
+
+    {{ if .Pages }}
+    <div class="list-grid">
+      {{ range .Pages }}
+        {{ partial "story.html" . }}
+      {{ end }}
+    </div>
+    {{ else }}
+    <div class="no-content">
+      <p>No {{ .Title | lower }} published yet.</p>
+    </div>
+    {{ end }}
+  </section>
+{{ end }}
