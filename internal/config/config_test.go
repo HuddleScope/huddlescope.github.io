@@ -870,3 +870,46 @@ func TestLoadSourcesFromYAML(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_LookbackWindow(t *testing.T) {
+	tests := []struct {
+		name     string
+		lookback string
+		want     time.Duration
+		wantErr  bool
+	}{
+		{"default", "", defaultLookbackWindow, false},
+		{"12 hours", "12h", 12 * time.Hour, false},
+		{"24 hours", "24h", 24 * time.Hour, false},
+		{"1 day", "24h0m0s", 24 * time.Hour, false},
+		{"negative", "-1h", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load("")
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if tt.lookback != "" {
+				t.Setenv("HSC_LOOKBACK", tt.lookback)
+				if tt.name == "negative" {
+					// Negative lookback should fail validation
+					cfg.LookbackWindow = -1 * time.Hour
+				} else {
+					cfg, err = Load("")
+					if err != nil {
+						t.Fatalf("Load() error = %v", err)
+					}
+				}
+			}
+			err = cfg.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Config.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && cfg.LookbackWindow != tt.want {
+				t.Errorf("LookbackWindow = %v, want %v", cfg.LookbackWindow, tt.want)
+			}
+		})
+	}
+}

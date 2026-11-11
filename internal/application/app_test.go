@@ -727,3 +727,151 @@ func TestWithFetcherResolver(t *testing.T) {
 		t.Fatal("Expected non-nil Application")
 	}
 }
+
+// TestRunPipelineSuccessWithOneSource tests RunPipeline with one successful source.
+func TestRunPipelineSuccessWithOneSource(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:            "test-feed",
+		URL:           "https://example.com/feed",
+		Publication:   "Test Feed",
+		Priority:      1,
+		Enabled:       true,
+		Language:      "en",
+		License:       "Test license",
+		AcceptableUse: domain.AcceptanceAllowed,
+	})
+	if err != nil {
+		t.Fatalf("NewFeedRegistry() error = %v", err)
+	}
+	fetcher := &mockFetcher{entries: []domain.FeedEntry{
+		{Title: "Story 1", Source: "test-feed", PublishedAt: time.Now().UTC(), Summary: "Summary 1", URL: "https://example.com/1"},
+	}}
+	publisher := &TestPublisher{}
+	app := New(
+		WithRepository(repo),
+		WithRegistry(registry),
+		WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}),
+		WithClusterer(domain.NewClusterer()),
+		WithScorer(domain.NewScorer()),
+		WithPublisher(publisher),
+		WithLookback(24*time.Hour),
+	)
+	result := app.RunPipeline(context.Background(), time.Now())
+	if result.Status != domain.RunStatusOK {
+		t.Errorf("Status = %s, want OK", result.Status)
+	}
+	if result.Homepage == nil {
+		t.Error("Homepage should not be nil")
+	}
+}
+
+// TestRebuildRankingSuccessWithStories tests RebuildRanking with existing stories.
+func TestRebuildRankingSuccessWithStories(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	_, _ = repo.Upsert(domain.Story{
+		ID:          "story-1",
+		Title:       "Story 1",
+		Source:      "feed1",
+		PublishedAt: time.Now().UTC().Add(-1 * time.Hour),
+		Summary:     "Summary 1",
+		Entities:    []string{"team-a"},
+	})
+	_, _ = repo.Upsert(domain.Story{
+		ID:          "story-2",
+		Title:       "Story 2",
+		Source:      "feed2",
+		PublishedAt: time.Now().UTC().Add(-30 * time.Minute),
+		Summary:     "Summary 2",
+		Entities:    []string{"team-a"},
+	})
+	app := New(
+		WithRepository(repo),
+		WithClusterer(domain.NewClusterer()),
+		WithScorer(domain.NewScorer()),
+		WithLookback(24*time.Hour),
+	)
+	result := app.RebuildRanking(context.Background(), time.Now())
+	if result.Status != domain.RunStatusOK {
+		t.Errorf("Status = %s, want OK", result.Status)
+	}
+	if result.Homepage == nil {
+		t.Error("Homepage should not be nil")
+	}
+}
+
+// TestPublisher is a test publisher implementation.
+type TestPublisher struct {
+	committed bool
+	called    int
+	failOnce  bool
+}
+
+func (p *TestPublisher) Publish(ctx context.Context, homepage domain.Homepage) error {
+	p.called++
+	if p.failOnce {
+		p.failOnce = false
+		return fmt.Errorf("publish failed (simulated)")
+	}
+	p.committed = true
+	return nil
+}
+
+func (p *TestPublisher) Committed() bool {
+	return p.committed
+}
+
+func (p *TestPublisher) Called() int {
+	return p.called
+}
+
+func (p *TestPublisher) SetFailOnce() {
+	p.failOnce = true
+}
+
+func (p *TestPublisher) Reset() {
+	p.committed = false
+	p.called = 0
+	p.failOnce = false
+}
+
+// TestRunPipelineAllPhases success path testsRunPipeline complete pipeline execution.
+func TestRunPipelineAllPhases(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	registry, err := domain.NewFeedRegistry(domain.FeedSource{
+		ID:            "test-feed",
+		URL:           "https://example.com/feed",
+		Publication:   "Test Feed",
+		Priority:      1,
+		Enabled:       true,
+		Language:      "en",
+		License:       "Test license",
+		AcceptableUse: domain.AcceptanceAllowed,
+	})
+	if err != nil {
+		t.Fatalf("NewFeedRegistry() error = %v", err)
+	}
+	fetcher := &mockFetcher{entries: []domain.FeedEntry{
+		{Title: "Story 1", Source: "test-feed", PublishedAt: time.Now().UTC(), Summary: "Summary 1", URL: "https://example.com/1"},
+	}}
+	publisher := &TestPublisher{}
+	app := New(
+		WithRepository(repo),
+		WithRegistry(registry),
+		WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}),
+		WithClusterer(domain.NewClusterer()),
+		WithScorer(domain.NewScorer()),
+		WithPublisher(publisher),
+		WithLookback(24*time.Hour),
+	)
+	result := app.RunPipeline(context.Background(), time.Now())
+	if result.Status != domain.RunStatusOK {
+		t.Errorf("Status = %s, want OK", result.Status)
+	}
+	if result.Homepage == nil || len(result.Homepage.RankedStories) == 0 {
+		t.Error("Homepage should have ranked stories")
+	}
+	if !result.Committed {
+		t.Error("Committed should be true")
+	}
+}
