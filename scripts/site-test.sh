@@ -132,6 +132,90 @@ fi
 log "PASS: idempotency path (outputs identical across builds)"
 
 # =============================================================================
+
+# =============================================================================
+# HS-015: Homepage with grouped stories and source attribution
+# =============================================================================
+
+log "TEST: HS-015 homepage assertions"
+
+# HS-015: Verify homepage contains featured section
+if ! grep -q 'Featured story' "$WEB_DIR/public/index.html"; then
+  log "FAIL: featured story section not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify homepage contains ranked/latest sections
+if ! grep -q 'Top ranked stories' "$WEB_DIR/public/index.html"; then
+  log "FAIL: top ranked stories section not found in homepage"
+  exit 1
+fi
+
+if ! grep -q 'Latest updates' "$WEB_DIR/public/index.html"; then
+  log "FAIL: latest updates section not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify timestamp and disclaimer
+if ! grep -q 'Data as of' "$WEB_DIR/public/index.html"; then
+  log "FAIL: timestamp metadata not found in homepage"
+  exit 1
+fi
+
+if ! grep -q 'not a live or real-time' "$WEB_DIR/public/index.html"; then
+  log "FAIL: real-time disclaimer not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify publisher count and coverage list
+if ! grep -q 'Covered by' "$WEB_DIR/public/index.html"; then
+  log "FAIL: publisher count text not found in homepage"
+  exit 1
+fi
+
+if ! grep -q 'coverage' "$WEB_DIR/public/index.html"; then
+  log "FAIL: coverage list not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify evidence badge (at least one unverified)
+if ! grep -q 'unverified' "$WEB_DIR/public/index.html"; then
+  log "FAIL: evidence badge (unverified) not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify disclaimer for rumour/speculation
+if ! grep -q 'Rumor/speculation' "$WEB_DIR/public/index.html"; then
+  log "FAIL: rumour/speculation disclaimer not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify basic a11y: lang on html, skip link present
+if ! grep -q 'lang="' "$WEB_DIR/public/index.html"; then
+  log "FAIL: lang attribute not found in <html>"
+  exit 1
+fi
+
+if ! grep -q 'Skip to main content' "$WEB_DIR/public/index.html"; then
+  log "FAIL: skip link not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify aria attributes on sections
+if ! grep -q 'aria-labelledby' "$WEB_DIR/public/index.html"; then
+  log "FAIL: aria-labelledby attributes not found in homepage"
+  exit 1
+fi
+
+# HS-015: Verify featured story is top-scored (score sort F1 guard)
+FEATURED_SCORE=$(grep -o 'class="story-score"[^>]*>[0-9.]*' "$WEB_DIR/public/index.html" | head -1 | sed 's/.*>//')
+MAX_SCORE=$(grep -o 'class="story-score"[^>]*>[0-9.]*' "$WEB_DIR/public/index.html" | sed 's/.*>//g' | sort -n | tail -1)
+if [ "$FEATURED_SCORE" != "$MAX_SCORE" ]; then
+  log "FAIL: featured story score ($FEATURED_SCORE) != max score ($MAX_SCORE)"
+  exit 1
+fi
+
+log "PASS: HS-015 homepage assertions (featured is top-scored)"
 # SUMMARY
 # =============================================================================
 log "=== All site tests passed ==="

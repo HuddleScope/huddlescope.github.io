@@ -1,0 +1,63 @@
+<!-- HuddleScope homepage partial — render one story card from homepage data
+     HS-015: Generate homepage with grouped stories and source attribution -->
+
+{{- $story := .story }}
+{{- $publishers := $story.publishers }}
+{{- $primary := index $publishers 0 }}
+<article class="story-card{{ if .featured }} story-card-featured{{ end }}">
+  <header class="story-header">
+    <h{{ if .featured }}1{{ else }}2{{ end }} class="story-title{{ if .featured }} story-title-featured{{ end }}">
+      <a href="{{ $primary.url }}" rel="noopener nofollow" aria-label="{{ $story.title }} — read original article">{{ $story.title }}</a>
+    </h{{ if .featured }}1{{ else }}2{{ end }}>
+    {{ if $story.evidenceLevel }}
+      <span class="story-evidence story-evidence-{{ $story.evidenceLevel }}" role="img" aria-label="Evidence: {{ $story.evidenceLevel }}">
+        {{ if eq $story.evidenceLevel "unverified" }}⚠️{{ end }}
+        {{ if eq $story.evidenceLevel "confirmed" }}✅{{ end }}
+        {{ if eq $story.evidenceLevel "unknown" }}ℹ️{{ end }}
+        {{ if eq $story.evidenceLevel "unverified" }}unverified{{ end }}
+        {{ if eq $story.evidenceLevel "confirmed" }}confirmed{{ end }}
+        {{ if eq $story.evidenceLevel "unknown" }}unknown{{ end }}
+      </span>
+    {{ end }}
+  </header>
+
+  <div class="story-source">
+    {{- $len := len $publishers }}
+    {{- if gt $len 1 }}
+      <span class="story-publishers-count">Covered by {{ $len }} independent publishers</span>
+      <ul class="story-coverage">
+        {{- range $publishers }}
+          <li class="story-coverage-item">
+            <a href="{{ .url }}" rel="noopener nofollow">{{ .name }}</a>
+          </li>
+        {{- end }}
+      </ul>
+    {{- else if eq $len 1 }}
+      <span class="story-source-single">Source: <a href="{{ $primary.url }}" rel="noopener nofollow">{{ $primary.name }}</a></span>
+    {{- end }}
+  </div>
+
+  <div class="story-meta">
+    {{- if $story.score }}
+      <span class="story-score" title="HuddleScope score (0–100)">{{ printf "%.1f" $story.score }}</span>
+    {{- end }}
+    <time class="story-date" datetime='{{ $story.lastPublishedAt }}'>
+      {{- $date := $story.lastPublishedAt }}
+      {{- $date := replace $date "T" " " }}
+      {{- $date := replace $date "Z" "" }}
+      {{- print $date }}
+    </time>
+  </div>
+
+  <div class="story-summary">
+    {{- $story.summary }}
+  </div>
+
+  {{- if $story.evidenceLevel }}
+    {{- if eq $story.evidenceLevel "unverified" }}
+      <div class="story-disclaimer">
+        Rumor/speculation: This story contains unverified claims. Information should be treated with caution.
+      </div>
+    {{- end }}
+  {{- end }}
+</article>

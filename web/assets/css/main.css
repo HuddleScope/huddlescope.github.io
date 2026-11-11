@@ -452,6 +452,164 @@ main {
   }
 }
 
+/* Story evidence badges (HS-015: rumor/speculation) */
+.story-evidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.5rem;
+}
+
+.story-evidence-unverified {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-evidence-unverified {
+    background-color: #6c757d;
+    color: #fff;
+  }
+}
+
+.story-evidence-confirmed {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-evidence-confirmed {
+    background-color: #28a745;
+    color: #fff;
+  }
+}
+
+.story-evidence-unknown {
+  background-color: #e2e3e5;
+  color: #383d41;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-evidence-unknown {
+    background-color: #6c757d;
+    color: #fff;
+  }
+}
+
+/* Featured story card */
+.story-card-featured {
+  border: 2px solid #0066cc;
+  background-color: #f0f7ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-card-featured {
+    border-color: #0052a3;
+    background-color: #1e3a8a;
+  }
+}
+
+.story-title-featured {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  margin-bottom: 0.5rem;
+}
+
+/* Story publishers and coverage list (HS-015) */
+.story-source {
+  font-size: 0.875rem;
+}
+
+.story-source-single,
+.story-publishers-count {
+  display: block;
+  margin-bottom: 0.375rem;
+}
+
+.story-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.375rem 0 0 0;
+}
+
+.story-coverage-item a {
+  color: #0066cc;
+  text-decoration: none;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  background-color: #f0f7ff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-coverage-item a {
+    background-color: #1e3a8a;
+    color: #c7d2fe;
+  }
+}
+
+.story-coverage-item a:hover,
+.story-coverage-item a:focus {
+  background-color: #0066cc;
+  color: white;
+  text-decoration: underline;
+}
+
+/* Story score badge (HS-015) */
+.story-score {
+  display: inline-block;
+  background-color: #1a1a1a;
+  color: white;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-score {
+    background-color: #f5f5f5;
+    color: #1a1a1a;
+  }
+}
+
+/* Story disclaimer (rumor/speculation) */
+.story-disclaimer {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background-color: #fff3cd;
+  border-left: 4px solid #ffc107;
+  font-size: 0.875rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .story-disclaimer {
+    background-color: #6c757d;
+    border-left-color: #ffc107;
+    color: #fff;
+  }
+}
+
+/* Content meta */
+.content-meta {
+  color: #666;
+  font-size: 0.875rem;
+  margin-top: 2rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .content-meta {
+    color: #aaa;
+  }
+}
+
 /* Form elements (for completeness) */
 input,
 select,
