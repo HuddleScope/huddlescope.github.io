@@ -1,23 +1,68 @@
 {{ define "main" }}
-  <section class="content-home">
-    <h1 class="content-title">Welcome to HuddleScope</h1>
+  <section class="content-home" aria-labelledby="home-heading">
+    <h1 class="content-title" id="home-heading">Welcome to HuddleScope</h1>
     <p class="content-intro">
       Independent NFL news discovery and story aggregation.
     </p>
 
-    {{ if .Site.RegularPages.ByDate.Reverse }}
-    <section class="latest-stories" aria-labelledby="latest-heading">
-      <h2 id="latest-heading">Latest stories</h2>
-      <div class="story-grid">
-        {{ range first 10 (where .Site.RegularPages "Type" "stories") }}
-          {{ partial "story.html" . }}
+    {{ with .Site.Data.homepage }}
+      <p class="content-meta">
+        Data as of <time datetime="{{ .generatedAt }}">{{ .generatedAt }}</time>.
+        This is not a live or real-time dashboard.
+      </p>
+
+      {{ $stories := .stories }}
+      {{ $len := len $stories }}
+
+      {{ if gt $len 0 }}
+        {{ $featured := index $stories 0 }}
+        <section class="featured-story" aria-labelledby="featured-heading">
+          <h2 id="featured-heading">Featured story</h2>
+          {{ partial "home-story.html" (dict "featured" true "story" $featured) }}
+        </section>
+
+        {{ $ranked := first 10 $stories }}
+        {{ if gt (len $ranked) 1 }}
+          <section class="ranked-stories" aria-labelledby="ranked-heading">
+            <h2 id="ranked-heading">Top ranked stories</h2>
+            <div class="story-grid">
+              {{ range after 1 $ranked }}
+                {{ partial "home-story.html" (dict "featured" false "story" .) }}
+              {{ end }}
+            </div>
+          </section>
         {{ end }}
-      </div>
-    </section>
+
+        {{ $latest := sort $stories "lastPublishedAt" "desc" | first 5 }}
+        {{ if gt (len $latest) 1 }}
+          <section class="latest-updates" aria-labelledby="latest-heading">
+            <h2 id="latest-heading">Latest updates</h2>
+            <div class="story-grid">
+              {{ range after 1 $latest }}
+                {{ partial "home-story.html" (dict "featured" false "story" .) }}
+              {{ end }}
+            </div>
+          </section>
+        {{ end }}
+
+        <p class="content-meta">
+          Showing <strong>{{ $len }}</strong> story{{ if gt $len 1 }}s{{ end }} from {{ len .stories }} story{{ if gt $len 1 }}s{{ end }} total.
+        </p>
+      {{ else }}
+        <div class="no-content" aria-labelledby="empty-heading">
+          <h2 id="empty-heading">No stories published yet</h2>
+          <p>Check back soon for the latest NFL news stories.</p>
+        </div>
+      {{ end }}
+
+      <p class="content-meta">
+        Data as of {{ .Site.Data.homepage.generatedAt }}.
+        This is not a live or real-time dashboard.
+      </p>
     {{ else }}
-    <div class="no-content">
-      <p>No stories published yet. Please check back soon.</p>
-    </div>
+      <div class="no-content">
+        <p>Story data unavailable. Please check back soon.</p>
+      </div>
     {{ end }}
   </section>
 {{ end }}
