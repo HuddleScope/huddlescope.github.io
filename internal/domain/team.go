@@ -144,7 +144,6 @@ func (r *TeamRegistry) Count() int {
 	return len(r.bySlug)
 }
 
-
 // DefaultTeamRegistry returns an empty registry.
 // DEPRECATED: Teams should be loaded from config via Config.TeamRegistry().
 // This function is kept for backward compatibility and testing only.
