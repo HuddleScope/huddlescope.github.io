@@ -1,0 +1,83 @@
+# HuddleScope Hugo configuration
+# HS-014: Bootstrap Hugo and responsive site design
+
+# Base URL (override with HUGO_BASEURL env var)
+baseURL = "https://huddlescope.github.io/"
+
+# Site metadata
+title = "HuddleScope"
+languageCode = "en"
+description = "Independent NFL news discovery and story aggregation"
+
+# Theme (none: custom implementation)
+# theme = ""  # Removed to avoid module resolution; custom implementation only
+
+# Content types
+hasCJKLanguage = false
+disableKinds = ["taxonomy", "term", "robotsTXT", "404"]
+
+# Permalinks
+[permalinks]
+  stories = "/stories/:slug/"
+  sources = "/sources/:slug/"
+
+# Markup (Goldmark)
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.extensions]
+      linkify = true
+    [markup.goldmark.renderer]
+      unsafe = false
+      hardWraps = false
+  [markup.highlight]
+    style = "monokai"
+
+# Build settings
+[build]
+  useCache = true
+  cacheDir = "resources"
+  writeStats = false
+
+# Assets pipeline (fingerprinting)
+[params]
+  assetsCache = true
+  fingerprint = true
+
+# Disable external CDNs
+disableCDN = true
+
+# Disable emoji (keep content neutral)
+enableEmoji = false
+
+# Menu
+[menu]
+  [[menu.main]]
+    identifier = "home"
+    name = "Home"
+    url = "/"
+    weight = 10
+
+  [[menu.main]]
+    identifier = "stories"
+    name = "Stories"
+    url = "/stories/"
+    weight = 20
+
+  [[menu.main]]
+    identifier = "sources"
+    name = "Sources"
+    url = "/sources/"
+    weight = 30
+
+  [[menu.main]]
+    identifier = "about"
+    name = "About"
+    url = "/about/"
+    weight = 40
+
+# Disable external services (analytics, disqus)
+[services]
+  [services.analytics]
+    disable = true
+  [services.disqus]
+    disable = true

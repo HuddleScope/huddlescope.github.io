@@ -1,0 +1,15 @@
+<!-- Original SVG mark for HuddleScope favicon
+     HS-014: Bootstrap Hugo and responsive site design
+     No external dependencies or licensed assets -->
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <style>
+      .mark-outer { fill: #0066cc; }
+      .mark-inner { fill: #ffffff; }
+    </style>
+  </defs>
+  <circle class="mark-outer" cx="32" cy="32" r="30"/>
+  <path class="mark-inner" d="M32 18c-7.7 0-14 6.3-14 14s6.3 14 14 14 14-6.3 14-14-6.3-14-14-14zm0 24c-5.5 0-10-4.5-10-10s4.5-10 10-10 10 4.5 10 10-4.5 10-10 10z"/>
+  <circle class="mark-inner" cx="32" cy="32" r="5"/>
+</svg>

@@ -1,0 +1,25 @@
+<div class="source-card">
+  <header class="source-header">
+    <h2 class="source-name">{{ .Title }}</h2>
+    {{ if .Params.publication }}
+    <p class="source-publication">{{ .Params.publication }}</p>
+    {{ end }}
+  </header>
+  {{ if .Params.license }}
+  <p class="source-license">License: {{ .Params.license }}</p>
+  {{ end }}
+  {{ if .Params.acceptableUse }}
+  <p class="source-usage">
+    Acceptable use: <strong>{{ .Params.acceptableUse }}</strong>
+  </p>
+  {{ end }}
+  <p class="source-url">
+    <a href="{{ .Params.feedURL }}" target="_blank" rel="noopener noreferrer">
+      {{ .Params.feedURL }}
+    </a>
+  </p>
+  <p class="source-language">Language: {{ .Params.language | default "en" }}</p>
+  {{ if .Params.priority }}
+  <p class="source-priority">Priority: {{ .Params.priority }}</p>
+  {{ end }}
+</div>

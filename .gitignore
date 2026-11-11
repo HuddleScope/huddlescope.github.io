@@ -2,6 +2,11 @@
 dist/
 coverage.out
 
+# Hugo site build artifacts
+web/public/
+web/resources/
+web/hugo_stats.json
+
 # Local secrets
 .env
 

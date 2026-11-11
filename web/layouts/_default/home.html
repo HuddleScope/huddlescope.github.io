@@ -1,0 +1,23 @@
+{{ define "main" }}
+  <section class="content-home">
+    <h1 class="content-title">Welcome to HuddleScope</h1>
+    <p class="content-intro">
+      Independent NFL news discovery and story aggregation.
+    </p>
+
+    {{ if .Site.RegularPages.ByDate.Reverse }}
+    <section class="latest-stories" aria-labelledby="latest-heading">
+      <h2 id="latest-heading">Latest stories</h2>
+      <div class="story-grid">
+        {{ range first 10 (where .Site.RegularPages "Type" "stories") }}
+          {{ partial "story.html" . }}
+        {{ end }}
+      </div>
+    </section>
+    {{ else }}
+    <div class="no-content">
+      <p>No stories published yet. Please check back soon.</p>
+    </div>
+    {{ end }}
+  </section>
+{{ end }}

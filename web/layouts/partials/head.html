@@ -1,0 +1,23 @@
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ block "title" . }}{{ .Site.Title }}{{ end }}</title>
+  <meta name="description" content="{{ block "description" . }}{{ .Site.Params.description }}{{ end }}">
+
+  {{ $styles := resources.Get "css/main.css" }}
+  {{ if $styles }}
+    {{ $styles := $styles | resources.Fingerprint }}
+    <link rel="stylesheet" href="{{ $styles.RelPermalink }}" integrity="{{ $styles.Data.Integrity }}" media="screen">
+  {{ end }}
+
+  {{ $script := resources.Get "js/main.js" }}
+  {{ if $script }}
+    {{ $script := $script | resources.Fingerprint }}
+    <script src="{{ $script.RelPermalink }}" integrity="{{ $script.Data.Integrity }}" defer></script>
+  {{ end }}
+
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  {{ if .IsHome }}
+  <link rel="canonical" href="{{ .Permalink }}">
+  {{ end }}
+</head>

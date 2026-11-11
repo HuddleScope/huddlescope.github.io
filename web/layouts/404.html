@@ -1,0 +1,16 @@
+{{ define "main" }}
+  <section class="content-404">
+    <h1 class="content-title">Page not found</h1>
+    <p class="content-message">
+      The page you're looking for doesn't exist. You can:
+    </p>
+    <ul>
+      <li><a href="{{ .Site.Home.Permalink }}">Return to the homepage</a></li>
+      <li><a href="/stories/">Browse stories</a></li>
+      <li><a href="/sources/">Browse sources</a></li>
+    </ul>
+    <p class="content-error-code">
+      (Error 404)
+    </p>
+  </section>
+{{ end }}
