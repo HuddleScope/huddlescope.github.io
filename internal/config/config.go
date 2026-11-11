@@ -81,6 +81,8 @@ type Config struct {
 	Sources          []Source
 	Teams            []Team
 	Env              string
+	// New for HS-013: lookback window
+	LookbackWindow time.Duration
 }
 
 const (
@@ -91,6 +93,7 @@ const (
 	defaultStorageBackend = "memory"
 	defaultTeamsFile      = "conf/teams.yaml"
 	defaultEnv            = "dev"
+	defaultLookbackWindow = 24 * time.Hour
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -103,6 +106,7 @@ func Load(configFile string) (Config, error) {
 		HugoBaseURL:    defaultHugoBaseURL,
 		StorageBackend: defaultStorageBackend,
 		Env:            defaultEnv,
+		LookbackWindow: defaultLookbackWindow,
 	}
 
 	// Override with config file if provided
@@ -173,6 +177,11 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_TEAMS_FILE"); v != "" {
 		c.TeamsFile = v
+	}
+	if v := os.Getenv("HSC_LOOKBACK"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.LookbackWindow = d
+		}
 	}
 }
 
@@ -578,6 +587,11 @@ func trimComment(line string) string {
 // Validate checks the configuration for validity and returns all errors.
 func (c Config) Validate() error {
 	var errs []error
+
+	// Validate LookbackWindow
+	if c.LookbackWindow < 0 {
+		errs = append(errs, fmt.Errorf("LookbackWindow must be non-negative; got %v", c.LookbackWindow))
+	}
 
 	// Validate LogLevel
 	if c.LogLevel != "" {
