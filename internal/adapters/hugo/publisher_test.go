@@ -109,7 +109,7 @@ func TestPublishSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Temp dir creation failed: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	_ = os.RemoveAll(tmpDir)
 
 	outDir := filepath.Join(tmpDir, "public", "_content", "stories")
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
@@ -143,7 +143,7 @@ func TestPublishIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Temp dir creation failed: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	_ = os.RemoveAll(tmpDir)
 
 	outDir := filepath.Join(tmpDir, "public", "_content", "stories")
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
@@ -241,7 +241,7 @@ func TestPublishEmptyPageErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Temp dir creation failed: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	_ = os.RemoveAll(tmpDir)
 
 	outDir := filepath.Join(tmpDir, "public", "_content", "stories")
 	p := NewPublisher(outDir, "https://huddlescope.github.io")
