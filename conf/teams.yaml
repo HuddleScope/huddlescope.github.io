@@ -1,0 +1,355 @@
+# HuddleScope NFL Teams Configuration
+#
+# This file defines all NFL teams for entity extraction and grouping.
+# Each team has a unique slug (used in URLs), official name, short name,
+# abbreviation, and common aliases for matching in news text.
+#
+# Field descriptions:
+#   slug: URL-friendly identifier (lowercase, hyphenated, e.g., "new-york-giants")
+#   name: Full legal team name (e.g., "New York Giants")
+#   short_name: Short team name (e.g., "Giants")
+#   abbreviation: Official NFL abbreviation (e.g., "NYG")
+#   aliases: Common alternative names and nicknames (optional)
+#   division: NFL division (AFC East/North/West, NFC East/North/West) (optional)
+#
+# Note: This file is read at startup. Changes require application restart.
+
+teams:
+  # === AFC East ===
+  - slug: baltimore-ravens
+    name: Baltimore Ravens
+    short_name: Ravens
+    abbreviation: BAL
+    aliases:
+      - balt ravs
+      - balt ravens
+      - ravens
+    division: afc east
+
+  - slug: buffalo-bills
+    name: Buffalo Bills
+    short_name: Bills
+    abbreviation: BUF
+    aliases:
+      - bills
+      - buff bills
+    division: afc east
+
+  - slug: miami-dolphins
+    name: Miami Dolphins
+    short_name: Dolphins
+    abbreviation: MIA
+    aliases:
+      - miami dflns
+      - miami dolphins
+      - dolphins
+    division: afc east
+
+  - slug: new-england-patriots
+    name: New England Patriots
+    short_name: Patriots
+    abbreviation: NE
+    aliases:
+      - n e patriots
+      - n epatriots
+      - new england
+      - patriots
+    division: afc east
+
+  # === AFC North ===
+  - slug: cincinnati-bengals
+    name: Cincinnati Bengals
+    short_name: Bengals
+    abbreviation: CIN
+    aliases:
+      - cincy bengals
+      - cincinnati
+      - bengals
+    division: afc north
+
+  - slug: cleveland-browns
+    name: Cleveland Browns
+    short_name: Browns
+    abbreviation: CLE
+    aliases:
+      - cle browns
+      - cleveland
+      - browns
+    division: afc north
+
+  - slug: pittsburgh-steelers
+    name: Pittsburgh Steelers
+    short_name: Steelers
+    abbreviation: PIT
+    aliases:
+      - pittsburgh steelers
+      - steelers
+    division: afc north
+
+  - slug: tennessee-titans
+    name: Tennessee Titans
+    short_name: Titans
+    abbreviation: TEN
+    aliases:
+      - ten titans
+      - tennessee titans
+      - titans
+    division: afc south
+
+  - slug: houston-texans
+    name: Houston Texans
+    short_name: Texans
+    abbreviation: HOU
+    aliases:
+      - hou texans
+      - houston texans
+      - texans
+    division: afc south
+
+  - slug: indianapolis-colts
+    name: Indianapolis Colts
+    short_name: Colts
+    abbreviation: IND
+    aliases:
+      - ind colts
+      - indianapolis colts
+      - colts
+    division: afc south
+
+  - slug: jacksonville-jaguars
+    name: Jacksonville Jaguars
+    short_name: Jaguars
+    abbreviation: JAX
+    aliases:
+      - jax jaguars
+      - jacksonville jaguars
+      - jaguars
+    division: afc south
+
+  # === AFC West ===
+  - slug: denver-broncos
+    name: Denver Broncos
+    short_name: Broncos
+    abbreviation: DEN
+    aliases:
+      - den broncos
+      - denver broncos
+      - broncos
+    division: afc west
+
+  - slug: kansas-city-chiefs
+    name: Kansas City Chiefs
+    short_name: Chiefs
+    abbreviation: KC
+    aliases:
+      - k c chiefs
+      - kansascity chiefs
+      - kansas city
+      - chiefs
+    division: afc west
+
+  - slug: las-vegas-raiders
+    name: Las Vegas Raiders
+    short_name: Raiders
+    abbreviation: LV
+    aliases:
+      - lv raiders
+      - lasvegas raiders
+      - vegas raiders
+      - oakland raiders
+      - raiders
+    division: afc west
+
+  - slug: los-angeles-chargers
+    name: Los Angeles Chargers
+    short_name: Chargers
+    abbreviation: LAC
+    aliases:
+      - la chargers
+      - losangeles chargers
+      - san diego chargers
+      - chargers
+    division: afc west
+
+  # === NFC East ===
+  - slug: dallas-cowboys
+    name: Dallas Cowboys
+    short_name: Cowboys
+    abbreviation: DAL
+    aliases:
+      - dallas cowboys
+      - cowboys
+    division: nfc east
+
+  - slug: new-york-giants
+    name: New York Giants
+    short_name: Giants
+    abbreviation: NYG
+    aliases:
+      - ny giants
+      - n y giants
+      - new york giants
+      - giants
+    division: nfc east
+
+  - slug: new-york-jets
+    name: New York Jets
+    short_name: Jets
+    abbreviation: NYJ
+    aliases:
+      - ny jets
+      - n y jets
+      - new york jets
+      - jets
+    division: nfc east
+
+  - slug: philadelphia-eagles
+    name: Philadelphia Eagles
+    short_name: Eagles
+    abbreviation: PHI
+    aliases:
+      - philly eagles
+      - philadelphia eagles
+      - eagles
+    division: nfc east
+
+  - slug: washington-commanders
+    name: Washington Commanders
+    short_name: Commanders
+    abbreviation: WSH
+    aliases:
+      - washington
+      - wsh commanders
+      - washington commanders
+      - redskins
+    division: nfc east
+
+  # === NFC North ===
+  - slug: chicago-bears
+    name: Chicago Bears
+    short_name: Bears
+    abbreviation: CHI
+    aliases:
+      - chi bears
+      - chicago bears
+      - bears
+    division: nfc north
+
+  - slug: detroit-lions
+    name: Detroit Lions
+    short_name: Lions
+    abbreviation: DET
+    aliases:
+      - detroit lions
+      - lions
+    division: nfc north
+
+  - slug: green-bay-packers
+    name: Green Bay Packers
+    short_name: Packers
+    abbreviation: GB
+    aliases:
+      - gb packers
+      - greenbay packers
+      - green bay
+      - packers
+    division: nfc north
+
+  - slug: minnesota-vikings
+    name: Minnesota Vikings
+    short_name: Vikings
+    abbreviation: MIN
+    aliases:
+      - min vikings
+      - minnesota vikings
+      - vikings
+    division: nfc north
+
+  # === NFC South ===
+  - slug: atlanta-falcons
+    name: Atlanta Falcons
+    short_name: Falcons
+    abbreviation: ATL
+    aliases:
+      - atl falcons
+      - atlanta falcons
+      - falcons
+    division: nfc south
+
+  - slug: carolina-panthers
+    name: Carolina Panthers
+    short_name: Panthers
+    abbreviation: CAR
+    aliases:
+      - car panthers
+      - carolina panthers
+      - panthers
+    division: nfc south
+
+  - slug: new-orleans-saints
+    name: New Orleans Saints
+    short_name: Saints
+    abbreviation: NO
+    aliases:
+      - no saints
+      - neworleans saints
+      - new orleans saints
+      - saints
+    division: nfc south
+
+  - slug: tampa-bay-buccaneers
+    name: Tampa Bay Buccaneers
+    short_name: Buccaneers
+    abbreviation: TB
+    aliases:
+      - tb bucs
+      - tb buccaneers
+      - tampabay bucs
+      - tampa bay bucs
+      - bucs
+      - buccaneers
+    division: nfc south
+
+  # === NFC West ===
+  - slug: arizona-cardinals
+    name: Arizona Cardinals
+    short_name: Cardinals
+    abbreviation: ARI
+    aliases:
+      - ari cardinals
+      - arizona cardinals
+      - cardinals
+    division: nfc west
+
+  - slug: los-angeles-rams
+    name: Los Angeles Rams
+    short_name: Rams
+    abbreviation: LAR
+    aliases:
+      - la rams
+      - losangeles rams
+      - st louis rams
+      - rams
+    division: nfc west
+
+  - slug: san-francisco-49ers
+    name: San Francisco 49ers
+    short_name: 49ers
+    abbreviation: SF
+    aliases:
+      - sf 49ers
+      - sanfrancisco 49ers
+      - san francisco 49ers
+      - niners
+      - 49ers
+    division: nfc west
+
+  - slug: seattle-seahawks
+    name: Seattle Seahawks
+    short_name: Seahawks
+    abbreviation: SEA
+    aliases:
+      - sea seahawks
+      - seattle seahawks
+      - seahawks
+    division: nfc west

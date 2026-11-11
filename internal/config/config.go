@@ -32,10 +32,21 @@ type Source struct {
 	AcceptableUse string
 }
 
+// Team represents an NFL team with all its identifying information.
+type Team struct {
+	Slug         string   // Stable URL slug (e.g., "new-york-giants")
+	Name         string   // Full legal name (e.g., "New York Giants")
+	ShortName    string   // Short name (e.g., "Giants")
+	Abbreviation string   // Official abbreviation (e.g., "NYG")
+	Aliases      []string // Common alternative names and nicknames
+	Division     string   // NFL division (optional)
+}
+
 // Config holds the application configuration.
 type Config struct {
 	ConfigFile       string
 	SourcesFile      string // Path to YAML sources file (optional)
+	TeamsFile        string // Path to YAML teams file (optional)
 	LogLevel         string
 	UserAgent        string
 	RequestTimeout   time.Duration
@@ -44,6 +55,7 @@ type Config struct {
 	TursoDatabaseURL string
 	TursoAuthToken   string
 	Sources          []Source
+	Teams            []Team
 	Env              string
 }
 
@@ -53,6 +65,7 @@ const (
 	defaultRequestTimeout = 30 * time.Second
 	defaultHugoBaseURL    = "https://huddlescope.github.io/"
 	defaultStorageBackend = "memory"
+	defaultTeamsFile      = "conf/teams.yaml"
 	defaultEnv            = "dev"
 )
 
@@ -61,6 +74,7 @@ func Load(configFile string) (Config, error) {
 	cfg := Config{
 		LogLevel:       defaultLogLevel,
 		UserAgent:      defaultUserAgent,
+		TeamsFile:      defaultTeamsFile,
 		RequestTimeout: defaultRequestTimeout,
 		HugoBaseURL:    defaultHugoBaseURL,
 		StorageBackend: defaultStorageBackend,
@@ -79,6 +93,11 @@ func Load(configFile string) (Config, error) {
 
 	// Parse sources after all env vars are loaded
 	if err := cfg.parseSources(); err != nil {
+		return cfg, err
+	}
+
+	// Parse teams after all env vars are loaded
+	if err := cfg.parseTeams(); err != nil {
 		return cfg, err
 	}
 
@@ -128,6 +147,9 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("HSC_SOURCES_FILE"); v != "" {
 		c.SourcesFile = v
 	}
+	if v := os.Getenv("HSC_TEAMS_FILE"); v != "" {
+		c.TeamsFile = v
+	}
 }
 
 // parseSources parses sources from the parsed Sources field (set by loadFromEnv).
@@ -145,17 +167,42 @@ func (c *Config) parseSources() error {
 		c.SourcesFile = "conf/sources.yaml"
 	}
 
-	// Try loading from YAML file
-	if sources, err := c.loadSourcesFromYAML(); err == nil && len(sources) > 0 {
-		c.Sources = sources
-		return nil
-	}
-
-	// Fall back to env var
+	// Fall back to env var first (highest priority)
 	if v := os.Getenv("HSC_SOURCES"); v != "" {
 		if err := c.parseSourcesRaw(v); err != nil {
 			return err
 		}
+		// Don't load from file if env var is set
+		return nil
+	}
+
+	// Try loading from YAML file
+	if sources, err := c.loadSourcesFromYAML(); err == nil && len(sources) > 0 {
+		c.Sources = sources
+	}
+
+	return nil
+}
+
+// parseTeams parses teams from the Teams field (set by loadFromEnv).
+// Teams are loaded in this priority order:
+//  1. HSC_TEAMS_FILE environment variable (highest priority)
+//  2. Teams file (from TeamsFile or default conf/teams.yaml)
+//  3. Default teams from SeedNFLTeams (lowest priority)
+func (c *Config) parseTeams() error {
+	if len(c.Teams) > 0 {
+		return nil // already parsed
+	}
+
+	// Try HSC_TEAMS_FILE if no env teams
+	if c.TeamsFile == "" {
+		c.TeamsFile = defaultTeamsFile
+	}
+
+	// Try loading from YAML file
+	if teams, err := c.loadTeamsFromYAML(); err == nil && len(teams) > 0 {
+		c.Teams = teams
+		return nil
 	}
 
 	return nil
@@ -382,6 +429,76 @@ func (c *Config) loadSourcesFromYAML() ([]Source, error) {
 	return sources, nil
 }
 
+// loadTeamsFromYAML loads teams from a YAML file.
+// Returns empty slice if file doesn't exist or is empty.
+func (c *Config) loadTeamsFromYAML() ([]Team, error) {
+	data, err := os.ReadFile(c.TeamsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File not found - return empty slice to allow fallback
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read teams file %q: %w", c.TeamsFile, err)
+	}
+
+	type YAMLTeam struct {
+		Slug         string   `yaml:"slug"`
+		Name         string   `yaml:"name"`
+		ShortName    string   `yaml:"short_name"`
+		Abbreviation string   `yaml:"abbreviation"`
+		Aliases      []string `yaml:"aliases,omitempty"`
+		Division     string   `yaml:"division,omitempty"`
+	}
+
+	type YAMLConfig struct {
+		Teams []YAMLTeam `yaml:"teams"`
+	}
+
+	var cfg YAMLConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse teams file %q: %w", c.TeamsFile, err)
+	}
+
+	if len(cfg.Teams) == 0 {
+		return nil, nil
+	}
+
+	// Validate and convert to Team
+	teams := make([]Team, 0, len(cfg.Teams))
+	seenSlugs := make(map[string]bool)
+
+	for i, yt := range cfg.Teams {
+		if yt.Slug == "" {
+			return nil, fmt.Errorf("team %d: missing required field 'slug'", i+1)
+		}
+		if yt.Name == "" {
+			return nil, fmt.Errorf("team %d (%s): missing required field 'name'", i+1, yt.Slug)
+		}
+		if yt.ShortName == "" {
+			return nil, fmt.Errorf("team %d (%s): missing required field 'short_name'", i+1, yt.Slug)
+		}
+		if yt.Abbreviation == "" {
+			return nil, fmt.Errorf("team %d (%s): missing required field 'abbreviation'", i+1, yt.Slug)
+		}
+
+		if seenSlugs[yt.Slug] {
+			return nil, fmt.Errorf("duplicate team slug %q", yt.Slug)
+		}
+		seenSlugs[yt.Slug] = true
+
+		teams = append(teams, Team{
+			Slug:         yt.Slug,
+			Name:         yt.Name,
+			ShortName:    yt.ShortName,
+			Abbreviation: yt.Abbreviation,
+			Aliases:      yt.Aliases,
+			Division:     yt.Division,
+		})
+	}
+
+	return teams, nil
+}
+
 // loadEnvFile loads key=value pairs from a file.
 // #nosec G304: path comes from operator --config flag or env, not untrusted input
 func loadEnvFile(path string, cfg *Config) error {
@@ -526,6 +643,27 @@ func (c Config) Validate() error {
 		}
 	}
 
+	// Validate Teams
+	teamSlugs := make(map[string]bool)
+	for i, team := range c.Teams {
+		if team.Slug == "" {
+			errs = append(errs, fmt.Errorf("team %d has empty slug", i+1))
+		}
+		if team.Name == "" {
+			errs = append(errs, fmt.Errorf("team %d (%s) has empty name", i+1, team.Slug))
+		}
+		if team.ShortName == "" {
+			errs = append(errs, fmt.Errorf("team %d (%s) has empty short_name", i+1, team.Slug))
+		}
+		if team.Abbreviation == "" {
+			errs = append(errs, fmt.Errorf("team %d (%s) has empty abbreviation", i+1, team.Slug))
+		}
+		if teamSlugs[team.Slug] {
+			errs = append(errs, fmt.Errorf("duplicate team slug %q", team.Slug))
+		}
+		teamSlugs[team.Slug] = true
+	}
+
 	// Validate Env
 	if c.Env != "" && c.Env != "dev" && c.Env != "production" {
 		errs = append(errs, fmt.Errorf("env must be dev or production; got %q", c.Env))
@@ -568,6 +706,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		StorageBackend string   `json:"StorageBackend"`
 		Env            string   `json:"Env"`
 		Sources        []Source `json:"Sources"`
+		Teams          []Team   `json:"Teams"`
 	}
 	safe := SafeConfig{
 		ConfigFile:     c.ConfigFile,
@@ -578,6 +717,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		StorageBackend: c.StorageBackend,
 		Env:            c.Env,
 		Sources:        c.Sources,
+		Teams:          c.Teams,
 	}
 	return json.Marshal(safe)
 }
@@ -608,4 +748,21 @@ func (c Config) ToDomain() []domain.FeedSource {
 		sources = append(sources, fs)
 	}
 	return sources
+}
+
+// ToDomainTeams converts config Teams to domain.Team.
+// This is used to wire the team registry when the application starts.
+func (c Config) ToDomainTeams() []domain.Team {
+	teams := make([]domain.Team, 0, len(c.Teams))
+	for _, t := range c.Teams {
+		dt := domain.Team{
+			Slug:         t.Slug,
+			Name:         t.Name,
+			ShortName:    t.ShortName,
+			Abbreviation: t.Abbreviation,
+			Aliases:      t.Aliases,
+		}
+		teams = append(teams, dt)
+	}
+	return teams
 }

@@ -62,8 +62,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load teams from config file
+	var teamRegistry *domain.TeamRegistry
+	if len(cfg.Teams) > 0 {
+		teams := make([]domain.Team, 0, len(cfg.Teams))
+		for _, t := range cfg.Teams {
+			teams = append(teams, domain.Team{
+				Slug:         t.Slug,
+				Name:         t.Name,
+				ShortName:    t.ShortName,
+				Abbreviation: t.Abbreviation,
+				Aliases:      t.Aliases,
+			})
+		}
+		teamRegistry = domain.NewTeamRegistry(teams...)
+		fmt.Printf("Loaded %d teams from config\n", len(cfg.Teams))
+	} else {
+		// Fallback to default NFL teams
+		teamRegistry = domain.DefaultTeamRegistry()
+		fmt.Println("Loaded 32 NFL teams (default embedded data)")
+	}
+
 	app := application.New(
 		application.WithRepository(repo),
+		application.WithTeamRegistry(teamRegistry),
 	)
 
 	result := app.RunExport(context.Background())
