@@ -31,8 +31,6 @@ type ScoringResult struct {
 	Errors      []error
 }
 
-// NewScoringResult creates a new ScoringResult.
-
 // GroupingResult represents the result of a grouping operation.
 type GroupingResult struct {
 	GroupsCreated   int

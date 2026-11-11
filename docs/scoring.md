@@ -23,7 +23,7 @@ All scores are in the range [0, 100]. The weights must sum to 1.0.
 ## Components
 
 ### Freshness Score
-Exponential decay based on age since first article publication.
+Reciprocal decay based on age since first article publication.
 
 ```
 decay = age / halfLife
@@ -52,7 +52,7 @@ Prevents a single source from dominating through repeated syndication.
 ### Importance Score
 Based on entity coverage (teams, players).
 
-- 0 entities → 0
+- 0 entities (group with articles) → 50 (neutral)
 - 1 entity → 30
 - 2 entities → 50
 - 3 entities → 70
@@ -75,7 +75,7 @@ Default MomentumCap: 10 articles.
 Keywords: "confirmed", "concluded", "officially", "announced", "signed", "verified", "determined", "established", "certified", "statement", "declared", "confirmed report", "official statement"
 
 ### Unverified
-Keywords: "reportedly", "report", "rumor", "alleged", "sources say", "claims", "unconfirmed", "unverified", "purportedly", "speculation"
+Keywords: "unconfirmed", "unverified", "reportedly", "rumor", "alleged", "sources say", "claims", "sources", "say", "rumors", "allegedly", "purportedly", "purported", "speculation", "speculative"
 
 ### Unknown
 No confirmed or unverified keywords found.

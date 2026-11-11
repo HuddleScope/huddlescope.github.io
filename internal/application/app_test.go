@@ -645,3 +645,85 @@ func TestRunExportEmptyRepository(t *testing.T) {
 		t.Errorf("Expected no errors for empty repo, got %v", result.Errors)
 	}
 }
+
+// mockRepository fails on List to test RunScoring error paths
+type mockRepository struct {
+	stories  []domain.Story
+	failList bool
+}
+
+func (r *mockRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
+	return domain.UpsertCreated, nil
+}
+
+func (r *mockRepository) List() ([]domain.Story, error) {
+	if r.failList {
+		return nil, fmt.Errorf("mock: List failed")
+	}
+	return r.stories, nil
+}
+
+func (r *mockRepository) Count() (int, error) {
+	return len(r.stories), nil
+}
+
+func TestRunScoringWithListError(t *testing.T) {
+	// Create a mock repository that fails on List
+	mockRepo := &mockRepository{stories: []domain.Story{}, failList: true}
+	scorer := domain.NewScorer()
+	clusterer := domain.NewClusterer()
+	app := New(WithRepository(mockRepo), WithScorer(scorer), WithClusterer(clusterer))
+
+	result := app.RunScoring(context.Background(), time.Now())
+
+	// RunScoring calls RunGrouping first, then repo.List()
+	// With a failing repo.List(), we expect at least one error from List failure
+	if len(result.Errors) < 1 {
+		t.Errorf("Expected at least 1 error for List failure, got %d", len(result.Errors))
+	}
+	// Check that the List failure error is present
+	var listErrorFound bool
+	for _, e := range result.Errors {
+		if e.Error() == "failed to list stories: mock: List failed" {
+			listErrorFound = true
+		}
+	}
+	if !listErrorFound {
+		t.Errorf("Expected 'failed to list stories: mock: List failed' in errors %v", result.Errors)
+	}
+	if len(result.Breakdowns) != 0 {
+		t.Errorf("Expected 0 breakdowns for List error, got %d", len(result.Breakdowns))
+	}
+}
+
+func TestRunScoringWithClustererError(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	scorer := domain.NewScorer()
+
+	// WithClusterer(nil) triggers the error path
+	app := New(WithRepository(repo), WithScorer(scorer), WithClusterer(nil))
+	result := app.RunScoring(context.Background(), time.Now())
+
+	if len(result.Errors) != 1 {
+		t.Errorf("Expected 1 error for nil clusterer, got %d", len(result.Errors))
+	}
+	if result.Errors[0].Error() != "clustering engine not configured; RunGrouping must be called first" {
+		t.Errorf("Expected 'clustering engine not configured...', got %v", result.Errors[0])
+	}
+	if len(result.Breakdowns) != 0 {
+		t.Errorf("Expected 0 breakdowns for nil clusterer, got %d", len(result.Breakdowns))
+	}
+}
+
+func TestWithFetcherResolver(t *testing.T) {
+	resolver := func(sourceID string) domain.FeedFetcher {
+		return nil
+	}
+
+	app := New(WithFetcherResolver(resolver))
+
+	// Verify that the option was applied (no panic, and app is created)
+	if app == nil {
+		t.Fatal("Expected non-nil Application")
+	}
+}
