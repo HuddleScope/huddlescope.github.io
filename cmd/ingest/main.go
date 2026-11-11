@@ -49,6 +49,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load feed registry: %v\n", registryErr)
 	}
 
+	// Load teams from config file
+	teamRegistry := cfg.TeamRegistry()
+	fmt.Printf("Loaded %d teams from config\n", len(cfg.Teams))
+
 	var appOpts []application.Option
 	appOpts = append(appOpts, application.WithRepository(repo))
 
@@ -84,6 +88,9 @@ func main() {
 		})
 		appOpts = append(appOpts, application.WithFeedFetchers(fetcher))
 	}
+
+	// Add team registry for entity extraction
+	appOpts = append(appOpts, application.WithTeamRegistry(teamRegistry))
 
 	app := application.New(appOpts...)
 

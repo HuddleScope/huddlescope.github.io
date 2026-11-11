@@ -62,8 +62,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load teams from config file
+	teamRegistry := cfg.TeamRegistry()
+	fmt.Printf("Loaded %d teams from config\n", len(cfg.Teams))
+
 	app := application.New(
 		application.WithRepository(repo),
+		application.WithTeamRegistry(teamRegistry),
 	)
 
 	result := app.RunExport(context.Background())

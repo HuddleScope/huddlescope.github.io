@@ -52,6 +52,8 @@ type Application struct {
 	fetcherMap map[string]domain.FeedFetcher // ID -> fetcher
 	// New for HS-010: clustering engine
 	clusteringEngine *domain.Clusterer
+	// New for HS-011: team registry for entity extraction
+	teamRegistry *domain.TeamRegistry
 }
 
 // Option configures the Application.
@@ -95,6 +97,36 @@ func WithFetcherMap(fetcherMap map[string]domain.FeedFetcher) Option {
 func WithClusterer(engine *domain.Clusterer) Option {
 	return func(a *Application) {
 		a.clusteringEngine = engine
+	}
+}
+
+// extractTeams extracts teams from story text and merges with existing entities.
+func extractTeams(story domain.Story, registry *domain.TeamRegistry) domain.Story {
+	if registry == nil {
+		return story
+	}
+
+	text := story.Title + " " + story.Summary
+	teamSlugs := registry.Extract(text)
+
+	// Merge entities, avoiding duplicates
+	existing := make(map[string]bool)
+	for _, e := range story.Entities {
+		existing[e] = true
+	}
+	for _, slug := range teamSlugs {
+		if !existing[slug] {
+			story.Entities = append(story.Entities, slug)
+		}
+	}
+
+	return story
+}
+
+// WithTeamRegistry sets the team registry for entity extraction (HS-011).
+func WithTeamRegistry(registry *domain.TeamRegistry) Option {
+	return func(a *Application) {
+		a.teamRegistry = registry
 	}
 }
 
@@ -142,6 +174,10 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 
 		for _, entry := range entries {
 			story := domain.Story{}.Canonicalize(entry)
+
+			// If a custom team registry is configured, re-extract teams
+			// Extract teams if custom registry is configured
+			story = extractTeams(story, a.teamRegistry)
 
 			status, err := a.repo.Upsert(story)
 			if err != nil {
@@ -197,6 +233,23 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 
 		for _, entry := range entries {
 			story := domain.Story{}.Canonicalize(entry)
+
+			// If a custom team registry is configured, re-extract teams
+			if a.teamRegistry != nil {
+				text := story.Title + " " + story.Summary
+				teamSlugs := a.teamRegistry.Extract(text)
+
+				// Merge entities, avoiding duplicates
+				existing := make(map[string]bool)
+				for _, e := range story.Entities {
+					existing[e] = true
+				}
+				for _, slug := range teamSlugs {
+					if !existing[slug] {
+						story.Entities = append(story.Entities, slug)
+					}
+				}
+			}
 
 			status, err := a.repo.Upsert(story)
 			if err != nil {
