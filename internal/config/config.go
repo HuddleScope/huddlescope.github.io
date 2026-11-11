@@ -43,8 +43,9 @@ type YAMLTeam struct {
 }
 
 // toConfigTeam converts YAMLTeam to config Team.
+//
+//nolint:staticcheck // S1016: struct literal required for explicit field mapping
 func (yt YAMLTeam) toConfigTeam() Team {
-	//nolint:staticcheck // S1016: YAMLTeam and Team have different fields, struct literal required
 	return Team{
 		Slug:         yt.Slug,
 		Name:         yt.Name,
