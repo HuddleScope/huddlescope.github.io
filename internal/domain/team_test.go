@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-func TestTeamRegistry_SeedNFLTeams(t *testing.T) {
-	teams := SeedNFLTeams()
+func TestTeamRegistry_GetDefaultTeams(t *testing.T) {
+	teams := getDefaultTeams()
 	if len(teams) != 32 {
-		t.Errorf("SeedNFLTeams() returned %d teams, expected 32", len(teams))
+		t.Errorf("getDefaultTeams() returned %d teams, expected 32", len(teams))
 	}
 
 	// Verify all teams have required fields
