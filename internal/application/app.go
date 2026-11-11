@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
@@ -21,6 +22,13 @@ type IngestionResult struct {
 type ExportResult struct {
 	StoriesExported int
 	Errors          []error
+}
+
+// ScoringResult represents the result of a scoring run (HS-012).
+type ScoringResult struct {
+	TotalGroups int
+	Breakdowns  []domain.ScoreBreakdown
+	Errors      []error
 }
 
 // GroupingResult represents the result of a grouping operation.
@@ -54,6 +62,8 @@ type Application struct {
 	clusteringEngine *domain.Clusterer
 	// New for HS-011: team registry for entity extraction
 	teamRegistry *domain.TeamRegistry
+	// New for HS-012: scoring engine
+	scorer *domain.Scorer
 }
 
 // Option configures the Application.
@@ -97,6 +107,13 @@ func WithFetcherMap(fetcherMap map[string]domain.FeedFetcher) Option {
 func WithClusterer(engine *domain.Clusterer) Option {
 	return func(a *Application) {
 		a.clusteringEngine = engine
+	}
+}
+
+// WithScorer sets the scoring engine (HS-012).
+func WithScorer(scorer *domain.Scorer) Option {
+	return func(a *Application) {
+		a.scorer = scorer
 	}
 }
 
@@ -361,6 +378,65 @@ func (a *Application) RunExport(ctx context.Context) ExportResult {
 	}
 
 	result.StoriesExported = len(stories)
+
+	return result
+}
+
+// RunScoring performs scoring and ranking of stories (HS-012).
+func (a *Application) RunScoring(ctx context.Context, now time.Time) ScoringResult {
+	result := ScoringResult{}
+
+	if a.scorer == nil {
+		result.Errors = append(result.Errors, fmt.Errorf("scorer not configured"))
+		return result
+	}
+
+	if a.repo == nil {
+		result.Errors = append(result.Errors, fmt.Errorf("repository not configured"))
+		return result
+	}
+
+	if a.clusteringEngine == nil {
+		result.Errors = append(result.Errors, fmt.Errorf("clustering engine not configured; RunGrouping must be called first"))
+		return result
+	}
+
+	// Re-run grouping to ensure we have fresh story groups
+	groupingResult := a.RunGrouping(ctx)
+	if len(groupingResult.Errors) > 0 {
+		result.Errors = append(result.Errors, groupingResult.Errors...)
+	}
+
+	stories, err := a.repo.List()
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("failed to list stories: %w", err))
+		return result
+	}
+
+	// Rebuild story groups and score them
+	articles := make([]domain.Article, 0, len(stories))
+	for _, story := range stories {
+		articles = append(articles, domain.Article{
+			ID:          story.ID,
+			SourceID:    story.Source,
+			Title:       story.Title,
+			Summary:     story.Summary,
+			URL:         story.URL,
+			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:    story.Entities,
+		})
+	}
+
+	groups := a.clusteringEngine.Cluster(articles)
+
+	// Score and rank groups
+	for _, g := range groups {
+		breakdown := a.scorer.WithTime(now).Score(g)
+		result.Breakdowns = append(result.Breakdowns, breakdown)
+	}
+
+	result.TotalGroups = len(result.Breakdowns)
 
 	return result
 }
