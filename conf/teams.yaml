@@ -16,16 +16,6 @@
 
 teams:
   # === AFC East ===
-  - slug: baltimore-ravens
-    name: Baltimore Ravens
-    short_name: Ravens
-    abbreviation: BAL
-    aliases:
-      - balt ravs
-      - balt ravens
-      - ravens
-    division: afc north
-
   - slug: buffalo-bills
     name: Buffalo Bills
     short_name: Bills
@@ -56,7 +46,28 @@ teams:
       - patriots
     division: afc east
 
+  - slug: new-york-jets
+    name: New York Jets
+    short_name: Jets
+    abbreviation: NYJ
+    aliases:
+      - ny jets
+      - n y jets
+      - new york jets
+      - jets
+    division: afc east
+
   # === AFC North ===
+  - slug: baltimore-ravens
+    name: Baltimore Ravens
+    short_name: Ravens
+    abbreviation: BAL
+    aliases:
+      - balt ravs
+      - balt ravens
+      - ravens
+    division: afc north
+
   - slug: cincinnati-bengals
     name: Cincinnati Bengals
     short_name: Bengals
@@ -86,16 +97,7 @@ teams:
       - steelers
     division: afc north
 
-  - slug: tennessee-titans
-    name: Tennessee Titans
-    short_name: Titans
-    abbreviation: TEN
-    aliases:
-      - ten titans
-      - tennessee titans
-      - titans
-    division: afc south
-
+  # === AFC South ===
   - slug: houston-texans
     name: Houston Texans
     short_name: Texans
@@ -124,6 +126,16 @@ teams:
       - jax jaguars
       - jacksonville jaguars
       - jaguars
+    division: afc south
+
+  - slug: tennessee-titans
+    name: Tennessee Titans
+    short_name: Titans
+    abbreviation: TEN
+    aliases:
+      - ten titans
+      - tennessee titans
+      - titans
     division: afc south
 
   # === AFC West ===
@@ -191,17 +203,6 @@ teams:
       - new york giants
       - giants
     division: nfc east
-
-  - slug: new-york-jets
-    name: New York Jets
-    short_name: Jets
-    abbreviation: NYJ
-    aliases:
-      - ny jets
-      - n y jets
-      - new york jets
-      - jets
-    division: afc east
 
   - slug: philadelphia-eagles
     name: Philadelphia Eagles
