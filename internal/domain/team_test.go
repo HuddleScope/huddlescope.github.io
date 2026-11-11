@@ -5,7 +5,7 @@ import (
 )
 
 func TestTeamRegistry_GetDefaultTeams(t *testing.T) {
-	teams := getDefaultTeams()
+	teams := SeedNFLTeams()
 	if len(teams) != 32 {
 		t.Errorf("getDefaultTeams() returned %d teams, expected 32", len(teams))
 	}

@@ -768,10 +768,10 @@ func (c Config) ToDomainTeams() []domain.Team {
 }
 
 // TeamRegistry returns a TeamRegistry initialized with the teams from config.
-// If no teams are configured, returns the default NFL teams registry.
+// It is a required configuration and the app will fail if teams cannot be loaded.
 func (c Config) TeamRegistry() *domain.TeamRegistry {
-	if len(c.Teams) > 0 {
-		return domain.NewTeamRegistryFromSlice(c.ToDomainTeams())
+	if len(c.Teams) == 0 {
+		panic("teams configuration is required but could not be loaded")
 	}
-	return domain.DefaultTeamRegistry()
+	return domain.NewTeamRegistryFromSlice(c.ToDomainTeams())
 }
