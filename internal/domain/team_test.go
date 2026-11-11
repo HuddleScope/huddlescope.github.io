@@ -4,15 +4,50 @@ import (
 	"testing"
 )
 
+// testTeams is the hardcoded test data that was previously in SeedNFLTeams
+var testTeams = []Team{
+	{Slug: "buffalo-bills", Name: "Buffalo Bills", ShortName: "Bills", Abbreviation: "BUF", Aliases: []string{"bills", "buff bills"}},
+	{Slug: "miami-dolphins", Name: "Miami Dolphins", ShortName: "Dolphins", Abbreviation: "MIA", Aliases: []string{"miami dflns", "miami dolphins", "dolphins"}},
+	{Slug: "new-england-patriots", Name: "New England Patriots", ShortName: "Patriots", Abbreviation: "NE", Aliases: []string{"n e patriots", "n epatriots", "new england", "patriots"}},
+	{Slug: "new-york-jets", Name: "New York Jets", ShortName: "Jets", Abbreviation: "NYJ", Aliases: []string{"ny jets", "n y jets", "new york jets", "jets"}},
+	{Slug: "baltimore-ravens", Name: "Baltimore Ravens", ShortName: "Ravens", Abbreviation: "BAL", Aliases: []string{"balt ravs", "balt ravens", "ravens"}},
+	{Slug: "cincinnati-bengals", Name: "Cincinnati Bengals", ShortName: "Bengals", Abbreviation: "CIN", Aliases: []string{"cincy bengals", "cincinnati", "bengals"}},
+	{Slug: "cleveland-browns", Name: "Cleveland Browns", ShortName: "Browns", Abbreviation: "CLE", Aliases: []string{"cle browns", "cleveland", "browns"}},
+	{Slug: "pittsburgh-steelers", Name: "Pittsburgh Steelers", ShortName: "Steelers", Abbreviation: "PIT", Aliases: []string{"pittsburgh steelers", "steelers"}},
+	{Slug: "houston-texans", Name: "Houston Texans", ShortName: "Texans", Abbreviation: "HOU", Aliases: []string{"hou texans", "houston texans", "texans"}},
+	{Slug: "indianapolis-colts", Name: "Indianapolis Colts", ShortName: "Colts", Abbreviation: "IND", Aliases: []string{"ind colts", "indianapolis colts", "colts"}},
+	{Slug: "jacksonville-jaguars", Name: "Jacksonville Jaguars", ShortName: "Jaguars", Abbreviation: "JAX", Aliases: []string{"jax jaguars", "jacksonville jaguars", "jaguars"}},
+	{Slug: "tennessee-titans", Name: "Tennessee Titans", ShortName: "Titans", Abbreviation: "TEN", Aliases: []string{"ten titans", "tennessee titans", "titans"}},
+	{Slug: "denver-broncos", Name: "Denver Broncos", ShortName: "Broncos", Abbreviation: "DEN", Aliases: []string{"den broncos", "denver broncos", "broncos"}},
+	{Slug: "kansas-city-chiefs", Name: "Kansas City Chiefs", ShortName: "Chiefs", Abbreviation: "KC", Aliases: []string{"k c chiefs", "kansascity chiefs", "kansas city", "chiefs"}},
+	{Slug: "las-vegas-raiders", Name: "Las Vegas Raiders", ShortName: "Raiders", Abbreviation: "LV", Aliases: []string{"lv raiders", "lasvegas raiders", "vegas raiders", "oakland raiders", "raiders"}},
+	{Slug: "los-angeles-chargers", Name: "Los Angeles Chargers", ShortName: "Chargers", Abbreviation: "LAC", Aliases: []string{"la chargers", "losangeles chargers", "san diego chargers", "chargers"}},
+	{Slug: "dallas-cowboys", Name: "Dallas Cowboys", ShortName: "Cowboys", Abbreviation: "DAL", Aliases: []string{"dallas cowboys", "cowboys"}},
+	{Slug: "new-york-giants", Name: "New York Giants", ShortName: "Giants", Abbreviation: "NYG", Aliases: []string{"ny giants", "n y giants", "new york giants", "giants"}},
+	{Slug: "philadelphia-eagles", Name: "Philadelphia Eagles", ShortName: "Eagles", Abbreviation: "PHI", Aliases: []string{"philly eagles", "philadelphia eagles", "eagles"}},
+	{Slug: "washington-commanders", Name: "Washington Commanders", ShortName: "Commanders", Abbreviation: "WSH", Aliases: []string{"washington", "wsh commanders", "washington commanders", "redskins"}},
+	{Slug: "chicago-bears", Name: "Chicago Bears", ShortName: "Bears", Abbreviation: "CHI", Aliases: []string{"chi bears", "chicago bears", "bears"}},
+	{Slug: "detroit-lions", Name: "Detroit Lions", ShortName: "Lions", Abbreviation: "DET", Aliases: []string{"detroit lions", "lions"}},
+	{Slug: "green-bay-packers", Name: "Green Bay Packers", ShortName: "Packers", Abbreviation: "GB", Aliases: []string{"gb packers", "greenbay packers", "green bay", "packers"}},
+	{Slug: "minnesota-vikings", Name: "Minnesota Vikings", ShortName: "Vikings", Abbreviation: "MIN", Aliases: []string{"min vikings", "minnesota vikings", "vikings"}},
+	{Slug: "atlanta-falcons", Name: "Atlanta Falcons", ShortName: "Falcons", Abbreviation: "ATL", Aliases: []string{"atl falcons", "atlanta falcons", "falcons"}},
+	{Slug: "carolina-panthers", Name: "Carolina Panthers", ShortName: "Panthers", Abbreviation: "CAR", Aliases: []string{"car panthers", "carolina panthers", "panthers"}},
+	{Slug: "new-orleans-saints", Name: "New Orleans Saints", ShortName: "Saints", Abbreviation: "NO", Aliases: []string{"no saints", "neworleans saints", "new orleans saints", "saints"}},
+	{Slug: "tampa-bay-buccaneers", Name: "Tampa Bay Buccaneers", ShortName: "Buccaneers", Abbreviation: "TB", Aliases: []string{"tb bucs", "tb buccaneers", "tampabay bucs", "tampa bay bucs", "buccaneers"}},
+	{Slug: "arizona-cardinals", Name: "Arizona Cardinals", ShortName: "Cardinals", Abbreviation: "ARI", Aliases: []string{"ari cardinals", "arizona cardinals", "cardinals"}},
+	{Slug: "los-angeles-rams", Name: "Los Angeles Rams", ShortName: "Rams", Abbreviation: "LAR", Aliases: []string{"la rams", "losangeles rams", "st louis rams", "rams"}},
+	{Slug: "san-francisco-49ers", Name: "San Francisco 49ers", ShortName: "49ers", Abbreviation: "SF", Aliases: []string{"sf 49ers", "sanfrancisco 49ers", "san francisco 49ers", "niners", "49ers"}},
+	{Slug: "seattle-seahawks", Name: "Seattle Seahawks", ShortName: "Seahawks", Abbreviation: "SEA", Aliases: []string{"sea seahawks", "seattle seahawks", "seahawks"}},
+}
+
 func TestTeamRegistry_GetDefaultTeams(t *testing.T) {
-	teams := SeedNFLTeams()
-	if len(teams) != 32 {
-		t.Errorf("getDefaultTeams() returned %d teams, expected 32", len(teams))
+	if len(testTeams) != 32 {
+		t.Errorf("testTeams contains %d teams, expected 32", len(testTeams))
 	}
 
 	// Verify all teams have required fields
 	slugs := make(map[string]bool)
-	for _, team := range teams {
+	for _, team := range testTeams {
 		if team.Slug == "" {
 			t.Errorf("Team has empty Slug: %v", team)
 		}
@@ -29,13 +64,13 @@ func TestTeamRegistry_GetDefaultTeams(t *testing.T) {
 	}
 
 	// Verify unique slugs
-	if len(slugs) != len(teams) {
-		t.Errorf("Found duplicate slugs in %d teams", len(teams))
+	if len(slugs) != len(testTeams) {
+		t.Errorf("Found duplicate slugs in %d teams", len(testTeams))
 	}
 }
 
 func TestTeamRegistry_Lookup(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -66,7 +101,7 @@ func TestTeamRegistry_Lookup(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -205,7 +240,7 @@ func TestTeamRegistry_Extract(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_Deduplication(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The Giants and the Giants played. Giants!"
 	result := registry.Extract(text)
 	if len(result) != 1 {
@@ -214,7 +249,7 @@ func TestTeamRegistry_Extract_Deduplication(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MultipleOccurrences(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The Giants beat the Patriots. Giants won again. Patriots lost."
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -227,7 +262,7 @@ func TestTeamRegistry_Extract_MultipleOccurrences(t *testing.T) {
 }
 
 func TestTeamRegistry_Get(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name  string
@@ -278,7 +313,7 @@ func TestTeamRegistry_Get(t *testing.T) {
 }
 
 func TestTeamRegistry_Count(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	count := registry.Count()
 	if count != 32 {
 		t.Errorf("Count() = %d, expected 32", count)
@@ -286,7 +321,7 @@ func TestTeamRegistry_Count(t *testing.T) {
 }
 
 func TestTeamRegistry_All(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	teams := registry.All()
 	if len(teams) != 32 {
 		t.Errorf("All() returned %d teams, expected 32", len(teams))
@@ -329,7 +364,7 @@ func TestNormalizeAlias(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_NegativeBoundary(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -369,7 +404,7 @@ func TestTeamRegistry_Extract_NegativeBoundary(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_CompoundOnlyForAmbiguous(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -422,7 +457,7 @@ func TestTeamRegistry_Extract_CompoundOnlyForAmbiguous(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_Idempotency(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The New York Giants and San Francisco 49ers played"
 	result1 := registry.Extract(text)
 	result2 := registry.Extract(text)
@@ -453,7 +488,7 @@ func TestTeamRegistry_Extract_Idempotency(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SpecialCharacters(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -507,7 +542,7 @@ func TestTeamRegistry_Extract_SpecialCharacters(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_Multiline(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := `The New York Giants played on Sunday.
 The San Francisco 49ers played on Monday.
 The Green Bay Packers played on Tuesday.`
@@ -522,7 +557,7 @@ The Green Bay Packers played on Tuesday.`
 }
 
 func TestTeamRegistry_Extract_WrongTeamSameName(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The Boston Celtics and New York Knicks played"
 	result := registry.Extract(text)
 	if len(result) != 0 {
@@ -531,7 +566,7 @@ func TestTeamRegistry_Extract_WrongTeamSameName(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_Substring(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -566,7 +601,7 @@ func TestTeamRegistry_Extract_Substring(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_WhitespaceVariations(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -606,7 +641,7 @@ func TestTeamRegistry_Extract_WhitespaceVariations(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ShortNames(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	// Test that short names are included
 	tests := []struct {
@@ -632,7 +667,7 @@ func TestTeamRegistry_Extract_ShortNames(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_Abbreviations(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -670,7 +705,7 @@ func TestTeamRegistry_Extract_Abbreviations(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_LowercaseAbbreviations(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -692,7 +727,7 @@ func TestTeamRegistry_Extract_LowercaseAbbreviations(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MixedCaseWords(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -714,7 +749,7 @@ func TestTeamRegistry_Extract_MixedCaseWords(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MultipleTeamsSameGame(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The New York Giants and New York Jets played at MetLife Stadium"
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -734,7 +769,7 @@ func TestTeamRegistry_Extract_MultipleTeamsSameGame(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_GiantsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -758,7 +793,7 @@ func TestTeamRegistry_Extract_GiantsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MultipleTeamsCrossReferenced(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The Giants and the Packers will meet at MetLife Stadium"
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -778,7 +813,7 @@ func TestTeamRegistry_Extract_MultipleTeamsCrossReferenced(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BearsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -801,7 +836,7 @@ func TestTeamRegistry_Extract_BearsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_PatriotsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -824,7 +859,7 @@ func TestTeamRegistry_Extract_PatriotsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_CowboysAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -847,7 +882,7 @@ func TestTeamRegistry_Extract_CowboysAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_RamsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -870,7 +905,7 @@ func TestTeamRegistry_Extract_RamsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ExtractTextExcerptIntegration(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	// Test that Extract works with HTML-sanitized text
 	text := "<p>The New York Giants played at MetLife Stadium</p>"
@@ -882,7 +917,7 @@ func TestTeamRegistry_Extract_ExtractTextExcerptIntegration(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_CardinalsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -905,7 +940,7 @@ func TestTeamRegistry_Extract_CardinalsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_FalconsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -927,7 +962,7 @@ func TestTeamRegistry_Extract_FalconsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_VikingsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -949,7 +984,7 @@ func TestTeamRegistry_Extract_VikingsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_EaglesAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -972,7 +1007,7 @@ func TestTeamRegistry_Extract_EaglesAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_JetsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -995,7 +1030,7 @@ func TestTeamRegistry_Extract_JetsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_DolphinsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1017,7 +1052,7 @@ func TestTeamRegistry_Extract_DolphinsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_JaguarsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1039,7 +1074,7 @@ func TestTeamRegistry_Extract_JaguarsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_TexansAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1061,7 +1096,7 @@ func TestTeamRegistry_Extract_TexansAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ColtsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1083,7 +1118,7 @@ func TestTeamRegistry_Extract_ColtsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BroncosAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1105,7 +1140,7 @@ func TestTeamRegistry_Extract_BroncosAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ChiefsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1127,7 +1162,7 @@ func TestTeamRegistry_Extract_ChiefsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_RaidersAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1150,7 +1185,7 @@ func TestTeamRegistry_Extract_RaidersAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ChargersAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1173,7 +1208,7 @@ func TestTeamRegistry_Extract_ChargersAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SaintsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1195,7 +1230,7 @@ func TestTeamRegistry_Extract_SaintsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BuccaneersAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1218,7 +1253,7 @@ func TestTeamRegistry_Extract_BuccaneersAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SeahawksAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1240,7 +1275,7 @@ func TestTeamRegistry_Extract_SeahawksAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_TitansAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1262,7 +1297,7 @@ func TestTeamRegistry_Extract_TitansAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_WashingtonCommandersAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1284,7 +1319,7 @@ func TestTeamRegistry_Extract_WashingtonCommandersAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_LionsAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1306,7 +1341,7 @@ func TestTeamRegistry_Extract_LionsAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_CardinalsInNFLContext(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "The Arizona Cardinals and Los Angeles Rams played at State Farm Stadium"
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -1326,7 +1361,7 @@ func TestTeamRegistry_Extract_CardinalsInNFLContext(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_49ersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1348,7 +1383,7 @@ func TestTeamRegistry_Extract_49ersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_PackersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1384,7 +1419,7 @@ func TestTeamRegistry_Extract_PackersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_JetsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1406,7 +1441,7 @@ func TestTeamRegistry_Extract_JetsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_DolphinsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1427,7 +1462,7 @@ func TestTeamRegistry_Extract_DolphinsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_RavensAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1448,7 +1483,7 @@ func TestTeamRegistry_Extract_RavensAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BillsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1469,7 +1504,7 @@ func TestTeamRegistry_Extract_BillsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_VikingsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1490,7 +1525,7 @@ func TestTeamRegistry_Extract_VikingsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BengalsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1511,7 +1546,7 @@ func TestTeamRegistry_Extract_BengalsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BrownsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1532,7 +1567,7 @@ func TestTeamRegistry_Extract_BrownsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SteelersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1553,7 +1588,7 @@ func TestTeamRegistry_Extract_SteelersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ColtsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1574,7 +1609,7 @@ func TestTeamRegistry_Extract_ColtsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_JaguarsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1595,7 +1630,7 @@ func TestTeamRegistry_Extract_JaguarsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_TexansAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1616,7 +1651,7 @@ func TestTeamRegistry_Extract_TexansAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_TitansAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1637,7 +1672,7 @@ func TestTeamRegistry_Extract_TitansAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BroncosAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1658,7 +1693,7 @@ func TestTeamRegistry_Extract_BroncosAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ChiefsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1679,7 +1714,7 @@ func TestTeamRegistry_Extract_ChiefsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_RaidersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1700,7 +1735,7 @@ func TestTeamRegistry_Extract_RaidersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ChargersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1721,7 +1756,7 @@ func TestTeamRegistry_Extract_ChargersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_RamsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1742,7 +1777,7 @@ func TestTeamRegistry_Extract_RamsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SaintsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1763,7 +1798,7 @@ func TestTeamRegistry_Extract_SaintsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_BuccaneersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1784,7 +1819,7 @@ func TestTeamRegistry_Extract_BuccaneersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SeahawksAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1805,7 +1840,7 @@ func TestTeamRegistry_Extract_SeahawksAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_FalconsAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1826,7 +1861,7 @@ func TestTeamRegistry_Extract_FalconsAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_PanthersAliases(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1847,7 +1882,7 @@ func TestTeamRegistry_Extract_PanthersAliases(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_WildcardMatching(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1882,7 +1917,7 @@ func TestTeamRegistry_Extract_WildcardMatching(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_CaseInsensitivity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1905,7 +1940,7 @@ func TestTeamRegistry_Extract_CaseInsensitivity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MultipleTeamsSameTitle(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "Giants vs. Patriots in Super Bowl LII"
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -1918,7 +1953,7 @@ func TestTeamRegistry_Extract_MultipleTeamsSameTitle(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_DashSeparatedNames(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1940,7 +1975,7 @@ func TestTeamRegistry_Extract_DashSeparatedNames(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_SpecialTeamNames(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -1978,7 +2013,7 @@ func TestTeamRegistry_Extract_SpecialTeamNames(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_TeamWithNumbers(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -2000,7 +2035,7 @@ func TestTeamRegistry_Extract_TeamWithNumbers(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ExtractTeamsWithRealNFLHeadlines(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	headlines := []string{
 		"Giants face Packers in NFC Championship",
@@ -2028,7 +2063,7 @@ func TestTeamRegistry_Extract_ExtractTeamsWithRealNFLHeadlines(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_FullNFLTeamList(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	allTeams := registry.All()
 
 	if len(allTeams) != 32 {
@@ -2092,7 +2127,7 @@ func mapKeys(m map[string]bool) []string {
 }
 
 func TestTeamRegistry_Extract_ShortAndLongNames(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -2115,7 +2150,7 @@ func TestTeamRegistry_Extract_ShortAndLongNames(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_MultipleTeamsOneTitle(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 	text := "Giants vs. Cowboys and Dolphins"
 	result := registry.Extract(text)
 	resultSet := make(map[string]bool)
@@ -2128,7 +2163,7 @@ func TestTeamRegistry_Extract_MultipleTeamsOneTitle(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ContextualAmbiguity(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	tests := []struct {
 		name     string
@@ -2152,7 +2187,7 @@ func TestTeamRegistry_Extract_ContextualAmbiguity(t *testing.T) {
 }
 
 func TestTeamRegistry_Extract_ComprehensiveNFLHeadlines(t *testing.T) {
-	registry := DefaultTeamRegistry()
+	registry := NewTeamRegistry(testTeams...)
 
 	// Test a mix of all 32 teams
 	headlines := []struct {

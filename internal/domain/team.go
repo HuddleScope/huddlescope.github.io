@@ -145,54 +145,15 @@ func (r *TeamRegistry) Count() int {
 }
 
 
-// DefaultTeamRegistry returns a pre-built registry with all 32 NFL teams.
+// DefaultTeamRegistry returns an empty registry.
 // DEPRECATED: Teams should be loaded from config via Config.TeamRegistry().
 // This function is kept for backward compatibility and testing only.
 // DO NOT USE IN PRODUCTION - teams must be loaded from conf/teams.yaml
 func DefaultTeamRegistry() *TeamRegistry {
-	return NewTeamRegistry(SeedNFLTeams()...)
+	return NewTeamRegistry()
 }
 
 // NewTeamRegistryFromSlice creates a TeamRegistry from a slice of Team.
 func NewTeamRegistryFromSlice(teams []Team) *TeamRegistry {
 	return NewTeamRegistry(teams...)
-}
-
-// SeedNFLTeams returns all 32 current NFL teams.
-// DEPRECATED: Teams should be loaded from config instead.
-func SeedNFLTeams() []Team {
-	return []Team{
-		{Slug: "buffalo-bills", Name: "Buffalo Bills", ShortName: "Bills", Abbreviation: "BUF", Aliases: []string{"bills", "buff bills"}},
-		{Slug: "miami-dolphins", Name: "Miami Dolphins", ShortName: "Dolphins", Abbreviation: "MIA", Aliases: []string{"miami dflns", "miami dolphins", "dolphins"}},
-		{Slug: "new-england-patriots", Name: "New England Patriots", ShortName: "Patriots", Abbreviation: "NE", Aliases: []string{"n e patriots", "n epatriots", "new england", "patriots"}},
-		{Slug: "new-york-jets", Name: "New York Jets", ShortName: "Jets", Abbreviation: "NYJ", Aliases: []string{"ny jets", "n y jets", "new york jets", "jets"}},
-		{Slug: "baltimore-ravens", Name: "Baltimore Ravens", ShortName: "Ravens", Abbreviation: "BAL", Aliases: []string{"balt ravs", "balt ravens", "ravens"}},
-		{Slug: "cincinnati-bengals", Name: "Cincinnati Bengals", ShortName: "Bengals", Abbreviation: "CIN", Aliases: []string{"cincy bengals", "cincinnati", "bengals"}},
-		{Slug: "cleveland-browns", Name: "Cleveland Browns", ShortName: "Browns", Abbreviation: "CLE", Aliases: []string{"cle browns", "cleveland", "browns"}},
-		{Slug: "pittsburgh-steelers", Name: "Pittsburgh Steelers", ShortName: "Steelers", Abbreviation: "PIT", Aliases: []string{"pittsburgh steelers", "steelers"}},
-		{Slug: "houston-texans", Name: "Houston Texans", ShortName: "Texans", Abbreviation: "HOU", Aliases: []string{"hou texans", "houston texans", "texans"}},
-		{Slug: "indianapolis-colts", Name: "Indianapolis Colts", ShortName: "Colts", Abbreviation: "IND", Aliases: []string{"ind colts", "indianapolis colts", "colts"}},
-		{Slug: "jacksonville-jaguars", Name: "Jacksonville Jaguars", ShortName: "Jaguars", Abbreviation: "JAX", Aliases: []string{"jax jaguars", "jacksonville jaguars", "jaguars"}},
-		{Slug: "tennessee-titans", Name: "Tennessee Titans", ShortName: "Titans", Abbreviation: "TEN", Aliases: []string{"ten titans", "tennessee titans", "titans"}},
-		{Slug: "denver-broncos", Name: "Denver Broncos", ShortName: "Broncos", Abbreviation: "DEN", Aliases: []string{"den broncos", "denver broncos", "broncos"}},
-		{Slug: "kansas-city-chiefs", Name: "Kansas City Chiefs", ShortName: "Chiefs", Abbreviation: "KC", Aliases: []string{"k c chiefs", "kansascity chiefs", "kansas city", "chiefs"}},
-		{Slug: "las-vegas-raiders", Name: "Las Vegas Raiders", ShortName: "Raiders", Abbreviation: "LV", Aliases: []string{"lv raiders", "lasvegas raiders", "vegas raiders", "oakland raiders", "raiders"}},
-		{Slug: "los-angeles-chargers", Name: "Los Angeles Chargers", ShortName: "Chargers", Abbreviation: "LAC", Aliases: []string{"la chargers", "losangeles chargers", "san diego chargers", "chargers"}},
-		{Slug: "dallas-cowboys", Name: "Dallas Cowboys", ShortName: "Cowboys", Abbreviation: "DAL", Aliases: []string{"dallas cowboys", "cowboys"}},
-		{Slug: "new-york-giants", Name: "New York Giants", ShortName: "Giants", Abbreviation: "NYG", Aliases: []string{"ny giants", "n y giants", "new york giants", "giants"}},
-		{Slug: "philadelphia-eagles", Name: "Philadelphia Eagles", ShortName: "Eagles", Abbreviation: "PHI", Aliases: []string{"philly eagles", "philadelphia eagles", "eagles"}},
-		{Slug: "washington-commanders", Name: "Washington Commanders", ShortName: "Commanders", Abbreviation: "WSH", Aliases: []string{"washington", "wsh commanders", "washington commanders", "redskins"}},
-		{Slug: "chicago-bears", Name: "Chicago Bears", ShortName: "Bears", Abbreviation: "CHI", Aliases: []string{"chi bears", "chicago bears", "bears"}},
-		{Slug: "detroit-lions", Name: "Detroit Lions", ShortName: "Lions", Abbreviation: "DET", Aliases: []string{"detroit lions", "lions"}},
-		{Slug: "green-bay-packers", Name: "Green Bay Packers", ShortName: "Packers", Abbreviation: "GB", Aliases: []string{"gb packers", "greenbay packers", "green bay", "packers"}},
-		{Slug: "minnesota-vikings", Name: "Minnesota Vikings", ShortName: "Vikings", Abbreviation: "MIN", Aliases: []string{"min vikings", "minnesota vikings", "vikings"}},
-		{Slug: "atlanta-falcons", Name: "Atlanta Falcons", ShortName: "Falcons", Abbreviation: "ATL", Aliases: []string{"atl falcons", "atlanta falcons", "falcons"}},
-		{Slug: "carolina-panthers", Name: "Carolina Panthers", ShortName: "Panthers", Abbreviation: "CAR", Aliases: []string{"car panthers", "carolina panthers", "panthers"}},
-		{Slug: "new-orleans-saints", Name: "New Orleans Saints", ShortName: "Saints", Abbreviation: "NO", Aliases: []string{"no saints", "neworleans saints", "new orleans saints", "saints"}},
-		{Slug: "tampa-bay-buccaneers", Name: "Tampa Bay Buccaneers", ShortName: "Buccaneers", Abbreviation: "TB", Aliases: []string{"tb bucs", "tb buccaneers", "tampabay bucs", "tampa bay bucs", "buccaneers"}},
-		{Slug: "arizona-cardinals", Name: "Arizona Cardinals", ShortName: "Cardinals", Abbreviation: "ARI", Aliases: []string{"ari cardinals", "arizona cardinals", "cardinals"}},
-		{Slug: "los-angeles-rams", Name: "Los Angeles Rams", ShortName: "Rams", Abbreviation: "LAR", Aliases: []string{"la rams", "losangeles rams", "st louis rams", "rams"}},
-		{Slug: "san-francisco-49ers", Name: "San Francisco 49ers", ShortName: "49ers", Abbreviation: "SF", Aliases: []string{"sf 49ers", "sanfrancisco 49ers", "san francisco 49ers", "niners", "49ers"}},
-		{Slug: "seattle-seahawks", Name: "Seattle Seahawks", ShortName: "Seahawks", Abbreviation: "SEA", Aliases: []string{"sea seahawks", "seattle seahawks", "seahawks"}},
-	}
 }

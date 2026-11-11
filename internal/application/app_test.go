@@ -10,6 +10,42 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
+// testTeams is the hardcoded test data that was previously in SeedNFLTeams
+var testTeams = []domain.Team{
+	{Slug: "buffalo-bills", Name: "Buffalo Bills", ShortName: "Bills", Abbreviation: "BUF", Aliases: []string{"bills", "buff bills"}},
+	{Slug: "miami-dolphins", Name: "Miami Dolphins", ShortName: "Dolphins", Abbreviation: "MIA", Aliases: []string{"miami dflns", "miami dolphins", "dolphins"}},
+	{Slug: "new-england-patriots", Name: "New England Patriots", ShortName: "Patriots", Abbreviation: "NE", Aliases: []string{"n e patriots", "n epatriots", "new england", "patriots"}},
+	{Slug: "new-york-jets", Name: "New York Jets", ShortName: "Jets", Abbreviation: "NYJ", Aliases: []string{"ny jets", "n y jets", "new york jets", "jets"}},
+	{Slug: "baltimore-ravens", Name: "Baltimore Ravens", ShortName: "Ravens", Abbreviation: "BAL", Aliases: []string{"balt ravs", "balt ravens", "ravens"}},
+	{Slug: "cincinnati-bengals", Name: "Cincinnati Bengals", ShortName: "Bengals", Abbreviation: "CIN", Aliases: []string{"cincy bengals", "cincinnati", "bengals"}},
+	{Slug: "cleveland-browns", Name: "Cleveland Browns", ShortName: "Browns", Abbreviation: "CLE", Aliases: []string{"cle browns", "cleveland", "browns"}},
+	{Slug: "pittsburgh-steelers", Name: "Pittsburgh Steelers", ShortName: "Steelers", Abbreviation: "PIT", Aliases: []string{"pittsburgh steelers", "steelers"}},
+	{Slug: "houston-texans", Name: "Houston Texans", ShortName: "Texans", Abbreviation: "HOU", Aliases: []string{"hou texans", "houston texans", "texans"}},
+	{Slug: "indianapolis-colts", Name: "Indianapolis Colts", ShortName: "Colts", Abbreviation: "IND", Aliases: []string{"ind colts", "indianapolis colts", "colts"}},
+	{Slug: "jacksonville-jaguars", Name: "Jacksonville Jaguars", ShortName: "Jaguars", Abbreviation: "JAX", Aliases: []string{"jax jaguars", "jacksonville jaguars", "jaguars"}},
+	{Slug: "tennessee-titans", Name: "Tennessee Titans", ShortName: "Titans", Abbreviation: "TEN", Aliases: []string{"ten titans", "tennessee titans", "titans"}},
+	{Slug: "denver-broncos", Name: "Denver Broncos", ShortName: "Broncos", Abbreviation: "DEN", Aliases: []string{"den broncos", "denver broncos", "broncos"}},
+	{Slug: "kansas-city-chiefs", Name: "Kansas City Chiefs", ShortName: "Chiefs", Abbreviation: "KC", Aliases: []string{"k c chiefs", "kansascity chiefs", "kansas city", "chiefs"}},
+	{Slug: "las-vegas-raiders", Name: "Las Vegas Raiders", ShortName: "Raiders", Abbreviation: "LV", Aliases: []string{"lv raiders", "lasvegas raiders", "vegas raiders", "oakland raiders", "raiders"}},
+	{Slug: "los-angeles-chargers", Name: "Los Angeles Chargers", ShortName: "Chargers", Abbreviation: "LAC", Aliases: []string{"la chargers", "losangeles chargers", "san diego chargers", "chargers"}},
+	{Slug: "dallas-cowboys", Name: "Dallas Cowboys", ShortName: "Cowboys", Abbreviation: "DAL", Aliases: []string{"dallas cowboys", "cowboys"}},
+	{Slug: "new-york-giants", Name: "New York Giants", ShortName: "Giants", Abbreviation: "NYG", Aliases: []string{"ny giants", "n y giants", "new york giants", "giants"}},
+	{Slug: "philadelphia-eagles", Name: "Philadelphia Eagles", ShortName: "Eagles", Abbreviation: "PHI", Aliases: []string{"philly eagles", "philadelphia eagles", "eagles"}},
+	{Slug: "washington-commanders", Name: "Washington Commanders", ShortName: "Commanders", Abbreviation: "WSH", Aliases: []string{"washington", "wsh commanders", "washington commanders", "redskins"}},
+	{Slug: "chicago-bears", Name: "Chicago Bears", ShortName: "Bears", Abbreviation: "CHI", Aliases: []string{"chi bears", "chicago bears", "bears"}},
+	{Slug: "detroit-lions", Name: "Detroit Lions", ShortName: "Lions", Abbreviation: "DET", Aliases: []string{"detroit lions", "lions"}},
+	{Slug: "green-bay-packers", Name: "Green Bay Packers", ShortName: "Packers", Abbreviation: "GB", Aliases: []string{"gb packers", "greenbay packers", "green bay", "packers"}},
+	{Slug: "minnesota-vikings", Name: "Minnesota Vikings", ShortName: "Vikings", Abbreviation: "MIN", Aliases: []string{"min vikings", "minnesota vikings", "vikings"}},
+	{Slug: "atlanta-falcons", Name: "Atlanta Falcons", ShortName: "Falcons", Abbreviation: "ATL", Aliases: []string{"atl falcons", "atlanta falcons", "falcons"}},
+	{Slug: "carolina-panthers", Name: "Carolina Panthers", ShortName: "Panthers", Abbreviation: "CAR", Aliases: []string{"car panthers", "carolina panthers", "panthers"}},
+	{Slug: "new-orleans-saints", Name: "New Orleans Saints", ShortName: "Saints", Abbreviation: "NO", Aliases: []string{"no saints", "neworleans saints", "new orleans saints", "saints"}},
+	{Slug: "tampa-bay-buccaneers", Name: "Tampa Bay Buccaneers", ShortName: "Buccaneers", Abbreviation: "TB", Aliases: []string{"tb bucs", "tb buccaneers", "tampabay bucs", "tampa bay bucs", "buccaneers"}},
+	{Slug: "arizona-cardinals", Name: "Arizona Cardinals", ShortName: "Cardinals", Abbreviation: "ARI", Aliases: []string{"ari cardinals", "arizona cardinals", "cardinals"}},
+	{Slug: "los-angeles-rams", Name: "Los Angeles Rams", ShortName: "Rams", Abbreviation: "LAR", Aliases: []string{"la rams", "losangeles rams", "st louis rams", "rams"}},
+	{Slug: "san-francisco-49ers", Name: "San Francisco 49ers", ShortName: "49ers", Abbreviation: "SF", Aliases: []string{"sf 49ers", "sanfrancisco 49ers", "san francisco 49ers", "niners", "49ers"}},
+	{Slug: "seattle-seahawks", Name: "Seattle Seahawks", ShortName: "Seahawks", Abbreviation: "SEA", Aliases: []string{"sea seahawks", "seattle seahawks", "seahawks"}},
+}
+
 type mockRepository struct {
 	stories []domain.Story
 }
@@ -141,7 +177,7 @@ func TestRunIngestWithRegistryWithTeamRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create registry: %v", err)
 	}
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	app := New(WithRepository(repo), WithFetcherMap(map[string]domain.FeedFetcher{"test-feed": fetcher}), WithRegistry(registry), WithTeamRegistry(teamReg))
 	result := app.RunIngest(context.Background())
 	if result.StoriesCreated != 1 {
@@ -384,7 +420,7 @@ func TestRunIngestRegistryMultipleStories(t *testing.T) {
 }
 
 func TestWithTeamRegistry(t *testing.T) {
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	app := New(WithTeamRegistry(teamReg))
 	if app.teamRegistry != teamReg {
 		t.Error("team registry not set correctly")
@@ -396,7 +432,7 @@ func TestRunIngestWithTeamRegistry(t *testing.T) {
 	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
 		{Title: "Giants win Super Bowl", Source: "test", PublishedAt: time.Now(), Summary: "The Giants defeated the Chiefs", URL: "https://test.com"},
 	})
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	app := New(WithRepository(repo), WithFeedFetchers(fetcher), WithTeamRegistry(teamReg))
 	result := app.RunIngest(context.Background())
 	if result.StoriesCreated != 1 {
@@ -430,7 +466,7 @@ func TestRunIngestWithTeamRegistryAndEntities(t *testing.T) {
 	fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
 		{Title: "49ers trade for WR", Source: "test", PublishedAt: time.Now(), Summary: "The 49ers make a trade", URL: "https://test.com", Entities: []string{"san-francisco-49ers"}},
 	})
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	app := New(WithRepository(repo), WithFeedFetchers(fetcher), WithTeamRegistry(teamReg))
 	result := app.RunIngest(context.Background())
 	if result.StoriesCreated != 1 {
@@ -497,7 +533,7 @@ func TestExtractTeams_WithRegistry(t *testing.T) {
 		Summary:  "The Giants defeated the Chiefs",
 		Entities: []string{},
 	}
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	result := extractTeams(story, teamReg)
 	if len(result.Entities) != 2 {
 		t.Errorf("expected 2 entities extracted, got %v", result.Entities)
@@ -526,7 +562,7 @@ func TestExtractTeams_Deduplication(t *testing.T) {
 		Summary:  "The Giants are great",
 		Entities: []string{"new-york-giants"},
 	}
-	teamReg := domain.DefaultTeamRegistry()
+	teamReg := domain.NewTeamRegistryFromSlice(testTeams)
 	result := extractTeams(story, teamReg)
 	// Should not add duplicate Giants
 	count := 0
