@@ -3,13 +3,43 @@
     <article>
       <header>
         <h1 class="content-title">{{ .Title }}</h1>
-        {{ if .Params.source }}
+        {{ if .Params.storyID }}
+        <p class="content-source">
+          <strong>Multi-source story</strong> (ID: {{ .Params.storyID }})
+        </p>
+        {{ else if .Params.source }}
         <p class="content-source">Source: {{ .Params.source }}</p>
         {{ end }}
         <time class="content-date" datetime="{{ .PublishDate.Format "2006-01-02T15:04:05Z07:00" }}">
           {{ .PublishDate.Format "January 2, 2006" }}
         </time>
       </header>
+      
+      {{ if .Params.articles }}
+      {{/* Multi-source story detail */}}
+      <div class="content-body">
+        <p class="content-intro">This page aggregates reporting from multiple sources on this story.</p>
+        
+        <h2>Reporting Sources</h2>
+        <ul class="content-sources-list">
+          {{ range .Params.articles }}
+          <li class="content-source-item">
+            <h3>{{ .source }}</h3>
+            <p><strong>Title:</strong> <a href="{{ .sourceURL }}">{{ .title }}</a></p>
+            <p><strong>Published:</strong> {{ .published }}</p>
+            <p><a href="{{ .sourceURL }}" target="_blank" rel="noopener noreferrer">View original article</a></p>
+          </li>
+          {{ end }}
+        </ul>
+        
+        <h2>Story Timeline</h2>
+        <ul class="content-timeline">
+          <li><strong>First published:</strong> {{ .Params.firstPublished }}</li>
+          <li><strong>Last published:</strong> {{ .Params.lastPublished }}</li>
+        </ul>
+      </div>
+      {{ else }}
+      {{/* Single-source story */}}
       <div class="content-body">
         {{ .Content }}
       </div>
@@ -24,8 +54,9 @@
       </aside>
       {{ end }}
       <nav class="content-links">
-        <a href="{{ .Params.url }}" target="_blank" rel="noopener noreferrer">Read original article</a>
+        <a href="{{ .Params.sourceURL }}" target="_blank" rel="noopener noreferrer">Read original article</a>
       </nav>
+      {{ end }}
     </article>
   </section>
 {{ end }}

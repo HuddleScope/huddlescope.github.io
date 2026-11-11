@@ -355,6 +355,51 @@ main {
   margin-top: 1rem;
 }
 
+/* Multi-source story sources list */
+.content-sources-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 1.5rem;
+}
+
+.content-source-item {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background-color: #fafafa;
+}
+
+@media (prefers-color-scheme: dark) {
+  .content-source-item {
+    background-color: #1e1e1e;
+    border-color: #333;
+  }
+}
+
+.content-source-item h3 {
+  margin-top: 0;
+}
+
+.content-source-item a {
+  color: #0066cc;
+}
+
+.content-source-item a:hover,
+.content-source-item a:focus {
+  text-decoration: underline;
+}
+
+.content-timeline {
+  list-style: none;
+  padding: 0;
+  margin-top: 1.5rem;
+}
+
+.content-timeline li {
+  margin-bottom: 0.5rem;
+}
+
 .content-entities {
   margin-top: 1.5rem;
   padding: 1rem;

@@ -10,4 +10,11 @@ language = "en"
 priority = 1
 entities = ["team-slug"]
 date = {{ .Date }}
+slug = ""
+storyID = ""
+headline = ""
+firstPublished = ""
+lastPublished = ""
+firstSeen = ""
+articles: []
 +++

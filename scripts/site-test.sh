@@ -78,6 +78,14 @@ if [[ ! -f "$WEB_DIR/public/stories/index.html" ]]; then
   exit 1
 fi
 
+# HS-016: Verify multi-source story structure exists
+if ! find "$WEB_DIR/public" -name "*multi-source*" -o -name "*top-free-agents*" | grep -q .; then
+  log "FAIL: multi-source story page not found"
+  exit 1
+fi
+
+log "PASS: HS-016 multi-source story structure (story page exists)"
+
 # Verify at least one source page exists
 if [[ ! -f "$WEB_DIR/public/sources/index.html" ]]; then
   log "FAIL: sources/index.html not found"
