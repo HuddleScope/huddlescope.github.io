@@ -30,7 +30,7 @@ jobs:
       - name: Install Hugo
         run: |
           HUGO_VERSION="0.169.0"
-          HUGO_BINARY="hugo_${HUGO_VERSION}_extended_linux-amd64.tar.gz"
+          HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
           curl -sL "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_BINARY}" | tar -xzf - hugo
           sudo mv hugo /usr/local/bin/
           echo "Hugo version: $(hugo version)"
