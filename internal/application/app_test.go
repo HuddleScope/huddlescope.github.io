@@ -9,6 +9,26 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
+func TestNewGroupingResult(t *testing.T) {
+	result := NewGroupingResult()
+
+	if result.GroupsCreated != 0 {
+		t.Errorf("Expected GroupsCreated=0, got %d", result.GroupsCreated)
+	}
+	if result.GroupsMerged != 0 {
+		t.Errorf("Expected GroupsMerged=0, got %d", result.GroupsMerged)
+	}
+	if result.ArticlesGrouped != 0 {
+		t.Errorf("Expected ArticlesGrouped=0, got %d", result.ArticlesGrouped)
+	}
+	if result.ArticlesSolo != 0 {
+		t.Errorf("Expected ArticlesSolo=0, got %d", result.ArticlesSolo)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected Errors=[], got %v", result.Errors)
+	}
+}
+
 func TestAppWithScorer(t *testing.T) {
 	repo := storage.NewMemoryRepository()
 
@@ -69,6 +89,43 @@ func TestAppWithScorer(t *testing.T) {
 		// Note: story-1 should be confirmed, story-2 should be unverified
 		// After clustering, we get groups; at least one should have the unverified note
 		t.Logf("Notes from first breakdown: %v", result.Breakdowns[0].Notes)
+	}
+}
+
+func TestRunScoringWithNilScorer(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	clusterer := domain.NewClusterer()
+
+	// Insert a test story
+	now := time.Now().UTC()
+	story := domain.Story{
+		ID:          "story-1",
+		Title:       "Test Story",
+		Source:      "feed-1",
+		PublishedAt: now.Add(-1 * time.Hour),
+		Summary:     "Summary",
+		ArticleIDs:  []string{"art-1"},
+		Headline:    "Test Story",
+	}
+	if _, err := repo.Upsert(story); err != nil {
+		t.Fatalf("Failed to insert: %v", err)
+	}
+
+	app := New(
+		WithRepository(repo),
+		WithClusterer(clusterer),
+		// No WithScorer - scorer is nil
+	)
+	result := app.RunScoring(context.Background(), now)
+
+	if len(result.Errors) != 1 {
+		t.Errorf("Expected 1 error for nil scorer, got %d", len(result.Errors))
+	}
+	if result.Errors[0].Error() != "scorer not configured" {
+		t.Errorf("Expected 'scorer not configured', got %v", result.Errors[0])
+	}
+	if len(result.Breakdowns) != 0 {
+		t.Errorf("Expected 0 breakdowns for nil scorer, got %d", len(result.Breakdowns))
 	}
 }
 
