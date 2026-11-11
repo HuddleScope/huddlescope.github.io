@@ -17,7 +17,5 @@
   {{ end }}
 
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  {{ if .IsHome }}
-  <link rel="canonical" href="{{ .Permalink }}">
-  {{ end }}
+  <link rel="canonical" href="{{ .Params.canonical | default .Permalink }}">
 </head>

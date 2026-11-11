@@ -1,18 +1,77 @@
 +++
-title = "Top 10 free agent signings of the offseason"
-description = "A ranking of the most impactful free agent moves so far this summer"
-source = "NFL.com"
-sourceURL = "https://www.nfl.com/news/top-free-agent-signings-2024"
-publication = "NFL.com"
-license = "News usage permitted"
-acceptableUse = "allowed"
-language = "en"
-priority = 1
-entities = ["free-agency", "nfl"]
-weight = 9
-date = 2024-07-25T15:30:00Z
+title = "Top free agents 2024: Complete player movement tracker"
+description = "Real-time tracking of free agent signings and movements across the league"
+source = "multi"
+storyID = "top-free-agents-2024"
+headline = "Top free agents 2024"
+firstPublished = "2024-03-10T10:00:00Z"
+lastPublished = "2024-03-15T14:00:00Z"
+firstSeen = "2024-03-10T09:00:00Z"
+
+[[articles]]
+  source = "ESPN"
+  sourceURL = "https://www.espn.com/nfl/story/_/id/40000001"
+  title = "Top free agents 2024: Every signing, trade"
+  published = "2024-03-10T10:00:00Z"
+
+[[articles]]
+  source = "NFL.com"
+  sourceURL = "https://www.nfl.com/news/top-free-agents-2024"
+  title = "2024 NFL free agency: Complete tracking"
+  published = "2024-03-10T11:30:00Z"
+
+[[articles]]
+  source = "CBS Sports"
+  sourceURL = "https://www.cbssports.com/nfl/free-agents/"
+  title = "2024 NFL free agency tracker"
+  published = "2024-03-10T12:00:00Z"
+
+[[articles]]
+  source = "The Athletic"
+  sourceURL = "https://theathletic.com/nfl/free-agents/"
+  title = "2024 NFL free agency: Analysis and projections"
+  published = "2024-03-10T13:00:00Z"
 +++
 
-With the trade deadline approaching and training camp around the corner, here are the biggest free agent acquisitions that could change playoff races.
+This page aggregates reporting from multiple sources on this story.
 
-Teams like the Eagles, 49ers, and Ravens made major moves to address key needs.
+## Reporting Sources
+
+### ESPN
+
+**Title:** [Top free agents 2024: Every signing, trade](https://www.espn.com/nfl/story/_/id/40000001)
+
+**Published:** 2024-03-10T10:00:00Z
+
+[View original article](https://www.espn.com/nfl/story/_/id/40000001)
+
+### NFL.com
+
+**Title:** [2024 NFL free agency: Complete tracking](https://www.nfl.com/news/top-free-agents-2024)
+
+**Published:** 2024-03-10T11:30:00Z
+
+[View original article](https://www.nfl.com/news/top-free-agents-2024)
+
+### CBS Sports
+
+**Title:** [2024 NFL free agency tracker](https://www.cbssports.com/nfl/free-agents/)
+
+**Published:** 2024-03-10T12:00:00Z
+
+[View original article](https://www.cbssports.com/nfl/free-agents/)
+
+### The Athletic
+
+**Title:** [2024 NFL free agency: Analysis and projections](https://theathletic.com/nfl/free-agents/)
+
+**Published:** 2024-03-10T13:00:00Z
+
+[View original article](https://theathletic.com/nfl/free-agents/)
+
+## Story Timeline
+
+- First published: 2024-03-10T10:00:00Z
+- Last published: 2024-03-15T14:00:00Z
+
+[Back to stories](/stories/)
