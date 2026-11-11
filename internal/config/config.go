@@ -766,3 +766,12 @@ func (c Config) ToDomainTeams() []domain.Team {
 	}
 	return teams
 }
+
+// TeamRegistry returns a TeamRegistry initialized with the teams from config.
+// If no teams are configured, returns the default NFL teams registry.
+func (c Config) TeamRegistry() *domain.TeamRegistry {
+	if len(c.Teams) > 0 {
+		return domain.NewTeamRegistryFromSlice(c.ToDomainTeams())
+	}
+	return domain.DefaultTeamRegistry()
+}

@@ -201,3 +201,8 @@ func SeedNFLTeams() []Team {
 func DefaultTeamRegistry() *TeamRegistry {
 	return NewTeamRegistry(SeedNFLTeams()...)
 }
+
+// NewTeamRegistryFromSlice creates a TeamRegistry from a slice of Team.
+func NewTeamRegistryFromSlice(teams []Team) *TeamRegistry {
+	return NewTeamRegistry(teams...)
+}
