@@ -32,6 +32,29 @@ type Source struct {
 	AcceptableUse string
 }
 
+// YAMLTeam represents the structure of a team in YAML config files.
+type YAMLTeam struct {
+	Slug         string   `yaml:"slug"`
+	Name         string   `yaml:"name"`
+	ShortName    string   `yaml:"short_name"`
+	Abbreviation string   `yaml:"abbreviation"`
+	Aliases      []string `yaml:"aliases,omitempty"`
+	Division     string   `yaml:"division,omitempty"`
+}
+
+// toConfigTeam converts YAMLTeam to config Team.
+func (yt YAMLTeam) toConfigTeam() Team {
+	//nolint:staticcheck // S1016: YAMLTeam and Team have different fields, struct literal required
+	return Team{
+		Slug:         yt.Slug,
+		Name:         yt.Name,
+		ShortName:    yt.ShortName,
+		Abbreviation: yt.Abbreviation,
+		Aliases:      yt.Aliases,
+		Division:     yt.Division,
+	}
+}
+
 // Team represents an NFL team with all its identifying information.
 type Team struct {
 	Slug         string   // Stable URL slug (e.g., "new-york-giants")
@@ -441,15 +464,6 @@ func (c *Config) loadTeamsFromYAML() ([]Team, error) {
 		return nil, fmt.Errorf("failed to read teams file %q: %w", c.TeamsFile, err)
 	}
 
-	type YAMLTeam struct {
-		Slug         string   `yaml:"slug"`
-		Name         string   `yaml:"name"`
-		ShortName    string   `yaml:"short_name"`
-		Abbreviation string   `yaml:"abbreviation"`
-		Aliases      []string `yaml:"aliases,omitempty"`
-		Division     string   `yaml:"division,omitempty"`
-	}
-
 	type YAMLConfig struct {
 		Teams []YAMLTeam `yaml:"teams"`
 	}
@@ -486,18 +500,12 @@ func (c *Config) loadTeamsFromYAML() ([]Team, error) {
 		}
 		seenSlugs[yt.Slug] = true
 
-		teams = append(teams, Team{
-			Slug:         yt.Slug,
-			Name:         yt.Name,
-			ShortName:    yt.ShortName,
-			Abbreviation: yt.Abbreviation,
-			Aliases:      yt.Aliases,
-			Division:     yt.Division,
-		})
+		teams = append(teams, yt.toConfigTeam())
 	}
 
 	return teams, nil
 }
+
 
 // loadEnvFile loads key=value pairs from a file.
 // #nosec G304: path comes from operator --config flag or env, not untrusted input
