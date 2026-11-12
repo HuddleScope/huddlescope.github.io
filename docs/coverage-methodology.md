@@ -10,9 +10,10 @@ This document describes how test coverage is calculated and enforced in the Hudd
 
 Coverage is calculated for all packages under `internal/...` only. This includes:
 
-- `internal/config`: Configuration handling and environment variable management
-- `internal/adapters`: Adapter implementations for storage and RSS fetching
+- `internal/domain`: Core domain models and interfaces
 - `internal/application`: Business logic and orchestration
+- `internal/config`: Configuration handling (sources, teams) and environment variable management
+- `internal/adapters`: Adapter implementations for storage, RSS fetching, Hugo publishing, and publishing
 
 ### Method
 
