@@ -935,11 +935,11 @@ func TestRunIngestWithRegistryNoEnabledSources(t *testing.T) {
 	// Create registry with disabled sources
 	registry, err := domain.NewFeedRegistry(
 		domain.FeedSource{
-			ID:        "feed-1",
-			URL:       "http://example.com/feed",
+			ID:          "feed-1",
+			URL:         "http://example.com/feed",
 			Publication: "Feed 1",
-			Priority:  10,
-			Enabled:   false, // Disabled
+			Priority:    10,
+			Enabled:     false, // Disabled
 		},
 	)
 	if err != nil {

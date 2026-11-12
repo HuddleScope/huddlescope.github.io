@@ -460,11 +460,11 @@ func buildRegistry(ts *httptest.Server, loader *FixtureLoader, enabledOnly bool)
 			continue
 		}
 		sources = append(sources, domain.FeedSource{
-			ID:        f.SourceID,
-			URL:       ts.URL + "/feeds/" + f.SourceID + "/" + f.Version,
+			ID:          f.SourceID,
+			URL:         ts.URL + "/feeds/" + f.SourceID + "/" + f.Version,
 			Publication: f.SourceID,
-			Priority:  10,
-			Enabled:   f.IsEnabled,
+			Priority:    10,
+			Enabled:     f.IsEnabled,
 		})
 	}
 	registry, err := domain.NewFeedRegistry(sources...)
@@ -568,11 +568,11 @@ func TestRegistryBuild(t *testing.T) {
 	var sources []domain.FeedSource
 	for _, f := range feeds {
 		sources = append(sources, domain.FeedSource{
-			ID:        f.SourceID,
-			URL:       "http://example.com/feeds/" + f.SourceID + "/" + f.Version,
+			ID:          f.SourceID,
+			URL:         "http://example.com/feeds/" + f.SourceID + "/" + f.Version,
 			Publication: f.SourceID,
-			Priority:  10,
-			Enabled:   f.IsEnabled,
+			Priority:    10,
+			Enabled:     f.IsEnabled,
 		})
 	}
 	registry, err := domain.NewFeedRegistry(sources...)
