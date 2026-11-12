@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -325,12 +326,14 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
+
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
+
 	_, err = io.Copy(out, in)
 	return err
 }
@@ -538,7 +541,9 @@ func TestFixtureServerETag(t *testing.T) {
 		t.Fatalf("first request failed: %v", err)
 	}
 	etag1 := resp1.Header.Get("ETag")
-	resp1.Body.Close()
+	if err := resp1.Body.Close(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("closing first response body: %v", err)
+	}
 	if etag1 == "" {
 		t.Fatal("no ETag in response")
 	}
@@ -553,7 +558,9 @@ func TestFixtureServerETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second request failed: %v", err)
 	}
-	defer resp2.Body.Close()
+	if err := resp2.Body.Close(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("closing second response body: %v", err)
+	}
 
 	if resp2.StatusCode != http.StatusNotModified {
 		t.Errorf("expected 304 Not Modified, got %d", resp2.StatusCode)
