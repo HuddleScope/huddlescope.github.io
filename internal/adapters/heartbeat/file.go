@@ -64,7 +64,7 @@ func (p *FilePublisher) Publish(ctx context.Context, hb *domain.Heartbeat) error
 // Load reads the heartbeat from the configured file.
 // Returns (heartbeat, found, error).
 func Load(path string) (*domain.Heartbeat, bool, error) {
-// #nosec G304: path is controlled by operator (heartbeat path configurable via HSC_HEARTBEAT_FILE)
+	// #nosec G304: path is controlled by operator (heartbeat path configurable via HSC_HEARTBEAT_FILE)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
