@@ -195,16 +195,22 @@ func NewScorer() *Scorer {
 	}
 }
 
-// WithPolicy overrides the scoring policy.
+// WithPolicy returns a copy of the scorer with the given policy.
+// The receiver is not mutated, so a Scorer shared between concurrent
+// runs stays safe.
 func (s *Scorer) WithPolicy(p ScorePolicy) *Scorer {
-	s.Policy = p
-	return s
+	cp := *s
+	cp.Policy = p
+	return &cp
 }
 
-// WithTime sets a deterministic time anchor.
+// WithTime returns a copy of the scorer with a deterministic time anchor.
+// The receiver is not mutated, so a Scorer shared between concurrent
+// runs stays safe.
 func (s *Scorer) WithTime(t time.Time) *Scorer {
-	s.Now = t.UTC()
-	return s
+	cp := *s
+	cp.Now = t.UTC()
+	return &cp
 }
 
 // computeFreshnessScore returns a score [0,100] based on article age.

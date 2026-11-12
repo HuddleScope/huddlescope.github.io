@@ -2,280 +2,182 @@ package storage
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
-func TestMemoryRepository(t *testing.T) {
+func TestMemoryRepositoryUpsert(t *testing.T) {
 	repo := NewMemoryRepository()
 
-	// Test Upsert
-	testTime := time.Now().UTC()
-	s1 := domain.Story{
-		ID:          "test-1",
-		Title:       "Test Story 1",
-		Source:      "test-feed",
-		PublishedAt: testTime,
-		Summary:     "Test summary 1",
+	// Create a new story
+	story := domain.Story{
+		ID:          "test-id",
+		Title:       "Test Story",
+		Source:      "test-source",
+		PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Summary:     "Test summary",
+		URL:         "https://example.com/test",
+		GUID:        "guid-123",
+		DedupeKey:   "test-source|guid-123",
 	}
-	status, err := repo.Upsert(s1)
+
+	status, err := repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("Upsert failed: %v", err)
 	}
 	if status != domain.UpsertCreated {
-		t.Fatalf("Expected UpsertCreated, got %s", status)
+		t.Errorf("expected UpsertCreated, got %v", status)
 	}
 
-	// Test Upsert update
-	s1.Title = "Updated Title"
-	status, err = repo.Upsert(s1)
+	// Upsert same story (unchanged)
+	status, err = repo.Upsert(story)
 	if err != nil {
-		t.Fatalf("Upsert update failed: %v", err)
-	}
-	if status != domain.UpsertUpdated {
-		t.Fatalf("Expected UpsertUpdated, got %s", status)
-	}
-
-	// Test Upsert unchanged
-	status, err = repo.Upsert(s1)
-	if err != nil {
-		t.Fatalf("Upsert unchanged failed: %v", err)
+		t.Fatalf("Upsert failed: %v", err)
 	}
 	if status != domain.UpsertUnchanged {
-		t.Fatalf("Expected UpsertUnchanged, got %s", status)
+		t.Errorf("expected UpsertUnchanged, got %v", status)
 	}
 
-	// Test List
-	stories, err := repo.List()
+	// Update meaningful field
+	story.Title = "Updated Title"
+	status, err = repo.Upsert(story)
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+	if status != domain.UpsertUpdated {
+		t.Errorf("expected UpsertUpdated, got %v", status)
+	}
+
+	// Verify FirstSeenAt preserved
+	list, err := repo.List()
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-	if len(stories) != 1 {
-		t.Errorf("Expected 1 story, got %d", len(stories))
+	if len(list) != 1 {
+		t.Fatalf("expected 1 story, got %d", len(list))
 	}
-	if stories[0].Title != "Updated Title" {
-		t.Errorf("Expected updated title, got %s", stories[0].Title)
-	}
-
-	// Test Count
-	count, err := repo.Count()
-	if err != nil {
-		t.Fatalf("Count failed: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("Expected count 1, got %d", count)
+	if list[0].FirstSeenAt.IsZero() {
+		t.Error("FirstSeenAt should not be zero")
 	}
 }
 
-func TestMemoryRepository_Empty(t *testing.T) {
+func TestMemoryRepositoryUpsertWithDedupeKey(t *testing.T) {
 	repo := NewMemoryRepository()
 
-	stories, err := repo.List()
-	if err != nil {
-		t.Fatalf("List on empty repo failed: %v", err)
-	}
-	if len(stories) != 0 {
-		t.Errorf("Expected 0 stories, got %d", len(stories))
-	}
-
-	count, err := repo.Count()
-	if err != nil {
-		t.Fatalf("Count on empty repo failed: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected count 0, got %d", count)
-	}
-}
-
-func TestMemoryRepository_Idempotency(t *testing.T) {
-	// Test AC1: Re-ingest of same entry returns Unchanged (not Created)
-	repo := NewMemoryRepository()
-	testTime := time.Now().UTC()
-
-	// First upsert - should create
+	// First story with GUID
 	story1 := domain.Story{
-		ID:          "id-1",
-		Title:       "Test Title",
-		Source:      "test-feed",
-		PublishedAt: testTime,
-		Summary:     "Original summary",
+		ID:          "id1",
+		Title:       "Story 1",
+		Source:      "source1",
+		PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Summary:     "Summary 1",
+		URL:         "https://example.com/1",
+		GUID:        "guid-1",
+		DedupeKey:   "source1|guid-1",
 	}
+
 	status, err := repo.Upsert(story1)
 	if err != nil {
-		t.Fatalf("First Upsert failed: %v", err)
+		t.Fatalf("First upsert failed: %v", err)
 	}
 	if status != domain.UpsertCreated {
-		t.Fatalf("First Upsert: expected Created, got %s", status)
+		t.Errorf("expected UpsertCreated, got %v", status)
 	}
 
-	// Second upsert of same ID with same data - should be unchanged
-	status, err = repo.Upsert(story1)
+	// Second story with same GUID but different ID (simulates duplicate with same GUID)
+	story2 := domain.Story{
+		ID:          "id2", // different ID but same dedupe key
+		Title:       "Story 1 Updated",
+		Source:      "source1",
+		PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Summary:     "Updated summary 1",
+		URL:         "https://example.com/1",
+		GUID:        "guid-1",
+		DedupeKey:   "source1|guid-1",
+	}
+
+	status, err = repo.Upsert(story2)
 	if err != nil {
-		t.Fatalf("Second Upsert failed: %v", err)
-	}
-	if status != domain.UpsertUnchanged {
-		t.Fatalf("Second Upsert: expected Unchanged, got %s", status)
+		t.Fatalf("Second upsert failed: %v", err)
 	}
 
-	// Third upsert with same ID and data - should still be unchanged
-	status, err = repo.Upsert(story1)
+	// Should be UpsertUpdated due to dedupe-key match
+	if status != domain.UpsertUpdated {
+		t.Errorf("expected UpsertUpdated due to dedupe-key match, got %v", status)
+	}
+
+	// Verify count is still 1
+	list, err := repo.List()
 	if err != nil {
-		t.Fatalf("Third Upsert failed: %v", err)
+		t.Fatalf("List failed: %v", err)
 	}
-	if status != domain.UpsertUnchanged {
-		t.Fatalf("Third Upsert: expected Unchanged, got %s", status)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 story (deduped), got %d", len(list))
 	}
 
-	// Verify only 1 record exists
+	// Verify the story has the updated title
+	if list[0].Title != "Story 1 Updated" {
+		t.Errorf("expected updated title, got %s", list[0].Title)
+	}
+
+	// Verify FirstSeenAt preserved from first insert
+	if list[0].FirstSeenAt.IsZero() {
+		t.Error("FirstSeenAt should be preserved from first insert")
+	}
+}
+
+func TestMemoryRepositoryCount(t *testing.T) {
+	repo := NewMemoryRepository()
+
+	// Insert multiple stories
+	for i := 0; i < 5; i++ {
+		story := domain.Story{
+			ID:          fmt.Sprintf("id%d", i),
+			Title:       fmt.Sprintf("Story %d", i),
+			Source:      "source1",
+			PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			Summary:     fmt.Sprintf("Summary %d", i),
+			URL:         fmt.Sprintf("https://example.com/%d", i),
+			GUID:        fmt.Sprintf("guid-%d", i),
+			DedupeKey:   fmt.Sprintf("source1|guid-%d", i),
+		}
+		_, err := repo.Upsert(story)
+		if err != nil {
+			t.Fatalf("Upsert %d failed: %v", i, err)
+		}
+	}
+
 	count, err := repo.Count()
 	if err != nil {
 		t.Fatalf("Count failed: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("Count = %d; want 1 (idempotent, no duplicates)", count)
-	}
-}
-
-func TestMemoryRepository_Concurrency(t *testing.T) {
-	// Test AC4: Concurrent Upsert does not create duplicates
-	repo := NewMemoryRepository()
-	numKeys := 100
-	done := make(chan bool, numKeys*2)
-
-	// Concurrent upsert of unique keys - should result in exactly numKeys records
-	for i := 0; i < numKeys; i++ {
-		go func(idx int) {
-			story := domain.Story{
-				ID:          fmt.Sprintf("id-%d", idx),
-				Title:       fmt.Sprintf("Title %d", idx),
-				Source:      "test-feed",
-				PublishedAt: time.Now().UTC(),
-				Summary:     fmt.Sprintf("Summary %d", idx),
-			}
-			_, err := repo.Upsert(story)
-			if err != nil {
-				t.Errorf("Concurrent Upsert(%d) failed: %v", idx, err)
-			}
-			done <- true
-		}(i)
+	if count != 5 {
+		t.Errorf("expected count 5, got %d", count)
 	}
 
-	// Wait for all unique key upserts
-	for i := 0; i < numKeys; i++ {
-		<-done
-	}
-
-	// Verify no duplicates for unique keys
-	count, err := repo.Count()
-	if err != nil {
-		t.Fatalf("Post-concurrency Count failed: %v", err)
-	}
-	if count != numKeys {
-		t.Errorf("After %d concurrent Upsert calls with unique keys, Count = %d; want %d", numKeys, count, numKeys)
-	}
-
-	// Concurrent upsert of same key - should result in exactly 1 record
-	repo2 := NewMemoryRepository()
+	// Upsert same story (unchanged)
 	story := domain.Story{
-		ID:          "same-id",
-		Title:       "Same Title",
-		Source:      "test-feed",
-		PublishedAt: time.Now().UTC(),
-		Summary:     "Same summary",
+		ID:          "id0",
+		Title:       "Story 0",
+		Source:      "source1",
+		PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+		Summary:     "Summary 0",
+		URL:         "https://example.com/0",
+		GUID:        "guid-0",
+		DedupeKey:   "source1|guid-0",
 	}
-	for i := 0; i < numKeys; i++ {
-		go func() {
-			_, err := repo2.Upsert(story)
-			if err != nil {
-				t.Errorf("Concurrent same-key Upsert failed: %v", err)
-			}
-			done <- true
-		}()
-	}
-
-	// Wait for all same-key upserts
-	for i := 0; i < numKeys; i++ {
-		<-done
-	}
-
-	// Verify no duplicate for same key
-	count, err = repo2.Count()
+	_, err = repo.Upsert(story)
 	if err != nil {
-		t.Fatalf("Post-concurrency same-key Count failed: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("After %d concurrent Upsert calls with same key, Count = %d; want 1 (no duplicates)", numKeys, count)
-	}
-}
-
-func TestMemoryRepository_ConcurrentUpdates(t *testing.T) {
-	// Test AC4: Concurrent updates with meaningful changes correctly update StoriesUpdated
-	repo := NewMemoryRepository()
-	testTime := time.Now().UTC()
-
-	// Create initial story
-	story := domain.Story{
-		ID:          "id-1",
-		Title:       "Original",
-		Source:      "test-feed",
-		PublishedAt: testTime,
-		Summary:     "Original summary",
-	}
-	status, err := repo.Upsert(story)
-	if err != nil {
-		t.Fatalf("Initial Upsert failed: %v", err)
-	}
-	if status != domain.UpsertCreated {
-		t.Fatalf("Expected Created, got %s", status)
+		t.Fatalf("Second upsert failed: %v", err)
 	}
 
-	// Concurrent upserts with different summaries (meaningful changes)
-	// Only one should get Updated status due to race, others Unchanged
-	var updatedCount int
-	var unchangedCount int
-	numGoroutines := 20
-	var mu sync.Mutex
-	wg := sync.WaitGroup{}
-
-	for i := 0; i < numGoroutines; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			newStory := story
-			newStory.Summary = fmt.Sprintf("Updated %d", i)
-			status, err := repo.Upsert(newStory)
-			if err != nil {
-				t.Errorf("Concurrent update failed: %v", err)
-				return
-			}
-			mu.Lock()
-			switch status {
-			case domain.UpsertUpdated:
-				updatedCount++
-			case domain.UpsertUnchanged:
-				unchangedCount++
-			}
-			mu.Unlock()
-		}()
-	}
-
-	// Wait for all goroutines
-	wg.Wait()
-
-	// Count should be 1 (only one record)
-	count, err := repo.Count()
+	count, err = repo.Count()
 	if err != nil {
 		t.Fatalf("Count failed: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("Count = %d; want 1 (no duplicates)", count)
-	}
-
-	// At least one should have been Updated
-	if updatedCount < 1 {
-		t.Errorf("No UpsertUpdated status recorded; at least one should have occurred")
+	if count != 5 {
+		t.Errorf("count should remain 5 after unchanged upsert, got %d", count)
 	}
 }

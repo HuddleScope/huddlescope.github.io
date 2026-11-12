@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
@@ -451,14 +452,15 @@ func TestRunIngestWithRegistry(t *testing.T) {
 	}
 }
 
-// mockFetcher is a mock FeedFetcher that returns predefined entries
-type mockFetcher struct {
+// legacyMockFetcher is a mock FeedFetcher used in legacy path tests
+// It supports failure simulation via fail flag
+type legacyMockFetcher struct {
 	entries []domain.FeedEntry
 	fail    bool
 	failMsg string
 }
 
-func (m *mockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+func (m *legacyMockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
 	if m.fail {
 		return nil, fmt.Errorf("fetcher error: %s", m.failMsg)
 	}
@@ -484,7 +486,7 @@ func TestRunIngestWithRegistryFetchError(t *testing.T) {
 	}
 
 	// Create fetcher that fails
-	fetcher := &mockFetcher{fail: true, failMsg: "network error"}
+	fetcher := &legacyMockFetcher{fail: true, failMsg: "network error"}
 
 	app := New(
 		WithRepository(repo),
@@ -873,5 +875,112 @@ func TestRunPipelineAllPhases(t *testing.T) {
 	}
 	if !result.Committed {
 		t.Error("Committed should be true")
+	}
+}
+
+// TestRunIngestWithLegacyFetchers tests the fallback path when registry is nil but fetchers is set
+func TestRunIngestWithLegacyFetchers(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// Create a mock fetcher that returns some entries
+	mockEntries := []domain.FeedEntry{
+		{
+			Title:       "Test Entry 1",
+			Source:      "feed-1",
+			PublishedAt: time.Now().UTC().Add(-1 * time.Hour),
+			Summary:     "Summary 1",
+			URL:         "https://example.com/1",
+			GUID:        "guid-1",
+		},
+		{
+			Title:       "Test Entry 2",
+			Source:      "feed-1",
+			PublishedAt: time.Now().UTC().Add(-2 * time.Hour),
+			Summary:     "Summary 2",
+			URL:         "https://example.com/2",
+			GUID:        "guid-2",
+		},
+	}
+
+	// Create a static fetcher (legacy path - registry is nil)
+	fetcher := rss.NewStaticFetcher(mockEntries)
+
+	app := New(WithRepository(repo), WithFeedFetchers(fetcher))
+	result := app.RunIngest(context.Background())
+
+	if result.EntriesFetched != 2 {
+		t.Errorf("Expected 2 entries fetched, got %d", result.EntriesFetched)
+	}
+	if result.StoriesCreated != 2 {
+		t.Errorf("Expected 2 stories created, got %d", result.StoriesCreated)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("Expected no errors, got %v", result.Errors)
+	}
+
+	// Verify stories were stored
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("Failed to list stories: %v", err)
+	}
+	if len(stories) != 2 {
+		t.Errorf("Expected 2 stories, got %d", len(stories))
+	}
+}
+
+// TestRunIngestWithRegistryNoEnabledSources tests when registry is set but no sources are enabled
+func TestRunIngestWithRegistryNoEnabledSources(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// Create registry with disabled sources
+	registry, err := domain.NewFeedRegistry(
+		domain.FeedSource{
+			ID:          "feed-1",
+			URL:         "http://example.com/feed",
+			Publication: "Feed 1",
+			Priority:    10,
+			Enabled:     false, // Disabled
+		},
+	)
+	if err != nil {
+		t.Fatalf("Failed to create registry: %v", err)
+	}
+
+	app := New(WithRepository(repo), WithRegistry(registry))
+	result := app.RunIngest(context.Background())
+
+	if result.StoriesSkipped != 0 {
+		t.Errorf("Expected 0 stories skipped, got %d", result.StoriesSkipped)
+	}
+	if result.EntriesFetched != 0 {
+		t.Errorf("Expected 0 entries fetched, got %d", result.EntriesFetched)
+	}
+}
+
+// mockFetcher is a simple fetcher implementation for testing
+type mockFetcher struct {
+	entries []domain.FeedEntry
+	err     error
+}
+
+func (f *mockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.entries, nil
+}
+
+// TestRunIngestWithFetcherError tests when fetcher returns an error
+func TestRunIngestWithFetcherError(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// Create a static fetcher that returns an error
+	fetcher := &mockFetcher{entries: nil, err: fmt.Errorf("fetch error")}
+
+	app := New(WithRepository(repo), WithFeedFetchers(fetcher))
+	result := app.RunIngest(context.Background())
+
+	if len(result.Errors) != 1 {
+		t.Errorf("Expected 1 error, got %d: %v", len(result.Errors), result.Errors)
 	}
 }
