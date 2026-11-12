@@ -1,0 +1,133 @@
+# GitHub Actions workflow for HuddleScope refresh and Pages deployment
+# HS-018: Create GitHub Actions refresh and Pages deployment workflow
+# Triggered manually via workflow_dispatch (Cloudflare is the authoritative scheduler)
+
+name: Refresh news
+
+on:
+  workflow_dispatch:
+    description: 'Manually trigger a news refresh and optional Pages deployment'
+    inputs:
+      publish:
+        description: 'Deploy to Pages after successful build'
+        required: true
+        default: 'true'
+        type: boolean
+
+# Cancel in-progress runs of this workflow on new dispatches
+# Ensures a fresh run only, avoiding race conditions on artifact upload/deploy
+concurrency:
+  group: refresh-news-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: default read access; only deploy job requires write
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Refresh and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: github-pages
+    env:
+      HSC_ENV: production
+      HSC_STORAGE_BACKEND: turso
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      HSC_HUGO_BASE_URL: https://huddlescope.github.io/
+      HSC_USER_AGENT: huddlescope-ci/0.1 (+https://huddlescope.github.io/)
+      HSC_LOOKBACK: 24h
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binaries
+        run: make build
+
+      - name: Run ingest pipeline
+        id: ingest
+        run: |
+          echo "Running ingestion pipeline..."
+          ./dist/ingest
+          echo "Ingestion completed"
+
+      - name: Export snapshot to Hugo data
+        id: export
+        run: |
+          echo "Running export pipeline..."
+          ./dist/export
+          echo "Export completed"
+
+      - name: Data safety guard
+        id: data-guard
+        run: |
+          # Prevent publishing an empty site by checking story count
+          DATA_FILE="web/data/homepage.json"
+          STORY_COUNT=$(jq -r '.stories | length' "$DATA_FILE" 2>/dev/null || echo "0")
+          echo "Stories in exported snapshot: $STORY_COUNT"
+          if [ "$STORY_COUNT" -lt 1 ]; then
+            echo "::warning::Exported snapshot has no stories; restoring last-known-good homepage.json"
+            git checkout -- "$DATA_FILE"
+            echo "Restored homepage.json from git"
+          else
+            echo "Snapshot contains $STORY_COUNT stories; proceeding"
+          fi
+
+      - name: Install Hugo extended
+        run: |
+          HUGO_VERSION="0.169.0"
+          HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
+          curl -sL "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_BINARY}" | tar -xzf - hugo
+          sudo mv hugo /usr/local/bin/
+          echo "Hugo version: $(hugo version)"
+
+      - name: Build Hugo site
+        run: |
+          make site
+
+      - name: Run site verification
+        run: |
+          chmod +x scripts/site-test.sh
+          bash scripts/site-test.sh
+
+      - name: Upload site artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-build
+          path: web/public/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Configure GitHub Pages
+        if: inputs.publish == 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact to GitHub Pages
+        if: inputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/public/
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    if: inputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

@@ -129,8 +129,21 @@ make site-watch
 - Edit `web/static/js/main.js` for JS enhancements (minimal, no tracking)
 
 ### Deployment
+
 The built site in `web/public/` can be deployed to GitHub Pages, Netlify, Vercel, or any static host.
-See issue #17 for Turso→Hugo JSON export and automated deployment.
+
+#### GitHub Pages (automatic via workflow)
+
+This repository uses a GitHub Actions workflow (`.github/workflows/refresh-news.yml`) to refresh news and deploy to GitHub Pages.
+
+- **Manual trigger**: Open the repository Actions tab and select **Run workflow** on the Refresh news workflow.
+- **Inputs**:
+  - `publish` (default `true`): Set to `false` to build the site without deploying.
+- **Secrets required**: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` must be configured in repository settings for production mode.
+- **Environment**: The workflow uses the `github-pages` environment and deploys via GitHub Pages with `pages: write` and `id-token: write` permissions.
+- **Safety**: If the export pipeline produces an empty snapshot (no stories), the workflow restores the last-committed homepage.json and warns instead of publishing an empty site.
+
+See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflow.
 
 ## Configuration
 
