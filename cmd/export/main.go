@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
@@ -67,6 +68,30 @@ func main() {
 
 	// Run snapshot export
 	result := app.RunSnapshot(context.Background(), time.Now())
+
+	// Update heartbeat with publish result (best-effort)
+	heartbeatPath := os.Getenv("HSC_HEARTBEAT_FILE")
+	if heartbeatPath == "" {
+		heartbeatPath = "web/data/heartbeat.json"
+	}
+	hb, found, err := heartbeat.Load(heartbeatPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load heartbeat for update: %v\n", err)
+		found = false
+	}
+	if !found {
+		hb = domain.NewHeartbeat("export-run")
+		hb.IngestedAt = nil
+	}
+	hb.MergePublication(result.PubResult, time.Now())
+	if err := hb.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: heartbeat validation failed: %v\n", err)
+	} else {
+		hbPub := heartbeat.NewFilePublisher(heartbeatPath)
+		if err := hbPub.Publish(context.Background(), hb); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update heartbeat: %v\n", err)
+		}
+	}
 
 	// Output result
 	fmt.Printf("Snapshot export complete\n")

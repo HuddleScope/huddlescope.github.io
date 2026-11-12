@@ -394,8 +394,8 @@ func TestValidate(t *testing.T) {
 		valid    bool
 		errMatch string
 	}{
-		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com"}, true, ""},
-		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production"}, true, ""},
+		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json"}, true, ""},
+		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json"}, true, ""},
 		{"invalid-log-level", Config{LogLevel: "invalid"}, false, "invalid log level"},
 		{"empty-user-agent", Config{UserAgent: ""}, false, "UserAgent"},
 		{"long-user-agent", Config{UserAgent: strings.Repeat("a", 513)}, false, "UserAgent too long"},

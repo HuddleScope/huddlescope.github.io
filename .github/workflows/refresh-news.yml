@@ -66,6 +66,20 @@ jobs:
           ./dist/export
           echo "Export completed"
 
+      - name: Commit heartbeat
+        id: commit-hb
+        if: always()
+        run: |
+          # Always commit heartbeat (best-effort; failure logged but not blocking)
+          git add web/data/heartbeat.json
+          if [ -n "$(git status --porcelain web/data/heartbeat.json)" ]; then
+            git commit -m "Update heartbeat.json [skip ci] (Closes #21)"
+            echo "Heartbeat committed"
+          else
+            echo "Heartbeat unchanged, skipping commit"
+          fi
+        continue-on-error: true
+
       - name: Data safety guard
         id: data-guard
         run: |

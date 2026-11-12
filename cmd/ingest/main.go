@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/publish"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
@@ -96,6 +97,20 @@ func main() {
 
 	// Run pipeline
 	result := app.RunPipeline(context.Background(), now)
+
+	// Publish heartbeat (best-effort: failures don't affect run exit)
+	heartbeatPath := os.Getenv("HSC_HEARTBEAT_FILE")
+	if heartbeatPath == "" {
+		heartbeatPath = "web/data/heartbeat.json"
+	}
+	if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
+		if hb := domain.NewHeartbeat(result.RunID.String()); hb != nil {
+			hb.FromRunRecord(result, *result.EndedAt)
+			if err := hbPub.Publish(context.Background(), hb); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to publish heartbeat: %v\n", err)
+			}
+		}
+	}
 
 	// Output result summary
 	fmt.Printf("Run ID: %s\n", result.RunID)

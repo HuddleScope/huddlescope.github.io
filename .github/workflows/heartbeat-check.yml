@@ -1,0 +1,38 @@
+# GitHub Actions workflow for heartbeat health checks — HS-021
+# Never blocks merges; only monitoring
+
+name: Heartbeat health
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+  workflow_dispatch:
+    description: 'Trigger a heartbeat health check'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Heartbeat health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build heartbeat binary
+        run: make build
+
+      - name: Run heartbeat check
+        run: |
+          ./dist/heartbeat check --file web/data/heartbeat.json --stale-after 90m || {
+            echo "::error::Heartbeat is stale or invalid"
+            exit 1
+          }
+        continue-on-error: false

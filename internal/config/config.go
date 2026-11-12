@@ -83,6 +83,8 @@ type Config struct {
 	Env              string
 	// New for HS-013: lookback window
 	LookbackWindow time.Duration
+	// New for HS-021: heartbeat file path
+	HeartbeatFile string
 }
 
 const (
@@ -94,6 +96,7 @@ const (
 	defaultTeamsFile      = "conf/teams.yaml"
 	defaultEnv            = "dev"
 	defaultLookbackWindow = 24 * time.Hour
+	defaultHeartbeatFile  = "web/data/heartbeat.json"
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -107,6 +110,7 @@ func Load(configFile string) (Config, error) {
 		StorageBackend: defaultStorageBackend,
 		Env:            defaultEnv,
 		LookbackWindow: defaultLookbackWindow,
+		HeartbeatFile:  defaultHeartbeatFile,
 	}
 
 	// Override with config file if provided
@@ -171,6 +175,9 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_ENV"); v != "" {
 		c.Env = v
+	}
+	if v := os.Getenv("HSC_HEARTBEAT_FILE"); v != "" {
+		c.HeartbeatFile = v
 	}
 	if v := os.Getenv("HSC_SOURCES_FILE"); v != "" {
 		c.SourcesFile = v
@@ -602,6 +609,11 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("LookbackWindow must be non-negative; got %v", c.LookbackWindow))
 	}
 
+	// Validate HeartbeatFile
+	if c.HeartbeatFile == "" {
+		errs = append(errs, errors.New("HeartbeatFile must not be empty"))
+	}
+
 	// Validate LogLevel
 	if c.LogLevel != "" {
 		switch c.LogLevel {
@@ -722,6 +734,7 @@ func (c Config) Validate() error {
 // Redacted returns a copy of Config with secrets replaced by "***".
 func (c Config) Redacted() Config {
 	c.TursoAuthToken = "***"
+	c.HeartbeatFile = "***"
 	return c
 }
 
@@ -738,6 +751,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Env            string   `json:"Env"`
 		Sources        []Source `json:"Sources"`
 		Teams          []Team   `json:"Teams"`
+		HeartbeatFile  string   `json:"HeartbeatFile"`
 	}
 	safe := SafeConfig{
 		ConfigFile:     c.ConfigFile,
@@ -749,6 +763,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Env:            c.Env,
 		Sources:        c.Sources,
 		Teams:          c.Teams,
+		HeartbeatFile:  c.HeartbeatFile,
 	}
 	return json.Marshal(safe)
 }
