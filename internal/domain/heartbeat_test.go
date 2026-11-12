@@ -58,10 +58,10 @@ func TestHeartbeat_Validate(t *testing.T) {
 		{
 			name: "missing attempted_at",
 			hb: &Heartbeat{
-				Version:     HeartbeatVersion,
-				Status:      HeartbeatStatusOK,
-				RunID:       "test-run-id",
-				IngestedAt:  &nowStr,
+				Version:    HeartbeatVersion,
+				Status:     HeartbeatStatusOK,
+				RunID:      "test-run-id",
+				IngestedAt: &nowStr,
 			},
 			wantErr: true,
 		},
@@ -196,18 +196,18 @@ func TestHeartbeat_FromRunRecord(t *testing.T) {
 	runID := "test-run-123"
 
 	tests := []struct {
-		name     string
-		record   RunRecord
-		want     *Heartbeat
-		wantErr  bool
+		name    string
+		record  RunRecord
+		want    *Heartbeat
+		wantErr bool
 	}{
 		{
 			name: "successful run",
 			record: RunRecord{
-				RunID:       RunID(runID),
-				StartedAt:   now.Add(-1 * time.Hour),
-				EndedAt:     &now,
-				Status:      RunStatusOK,
+				RunID:     RunID(runID),
+				StartedAt: now.Add(-1 * time.Hour),
+				EndedAt:   &now,
+				Status:    RunStatusOK,
 				Sources: []SourceRunStatus{
 					{SourceID: "espn", EntriesFetched: 10, StoriesCreated: 8, StoriesUpdated: 1, StoriesSkipped: 1},
 				},
@@ -215,14 +215,14 @@ func TestHeartbeat_FromRunRecord(t *testing.T) {
 				StoriesCreated: 8,
 				StoriesUpdated: 1,
 				StoriesSkipped: 1,
-				Committed:    true,
+				Committed:      true,
 			},
 			want: &Heartbeat{
 				Version:        HeartbeatVersion,
 				Status:         HeartbeatStatusOK,
 				RunID:          runID,
-				AttemptedAt:  now.UTC().Format(time.RFC3339),
-				IngestedAt:   strPtr(now.UTC().Format(time.RFC3339)),
+				AttemptedAt:    now.UTC().Format(time.RFC3339),
+				IngestedAt:     strPtr(now.UTC().Format(time.RFC3339)),
 				SourcesChecked: 1,
 				SourcesFailed:  0,
 			},
@@ -231,10 +231,10 @@ func TestHeartbeat_FromRunRecord(t *testing.T) {
 		{
 			name: "partial run with one failed source",
 			record: RunRecord{
-				RunID:       RunID(runID),
-				StartedAt:   now.Add(-1 * time.Hour),
-				EndedAt:     &now,
-				Status:      RunStatusPartial,
+				RunID:     RunID(runID),
+				StartedAt: now.Add(-1 * time.Hour),
+				EndedAt:   &now,
+				Status:    RunStatusPartial,
 				Sources: []SourceRunStatus{
 					{SourceID: "espn", EntriesFetched: 10, StoriesCreated: 10},
 					{SourceID: "nfl.com", EntriesFetched: 0, Errors: []error{fmt.Errorf("connection refused")}},
@@ -243,14 +243,14 @@ func TestHeartbeat_FromRunRecord(t *testing.T) {
 				StoriesCreated: 8,
 				StoriesUpdated: 1,
 				StoriesSkipped: 1,
-				Committed:    true,
+				Committed:      true,
 			},
 			want: &Heartbeat{
 				Version:        HeartbeatVersion,
 				Status:         HeartbeatStatusPartial,
 				RunID:          runID,
-				AttemptedAt:  now.UTC().Format(time.RFC3339),
-				IngestedAt:   strPtr(now.UTC().Format(time.RFC3339)),
+				AttemptedAt:    now.UTC().Format(time.RFC3339),
+				IngestedAt:     strPtr(now.UTC().Format(time.RFC3339)),
 				SourcesChecked: 2,
 				SourcesFailed:  1,
 				Errors:         []string{"[source:nfl.com] connection refused"},
@@ -260,43 +260,43 @@ func TestHeartbeat_FromRunRecord(t *testing.T) {
 		{
 			name: "failed run with top-level error",
 			record: RunRecord{
-				RunID:       RunID(runID),
-				StartedAt:   now.Add(-1 * time.Hour),
-				EndedAt:     &now,
-				Status:      RunStatusFailed,
-				Errors:      []error{fmt.Errorf("repository not configured")},
-				Committed:   false,
+				RunID:     RunID(runID),
+				StartedAt: now.Add(-1 * time.Hour),
+				EndedAt:   &now,
+				Status:    RunStatusFailed,
+				Errors:    []error{fmt.Errorf("repository not configured")},
+				Committed: false,
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusFailed,
-				RunID:         runID,
-				AttemptedAt:  now.UTC().Format(time.RFC3339),
+				Version:        HeartbeatVersion,
+				Status:         HeartbeatStatusFailed,
+				RunID:          runID,
+				AttemptedAt:    now.UTC().Format(time.RFC3339),
 				SourcesChecked: 0,
 				SourcesFailed:  0,
-				Errors:        []string{"repository not configured"},
+				Errors:         []string{"repository not configured"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "successful run with top-level error appended",
 			record: RunRecord{
-				RunID:       RunID(runID),
-				StartedAt:   now.Add(-1 * time.Hour),
-				EndedAt:     &now,
-				Status:      RunStatusPartial,
+				RunID:     RunID(runID),
+				StartedAt: now.Add(-1 * time.Hour),
+				EndedAt:   &now,
+				Status:    RunStatusPartial,
 				Sources: []SourceRunStatus{
 					{SourceID: "espn", EntriesFetched: 10, StoriesCreated: 10},
 				},
-				Errors:      []error{fmt.Errorf("non-fatal warning")},
-				Committed:   true,
+				Errors:    []error{fmt.Errorf("non-fatal warning")},
+				Committed: true,
 			},
 			want: &Heartbeat{
 				Version:        HeartbeatVersion,
 				Status:         HeartbeatStatusPartial,
 				RunID:          runID,
-				AttemptedAt:  now.UTC().Format(time.RFC3339),
-				IngestedAt:   strPtr(now.UTC().Format(time.RFC3339)),
+				AttemptedAt:    now.UTC().Format(time.RFC3339),
+				IngestedAt:     strPtr(now.UTC().Format(time.RFC3339)),
 				SourcesChecked: 1,
 				SourcesFailed:  0,
 				Errors:         []string{"non-fatal warning"},
@@ -359,19 +359,19 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 	newTime := now.Format(time.RFC3339)
 
 	tests := []struct {
-		name      string
-		hb        *Heartbeat
-		result    PublicationResult
-		want      *Heartbeat
+		name   string
+		hb     *Heartbeat
+		result PublicationResult
+		want   *Heartbeat
 	}{
 		{
 			name: "committed publication updates published_at",
 			hb: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime),
 			},
 			result: PublicationResult{
 				Committed:   true,
@@ -379,21 +379,21 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 				Errors:      nil,
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(newTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(newTime),
 			},
 		},
 		{
 			name: "failed publish keeps published_at and sets status failed",
 			hb: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime),
 			},
 			result: PublicationResult{
 				Committed:   false,
@@ -401,22 +401,22 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 				Errors:      []error{fmt.Errorf("write failed")},
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusFailed,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime), // unchanged
-				Errors:        []string{"[publish] write failed"},
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusFailed,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime), // unchanged
+				Errors:      []string{"[publish] write failed"},
 			},
 		},
 		{
 			name: "later published_at overwrites earlier",
 			hb: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime),
 			},
 			result: PublicationResult{
 				Committed:   true,
@@ -424,21 +424,21 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 				Errors:      nil,
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(newTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(newTime),
 			},
 		},
 		{
 			name: "earlier published_at does not overwrite newer",
 			hb: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(newTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(newTime),
 			},
 			result: PublicationResult{
 				Committed:   true,
@@ -446,21 +446,21 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 				Errors:      nil,
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(newTime), // unchanged
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(newTime), // unchanged
 			},
 		},
 		{
 			name: "failed publish on previously successful run keeps published_at",
 			hb: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime),
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusOK,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime),
 			},
 			result: PublicationResult{
 				Committed:   false,
@@ -468,12 +468,12 @@ func TestHeartbeat_MergePublication(t *testing.T) {
 				Errors:      []error{fmt.Errorf("commit failed")},
 			},
 			want: &Heartbeat{
-				Version:       HeartbeatVersion,
-				Status:        HeartbeatStatusFailed,
-				RunID:         "test",
-				AttemptedAt:   now.Format(time.RFC3339),
-				PublishedAt:   strPtr(oldTime), // preserved
-				Errors:        []string{"[publish] commit failed"},
+				Version:     HeartbeatVersion,
+				Status:      HeartbeatStatusFailed,
+				RunID:       "test",
+				AttemptedAt: now.Format(time.RFC3339),
+				PublishedAt: strPtr(oldTime), // preserved
+				Errors:      []string{"[publish] commit failed"},
 			},
 		},
 	}

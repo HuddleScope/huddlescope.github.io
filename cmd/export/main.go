@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
 	"github.com/HuddleScope/huddlescope.github.io/internal/config"

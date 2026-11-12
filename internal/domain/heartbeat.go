@@ -14,8 +14,8 @@ type HeartbeatStatus int
 
 const (
 	HeartbeatStatusOK      HeartbeatStatus = iota // Refresh completed successfully
-	HeartbeatStatusPartial                         // Ingestion or export succeeded with warnings
-	HeartbeatStatusFailed                          // Critical failure: run did not complete
+	HeartbeatStatusPartial                        // Ingestion or export succeeded with warnings
+	HeartbeatStatusFailed                         // Critical failure: run did not complete
 )
 
 func (s HeartbeatStatus) String() string {
@@ -33,23 +33,23 @@ func (s HeartbeatStatus) String() string {
 
 // Heartbeat represents the state and freshness of a refresh run.
 type Heartbeat struct {
-	Version       string          `json:"version"`
-	Status        HeartbeatStatus `json:"status"`
-	RunID         string          `json:"run_id"`
-	AttemptedAt   string          `json:"attempted_at"`
-	IngestedAt    *string         `json:"ingested_at,omitempty"`
-	PublishedAt   *string         `json:"published_at,omitempty"`
-	SourcesChecked int            `json:"sources_checked"`
-	SourcesFailed int             `json:"sources_failed"`
-	Errors        []string        `json:"errors,omitempty"`
+	Version        string          `json:"version"`
+	Status         HeartbeatStatus `json:"status"`
+	RunID          string          `json:"run_id"`
+	AttemptedAt    string          `json:"attempted_at"`
+	IngestedAt     *string         `json:"ingested_at,omitempty"`
+	PublishedAt    *string         `json:"published_at,omitempty"`
+	SourcesChecked int             `json:"sources_checked"`
+	SourcesFailed  int             `json:"sources_failed"`
+	Errors         []string        `json:"errors,omitempty"`
 }
 
 // NewHeartbeat creates a new heartbeat with the given run ID.
 func NewHeartbeat(runID string) *Heartbeat {
 	return &Heartbeat{
-		Version:       HeartbeatVersion,
-		RunID:         runID,
-		Status:        HeartbeatStatusOK,
+		Version:        HeartbeatVersion,
+		RunID:          runID,
+		Status:         HeartbeatStatusOK,
 		SourcesChecked: 0,
 		SourcesFailed:  0,
 	}

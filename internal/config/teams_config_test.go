@@ -365,10 +365,10 @@ func TestTeamRegistryPanicsOnEmptyTeams(t *testing.T) {
 // baseValidConfig returns a Config that passes Validate with no teams or sources.
 func baseValidConfig() Config {
 	return Config{
-		LogLevel:        "info",
-		UserAgent:       "test/1",
-		RequestTimeout:  30 * time.Second,
-		HeartbeatFile:   "web/data/heartbeat.json",
+		LogLevel:       "info",
+		UserAgent:      "test/1",
+		RequestTimeout: 30 * time.Second,
+		HeartbeatFile:  "web/data/heartbeat.json",
 	}
 }
 

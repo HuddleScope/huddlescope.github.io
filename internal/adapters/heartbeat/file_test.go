@@ -16,10 +16,10 @@ func TestFilePublisher_Publish(t *testing.T) {
 	p := NewFilePublisher(filePath)
 
 	hb := &domain.Heartbeat{
-		Version:       domain.HeartbeatVersion,
-		Status:        domain.HeartbeatStatusOK,
-		RunID:         "test-run-123",
-		AttemptedAt:   time.Now().UTC().Format(time.RFC3339),
+		Version:        domain.HeartbeatVersion,
+		Status:         domain.HeartbeatStatusOK,
+		RunID:          "test-run-123",
+		AttemptedAt:    time.Now().UTC().Format(time.RFC3339),
 		SourcesChecked: 1,
 		SourcesFailed:  0,
 	}
@@ -60,18 +60,18 @@ func TestFilePublisher_Publish_Validation(t *testing.T) {
 		{
 			name: "valid heartbeat",
 			hb: &domain.Heartbeat{
-				Version:       domain.HeartbeatVersion,
-				Status:        domain.HeartbeatStatusOK,
-				RunID:         "test",
-				AttemptedAt:   time.Now().UTC().Format(time.RFC3339),
+				Version:        domain.HeartbeatVersion,
+				Status:         domain.HeartbeatStatusOK,
+				RunID:          "test",
+				AttemptedAt:    time.Now().UTC().Format(time.RFC3339),
 				SourcesChecked: 0,
 				SourcesFailed:  0,
 			},
 			wantErr: false,
 		},
 		{
-			name: "nil heartbeat",
-			hb:   nil,
+			name:    "nil heartbeat",
+			hb:      nil,
 			wantErr: true,
 		},
 		{
@@ -113,10 +113,10 @@ func TestLoad(t *testing.T) {
 
 	// Test: valid file
 	hb = &domain.Heartbeat{
-		Version:       domain.HeartbeatVersion,
-		Status:        domain.HeartbeatStatusOK,
-		RunID:         "test-run",
-		AttemptedAt:   time.Now().UTC().Format(time.RFC3339),
+		Version:        domain.HeartbeatVersion,
+		Status:         domain.HeartbeatStatusOK,
+		RunID:          "test-run",
+		AttemptedAt:    time.Now().UTC().Format(time.RFC3339),
 		SourcesChecked: 1,
 		SourcesFailed:  0,
 	}
