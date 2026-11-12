@@ -503,6 +503,7 @@ func (a *Application) RunPipeline(ctx context.Context, now time.Time) domain.Run
 
 	// Phase 1: Ingest
 	result = a.runIngestPipeline(ctx, result)
+	result.IngestedAt = result.EndedAt // Ingestion phase completed when first endedAt is set
 
 	// Phase 2: Group and Score
 	if result.Status != domain.RunStatusFailed {

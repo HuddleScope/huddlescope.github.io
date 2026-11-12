@@ -87,6 +87,7 @@ type RunRecord struct {
 	RunID           RunID
 	StartedAt       time.Time
 	EndedAt         *time.Time
+	IngestedAt      *time.Time // Ingestion phase completion timestamp
 	LastPublishedAt *time.Time // Most recent article publishedAt
 	Status          RunStatus
 	Sources         []SourceRunStatus

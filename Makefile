@@ -15,7 +15,7 @@ GOSEC ?= ~/go/bin/gosec
 GOVULNCHECK ?= ~/go/bin/govulncheck
 
 PREFIX ?= dist
-BINARIES ?= $(PREFIX)/ingest $(PREFIX)/export
+BINARIES ?= $(PREFIX)/ingest $(PREFIX)/export $(PREFIX)/heartbeat
 PACKAGE := $(shell $(GO) list ./... 2>/dev/null | grep -v '/vendor/' || true)
 
 # Default target: help

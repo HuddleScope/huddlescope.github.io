@@ -365,9 +365,10 @@ func TestTeamRegistryPanicsOnEmptyTeams(t *testing.T) {
 // baseValidConfig returns a Config that passes Validate with no teams or sources.
 func baseValidConfig() Config {
 	return Config{
-		LogLevel:       "info",
-		UserAgent:      "test/1",
-		RequestTimeout: 30 * time.Second,
+		LogLevel:        "info",
+		UserAgent:       "test/1",
+		RequestTimeout:  30 * time.Second,
+		HeartbeatFile:   "web/data/heartbeat.json",
 	}
 }
 
@@ -539,6 +540,7 @@ func TestValidateProductionSuccess(t *testing.T) {
 		TursoDatabaseURL: "db",
 		TursoAuthToken:   "token",
 		Env:              "production",
+		HeartbeatFile:    "web/data/heartbeat.json",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() error = %v; want nil for valid production config", err)
