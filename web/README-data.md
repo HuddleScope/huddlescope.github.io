@@ -1,4 +1,4 @@
-# Homepage data contract — HS-015
+# Homepage data contract — HS-015, HS-017
 
 This directory contains data files consumed by Hugo for the homepage.
 
@@ -7,10 +7,11 @@ This directory contains data files consumed by Hugo for the homepage.
 The `homepage.json` file is the renderable projection of the domain `StoryGroup` (internal/domain/clustering.go)
 scored by HS-012 (`internal/domain/scoring.go`). It powers the homepage display.
 
-### Schema
+### Schema (v1)
 
 ```json
 {
+  "version": "1",
   "generatedAt": "2026-11-11T17:00:00Z",
   "stories": [
     {
@@ -26,15 +27,33 @@ scored by HS-012 (`internal/domain/scoring.go`). It powers the homepage display.
         { "id": "espn-nfl", "name": "ESPN",    "url": "https://www.espn.com/nfl/..." }
       ]
     }
+  ],
+  "latest": [
+    {
+      "source_id": "nfl-com",
+      "source_name": "NFL.com",
+      "title": "Latest story headline",
+      "url": "https://www.nfl.com/news/latest",
+      "published_at": "2026-11-11T17:00:00Z"
+    }
+  ],
+  "teams": [
+    {
+      "slug": "49ers",
+      "name": "San Francisco 49ers",
+      "short_name": "49ers",
+      "abbreviation": "SF"
+    }
   ]
 }
 ```
 
 #### Top-level fields
 
+- `version` (required, string): export format version (currently `"1"`).
 - `generatedAt` (required, string, RFC3339): snapshot timestamp used for the "Data as of" metadata. Never implies real-time.
 
-#### Story fields
+#### Story fields (within `stories` array)
 
 - `id` (required, string): unique identifier (same as the content page slug under `/stories/`).
 - `title` (required, string): headline, not the full article.
@@ -49,16 +68,52 @@ scored by HS-012 (`internal/domain/scoring.go`). It powers the homepage display.
   - `name` (required, string): publisher display name.
   - `url` (required, string): direct link to the original coverage.
 
+#### Latest articles (within `latest` array)
+
+- `source_id` (required, string): source identifier.
+- `source_name` (required, string): publisher display name.
+- `title` (required, string): article headline.
+- `url` (required, string): direct link to the article.
+- `published_at` (required, string, RFC3339): article publication time.
+
+#### Teams (within `teams` array)
+
+- `slug` (required, string): team identifier used in URLs.
+- `name` (required, string): full team name.
+- `short_name` (required, string): abbreviated team name.
+- `abbreviation` (required, string): two- or three-letter team abbreviation.
+
+### Determinism and idempotency
+
+The export produces deterministic output:
+
+- Stories are sorted by `id` ascending.
+- Publishers within each story are sorted by `id` ascending.
+- Latest articles are sorted by `published_at` descending, then `source_id` descending.
+- Teams are sorted by `slug` ascending.
+- The `generatedAt` timestamp is the only wall-clock field; content comparison excludes it for idempotency.
+
+The Go engine compares content (excluding `generatedAt`) with the existing file on disk and skips the write if unchanged.
+This ensures the site build produces identical output when no relevant content has changed.
+
+### No-secret and no-body guarantees
+
+The export contract enforces:
+- Summaries are bounded at 1024 characters to prevent full copyrighted article text from leaking.
+- Secret patterns (`password`, `token`, `api_key`, etc.) are scanned in summaries and rejected.
+- Only whitelisted fields are exported; database credentials and private metadata are never included.
+
 ### Implementation notes
 
-- The Go engine produces `homepage.json` via the `export` command when #17 runs.
+- The Go engine produces `homepage.json` via `cmd/export/main.go` when #17 runs.
 - This directory is the *only* contract between the engine and the rendering layer.
 - `internal/domain/scoring.go.ClassifyEvidence` maps to `evidenceLevel` one-to-one.
 - Score ordering (desc) is applied by the template; the JSON file itself can be unsorted.
+- `version` enables forward-compatible schema evolution.
 
 ### Empty state
 
-An empty array `{"generatedAt":"…","stories":[]}` is valid and renders the "No stories published yet" message.
+An empty array `{"version":"1","generatedAt":"…","stories":[],"latest":[],"teams":[]}` is valid and renders the "No stories published yet" message.
 
 ### Fallback
 

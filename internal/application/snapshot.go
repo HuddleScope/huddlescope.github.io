@@ -35,6 +35,12 @@ func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotRe
 		return result
 	}
 
+	// Use configured snapshot publisher, or default if none provided
+	publisher := a.snapshotPublisher
+	if publisher == nil {
+		publisher = &domain.DefaultSnapshotPublisher{}
+	}
+
 	// Build the snapshot
 	snapshot, err := a.buildSnapshot(now)
 	if err != nil {
@@ -51,9 +57,6 @@ func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotRe
 	}
 	result.Snapshot = snapshot
 	result.StoriesBuilt = len(snapshot.Stories)
-
-	// Publish using the default publisher (no-op for offline/dev)
-	publisher := &domain.DefaultSnapshotPublisher{}
 
 	// Publish
 	pubResult, err := publisher.Publish(ctx, snapshot)
@@ -98,14 +101,8 @@ func (a *Application) buildSnapshot(now time.Time) (domain.Snapshot, error) {
 	// Cluster
 	groups := a.clusteringEngine.Cluster(articles)
 
-	// Debug: print clustering results
 	if len(groups) == 0 {
 		return domain.Snapshot{}, fmt.Errorf("clustering produced no groups from %d stories", len(stories))
-	}
-
-	// Debug: print cluster info
-	for i, g := range groups {
-		fmt.Printf("DEBUG cluster %d: ID=%s, articles=%d, headline=%s\n", i, g.ID, len(g.Articles), g.Headline)
 	}
 
 	// Build the snapshot

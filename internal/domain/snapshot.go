@@ -113,10 +113,13 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 	}
 
 	// Build snapshot stories from clusters
-	// We don't look up by cluster ID because cluster IDs are content-derived,
-	// not matching story IDs. Instead, we build from cluster data directly.
 	ss := make([]SnapshotStory, 0)
 	for _, g := range clusters {
+		// Skip empty clusters (should be filtered earlier, but defend here)
+		if len(g.Articles) == 0 {
+			continue
+		}
+
 		// Collect publishers from articles
 		publishers := buildPublishers(g.Articles, resolver)
 
@@ -127,18 +130,6 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 			sb := scorer.WithTime(now).Score(g)
 			score = sb.TotalScore
 			evidence = sb.EvidenceLevel
-		}
-
-		// Convert articles to snapshot articles
-		for _, art := range g.Articles {
-			// Directly build the article without intermediate slice
-			_ = SnapshotArticle{
-				SourceID:    NormalizeSourceID(art.SourceID),
-				SourceName:  resolver.Resolve(art.SourceID),
-				Title:       art.Title,
-				URL:         art.URL,
-				PublishedAt: art.ParsePublishedAtOrZero().UTC().Format(time.RFC3339),
-			}
 		}
 
 		ss = append(ss, SnapshotStory{
@@ -260,7 +251,7 @@ func buildTeams(registry *TeamRegistry) []SnapshotTeam {
 
 // Render produces canonical JSON with stable field order.
 func (s Snapshot) Render() ([]byte, error) {
-	// Use a sorted map to ensure consistent ordering
+	// Struct field order ensures stable output; MarshalIndent adds indentation
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)

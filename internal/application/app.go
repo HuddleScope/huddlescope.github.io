@@ -85,7 +85,9 @@ type Application struct {
 	scorer *domain.Scorer
 	// New for HS-013: pipeline orchestration
 	publisher Publisher
-	lookback  time.Duration
+	// New for HS-017: snapshot publisher
+	snapshotPublisher domain.SnapshotPublisher
+	lookback          time.Duration
 }
 
 // Option configures the Application.
@@ -143,6 +145,13 @@ func WithScorer(scorer *domain.Scorer) Option {
 func WithPublisher(publisher Publisher) Option {
 	return func(a *Application) {
 		a.publisher = publisher
+	}
+}
+
+// WithSnapshotPublisher sets the snapshot publisher (HS-017).
+func WithSnapshotPublisher(publisher domain.SnapshotPublisher) Option {
+	return func(a *Application) {
+		a.snapshotPublisher = publisher
 	}
 }
 
