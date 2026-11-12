@@ -19,10 +19,14 @@ type Repository interface {
 type MemoryRepository struct {
 	mu      sync.RWMutex
 	stories map[string]domain.Story
+	dedupe  map[string]string // dedupeKey -> storyID
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{stories: make(map[string]domain.Story)}
+	return &MemoryRepository{
+		stories: make(map[string]domain.Story),
+		dedupe:  make(map[string]string),
+	}
 }
 
 func (r *MemoryRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
@@ -31,9 +35,36 @@ func (r *MemoryRepository) Upsert(story domain.Story) (domain.UpsertStatus, erro
 
 	existing, exists := r.stories[story.ID]
 	if !exists {
+		// ID not found; try dedupe key match
+		dedupeKey := story.DedupeKey
+		if dedupeKey != "" {
+			if existingID, ok := r.dedupe[dedupeKey]; ok {
+				// Dedupe match: update existing story (merge)
+				existing, exists := r.stories[existingID]
+				if !exists {
+					// Should not happen; log and create new
+					story.FirstSeenAt = time.Now().UTC()
+					r.stories[story.ID] = story
+					return domain.UpsertCreated, nil
+				}
+
+				// Merge: preserve ID and FirstSeenAt, take meaningful fields
+				story.FirstSeenAt = existing.FirstSeenAt
+				story.UpdatedAt = time.Now().UTC()
+				r.stories[existingID] = story
+				return domain.UpsertUpdated, nil
+			}
+		}
+
 		// New story: set FirstSeenAt to now
 		story.FirstSeenAt = time.Now().UTC()
 		r.stories[story.ID] = story
+
+		// Index by dedupe key if available
+		if story.DedupeKey != "" {
+			r.dedupe[story.DedupeKey] = story.ID
+		}
+
 		return domain.UpsertCreated, nil
 	}
 

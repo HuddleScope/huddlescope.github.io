@@ -1,0 +1,2 @@
+# Preserve the backup file locally, but never commit it
+all_test.go.bak

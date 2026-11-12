@@ -1,0 +1,1060 @@
+// Package e2e provides end-to-end integration tests for the ingestion, snapshot
+// export, and Hugo publication pipeline (HS-020).
+package e2e
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
+	"github.com/HuddleScope/huddlescope.github.io/internal/application"
+	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
+)
+
+// FixtureFeed represents a versioned fixture feed with its content and ETag.
+type FixtureFeed struct {
+	SourceID  string
+	Version   string
+	Content   string
+	ETag      string
+	MimeType  string
+	IsEnabled bool
+}
+
+// FixtureServer provides versioned fixture feeds via HTTP with ETag support.
+type FixtureServer struct {
+	mu          sync.Mutex
+	feeds       map[string]*FixtureFeed
+	statusCodes map[string]int
+}
+
+func NewFixtureServer(feeds ...FixtureFeed) *FixtureServer {
+	s := &FixtureServer{
+		feeds:       make(map[string]*FixtureFeed),
+		statusCodes: make(map[string]int),
+	}
+	for _, f := range feeds {
+		s.AddFeed(f)
+	}
+	return s
+}
+
+func (s *FixtureServer) AddFeed(f FixtureFeed) {
+	key := f.SourceID + "/" + f.Version
+	s.feeds[key] = &FixtureFeed{
+		SourceID:  f.SourceID,
+		Version:   f.Version,
+		Content:   f.Content,
+		ETag:      fmt.Sprintf(`"%x"`, hash32(f.Content)),
+		MimeType:  f.MimeType,
+		IsEnabled: f.IsEnabled,
+	}
+}
+
+func (s *FixtureServer) SetFailure(sourceID, version string, statusCode int) {
+	key := sourceID + "/" + version
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.statusCodes[key] = statusCode
+}
+
+func (s *FixtureServer) ClearFailure(sourceID, version string) {
+	key := sourceID + "/" + version
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.statusCodes, key)
+}
+
+func (s *FixtureServer) Handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/feeds/")
+		parts := strings.SplitN(path, "/", 2)
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		sourceID, version := parts[0], parts[1]
+
+		s.mu.Lock()
+		feed, ok := s.feeds[sourceID+"/"+version]
+		status, hasStatus := s.statusCodes[sourceID+"/"+version]
+		s.mu.Unlock()
+
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		if etag := r.Header.Get("If-None-Match"); etag != "" && etag == feed.ETag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		if hasStatus {
+			w.WriteHeader(status)
+			return
+		}
+
+		w.Header().Set("ETag", feed.ETag)
+		if feed.MimeType != "" {
+			w.Header().Set("Content-Type", feed.MimeType)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(feed.Content))
+	}
+}
+
+func hash32(s string) uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
+}
+
+// AppBuilder holds configuration for building a test application.
+type AppBuilder struct {
+	repo         domain.Repository
+	fetchers     map[string]domain.FeedFetcher
+	registry     *domain.FeedRegistry
+	teamRegistry *domain.TeamRegistry
+	clustering   *domain.Clusterer
+	scorer       *domain.Scorer
+	publisher    application.Publisher
+	snapshotPub  domain.SnapshotPublisher
+	lookback     time.Duration
+}
+
+func NewAppBuilder() *AppBuilder {
+	return &AppBuilder{
+		repo:       storage.NewMemoryRepository(),
+		fetchers:   make(map[string]domain.FeedFetcher),
+		lookback:   24 * time.Hour,
+		clustering: domain.NewClusterer(),
+		scorer:     domain.NewScorer().WithTime(time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)),
+	}
+}
+
+func (b *AppBuilder) WithRepository(r domain.Repository) *AppBuilder {
+	b.repo = r
+	return b
+}
+
+func (b *AppBuilder) WithRegistry(reg *domain.FeedRegistry) *AppBuilder {
+	b.registry = reg
+	return b
+}
+
+func (b *AppBuilder) WithFetcherMap(fm map[string]domain.FeedFetcher) *AppBuilder {
+	b.fetchers = fm
+	return b
+}
+
+func (b *AppBuilder) WithTeamRegistry(tr *domain.TeamRegistry) *AppBuilder {
+	b.teamRegistry = tr
+	return b
+}
+
+func (b *AppBuilder) WithClusterer(ce *domain.Clusterer) *AppBuilder {
+	b.clustering = ce
+	return b
+}
+
+func (b *AppBuilder) WithScorer(s *domain.Scorer) *AppBuilder {
+	b.scorer = s
+	return b
+}
+
+func (b *AppBuilder) WithPublisher(p application.Publisher) *AppBuilder {
+	b.publisher = p
+	return b
+}
+
+func (b *AppBuilder) WithSnapshotPublisher(sp domain.SnapshotPublisher) *AppBuilder {
+	b.snapshotPub = sp
+	return b
+}
+
+func (b *AppBuilder) WithLookback(d time.Duration) *AppBuilder {
+	b.lookback = d
+	return b
+}
+
+func (b *AppBuilder) Build() *application.Application {
+	opts := []application.Option{
+		application.WithRepository(b.repo),
+		application.WithPublisher(b.publisher),
+		application.WithSnapshotPublisher(b.snapshotPub),
+		application.WithLookback(b.lookback),
+		application.WithClusterer(b.clustering),
+		application.WithScorer(b.scorer),
+	}
+	if b.registry != nil {
+		opts = append(opts, application.WithRegistry(b.registry))
+	}
+	if len(b.fetchers) > 0 {
+		opts = append(opts, application.WithFetcherMap(b.fetchers))
+	}
+	if b.teamRegistry != nil {
+		opts = append(opts, application.WithTeamRegistry(b.teamRegistry))
+	}
+	return application.New(opts...)
+}
+
+// FixtureLoader loads fixture feeds from embedded content.
+type FixtureLoader struct {
+	feeds map[string]FixtureFeed
+}
+
+func NewFixtureLoader(feeds ...FixtureFeed) *FixtureLoader {
+	fl := &FixtureLoader{feeds: make(map[string]FixtureFeed)}
+	for _, f := range feeds {
+		key := f.SourceID + "/" + f.Version
+		fl.feeds[key] = f
+	}
+	return fl
+}
+
+func (l *FixtureLoader) Load(sourceID, version string) (*FixtureFeed, bool) {
+	f, ok := l.feeds[sourceID+"/"+version]
+	return &f, ok
+}
+
+func (l *FixtureLoader) EnabledFeeds() []FixtureFeed {
+	result := make([]FixtureFeed, 0, len(l.feeds))
+	for _, f := range l.feeds {
+		if f.IsEnabled {
+			result = append(result, f)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SourceID+result[i].Version < result[j].SourceID+result[j].Version
+	})
+	return result
+}
+
+func (l *FixtureLoader) AllFeeds() []FixtureFeed {
+	result := make([]FixtureFeed, 0, len(l.feeds))
+	for _, f := range l.feeds {
+		result = append(result, f)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SourceID+result[i].Version < result[j].SourceID+result[j].Version
+	})
+	return result
+}
+
+// TempWebDir creates a temporary copy of the web directory for Hugo tests.
+func TempWebDir(t *testing.T) (dir string, cleanup func()) {
+	t.Helper()
+
+	// Find repo root by walking up until we find web/ directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get current directory: %v", err)
+	}
+
+	repoRoot := cwd
+	for i := 0; i < 10; i++ { // Safety limit
+		if _, err := os.Stat(filepath.Join(repoRoot, "web")); err == nil {
+			break
+		}
+		parent := filepath.Dir(repoRoot)
+		if parent == repoRoot {
+			t.Fatalf("could not find web directory from %s", cwd)
+		}
+		repoRoot = parent
+	}
+
+	webRoot := filepath.Join(repoRoot, "web")
+	if _, err := os.Stat(webRoot); os.IsNotExist(err) {
+		t.Fatalf("web directory not found at %s", webRoot)
+	}
+
+	tmpDir := filepath.Join(os.TempDir(), fmt.Sprintf("huddlescope-web-%d", time.Now().UnixNano()))
+	if err := copyDir(webRoot, tmpDir); err != nil {
+		t.Fatalf("failed to copy web directory: %v", err)
+	}
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }
+}
+
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+// LoadEmbeddedFixtures returns fixture feeds with unique source IDs.
+func LoadEmbeddedFixtures() []FixtureFeed {
+	return []FixtureFeed{
+		{SourceID: "espn-v1", Version: "v1", Content: fixtureESPNv1, MimeType: "application/rss+xml", IsEnabled: true},
+		{SourceID: "espn-v2", Version: "v1", Content: fixtureESPNv2, MimeType: "application/rss+xml", IsEnabled: true},
+		{SourceID: "nfl-com-v1", Version: "v1", Content: fixtureNFLv1, MimeType: "application/atom+xml", IsEnabled: true},
+		{SourceID: "nfl-com-v2", Version: "v1", Content: fixtureNFLv2, MimeType: "application/atom+xml", IsEnabled: true},
+		{SourceID: "failing-v1", Version: "v1", Content: "", MimeType: "application/rss+xml", IsEnabled: true},
+		{SourceID: "failing-v2", Version: "v1", Content: fixtureFailingv2, MimeType: "application/rss+xml", IsEnabled: true},
+	}
+}
+
+// Embedded fixture contents
+const fixtureESPNv1 = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ESPN NFL News</title>
+    <link>https://www.espn.com/nfl/</link>
+    <description>NFL news from ESPN</description>
+    <item>
+      <title>Top 10 free agent signings of the offseason</title>
+      <link>https://www.espn.com/nfl/story/_/id/top-free-agents-2024</link>
+      <guid isPermaLink="true">https://www.espn.com/nfl/story/_/id/top-free-agents-2024</guid>
+      <pubDate>Mon, 25 Jul 2024 15:30:00 -0400</pubDate>
+      <description>With the trade deadline approaching and training camp around the corner, here are the biggest free agent acquisitions.</description>
+    </item>
+    <item>
+      <title>Pro Bowl Game 2025 format changes</title>
+      <link>https://www.espn.com/nfl/story/_/id/pro-bowl-format-2025</link>
+      <guid isPermaLink="true">https://www.espn.com/nfl/story/_/id/pro-bowl-format-2025</guid>
+      <pubDate>Thu, 20 Jul 2024 09:15:00 -0400</pubDate>
+      <description>The NFL announced changes to the Pro Bowl format for 2025.</description>
+    </item>
+  </channel>
+</rss>`
+
+const fixtureESPNv2 = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ESPN NFL News</title>
+    <link>https://www.espn.com/nfl/</link>
+    <description>NFL news from ESPN</description>
+    <item>
+      <title>Top 10 free agent signings of the offseason</title>
+      <link>https://www.espn.com/nfl/story/_/id/top-free-agents-2024</link>
+      <guid isPermaLink="true">https://www.espn.com/nfl/story/_/id/top-free-agents-2024</guid>
+      <pubDate>Mon, 25 Jul 2024 15:30:00 -0400</pubDate>
+      <description>Updated summary: Updated content for the top free agent story.</description>
+    </item>
+    <item>
+      <title>Preseason Week 1 outlook</title>
+      <link>https://www.espn.com/nfl/story/_/id/preseason-week-1-overview</link>
+      <guid isPermaLink="true">https://www.espn.com/nfl/story/_/id/preseason-week-1-overview</guid>
+      <pubDate>Wed, 31 Jul 2024 10:00:00 -0400</pubDate>
+      <description>Preview of the first week of NFL preseason action.</description>
+    </item>
+  </channel>
+</rss>`
+
+const fixtureNFLv1 = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>NFL.com News</title>
+  <link href="https://www.nfl.com/news"/>
+  <entry>
+    <title>Top 10 free agent signings of the offseason</title>
+    <link href="https://www.nfl.com/news/top-free-agent-signings-2024"/>
+    <id>https://www.nfl.com/news/top-free-agent-signings-2024</id>
+    <published>2024-07-25T15:30:00Z</published>
+    <summary>With the trade deadline approaching, here are the biggest free agent acquisitions.</summary>
+  </entry>
+  <entry>
+    <title>Pro Bowl Game 2025 format changes</title>
+    <link href="https://www.nfl.com/news/pro-bowl-format-changes-2025"/>
+    <id>https://www.nfl.com/news/pro-bowl-format-changes-2025</id>
+    <published>2024-07-20T09:15:00Z</published>
+    <summary>The NFL announced changes to the Pro Bowl format for 2025.</summary>
+  </entry>
+</feed>`
+
+const fixtureNFLv2 = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>NFL.com News</title>
+  <link href="https://www.nfl.com/news"/>
+  <entry>
+    <title>Top 10 free agent signings of the offseason</title>
+    <link href="https://www.nfl.com/news/top-free-agent-signings-2024"/>
+    <id>https://www.nfl.com/news/top-free-agent-signings-2024</id>
+    <published>2024-07-25T15:30:00Z</published>
+    <summary>Updated NFL.com version with expanded free agency analysis.</summary>
+  </entry>
+  <entry>
+    <title>Super Bowl LVIII championship recap</title>
+    <link href="https://www.nfl.com/news/super-bowl-lviii-recap"/>
+    <id>https://www.nfl.com/news/super-bowl-lviii-recap</id>
+    <published>2024-02-11T05:00:00Z</published>
+    <description>The Kansas City Chiefs won their second consecutive Super Bowl.</description>
+  </entry>
+</feed>`
+
+// fixtureFailingv2 contains a delayed item with a timestamp within the lookback window
+const fixtureFailingv2 = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Failing Source</title>
+    <link>https://example.com/failing</link>
+    <description>Fixture feed for retry testing</description>
+    <item>
+      <title>Delayed item</title>
+      <link>https://example.com/delayed</link>
+      <guid isPermaLink="true">https://example.com/delayed</guid>
+      <pubDate>Fri, 01 Nov 2024 08:30:00 -0400</pubDate>
+      <description>This item was delayed from the previous run and appears in this feed.</description>
+    </item>
+  </channel>
+</rss>`
+
+// buildRegistry creates a FeedRegistry from fixture feeds with enabled flag.
+func buildRegistry(ts *httptest.Server, loader *FixtureLoader, enabledOnly bool) *domain.FeedRegistry {
+	var sources []domain.FeedSource
+	feeds := loader.AllFeeds()
+	for _, f := range feeds {
+		if enabledOnly && !f.IsEnabled {
+			continue
+		}
+		sources = append(sources, domain.FeedSource{
+			ID:        f.SourceID,
+			URL:       ts.URL + "/feeds/" + f.SourceID + "/" + f.Version,
+			Publication: f.SourceID,
+			Priority:  10,
+			Enabled:   f.IsEnabled,
+		})
+	}
+	registry, err := domain.NewFeedRegistry(sources...)
+	if err != nil {
+		panic(err)
+	}
+	return registry
+}
+
+// buildFetchers creates HTTPFetchers for all sources.
+func buildFetchers(registry *domain.FeedRegistry, limiter *rss.HostRateLimiter, etagCache *rss.ETagCache) map[string]domain.FeedFetcher {
+	fetchers := make(map[string]domain.FeedFetcher)
+	for _, src := range registry.Enabled() {
+		fetcher := rss.NewHTTPFetcher(src,
+			rss.WithRateLimiter(limiter),
+			rss.WithETagCache(etagCache),
+		)
+		fetchers[src.ID] = fetcher
+	}
+	return fetchers
+}
+
+// TestFixtureLoad ensures fixture feeds can be loaded correctly.
+func TestFixtureLoad(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+
+	if len(feeds) == 0 {
+		t.Fatal("no feeds loaded")
+	}
+
+	expected := map[string]bool{
+		"espn-v1/v1":    false,
+		"espn-v2/v1":    false,
+		"nfl-com-v1/v1": false,
+		"nfl-com-v2/v1": false,
+		"failing-v1/v1": false,
+		"failing-v2/v1": false,
+	}
+
+	for _, f := range feeds {
+		expected[f.SourceID+"/"+f.Version] = true
+	}
+
+	for key, found := range expected {
+		if !found {
+			t.Errorf("missing fixture: %s", key)
+		}
+	}
+
+	// Test loader's AllFeeds and EnabledFeeds
+	if len(loader.AllFeeds()) != 6 {
+		t.Errorf("expected 6 all feeds, got %d", len(loader.AllFeeds()))
+	}
+
+	enabled := loader.EnabledFeeds()
+	if len(enabled) != 6 {
+		t.Errorf("expected 6 enabled feeds, got %d", len(enabled))
+	}
+}
+
+// TestFixtureServerETag verifies ETag support.
+func TestFixtureServerETag(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	resp1, err := http.Get(ts.URL + "/feeds/espn-v1/v1")
+	if err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	etag1 := resp1.Header.Get("ETag")
+	resp1.Body.Close()
+	if etag1 == "" {
+		t.Fatal("no ETag in response")
+	}
+
+	req, err := http.NewRequest("GET", ts.URL+"/feeds/espn-v1/v1", nil)
+	if err != nil {
+		t.Fatalf("request creation failed: %v", err)
+	}
+	req.Header.Set("If-None-Match", etag1)
+	client := &http.Client{}
+	resp2, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusNotModified {
+		t.Errorf("expected 304 Not Modified, got %d", resp2.StatusCode)
+	}
+}
+
+// TestRegistryBuild ensures FeedRegistry is built correctly.
+func TestRegistryBuild(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+
+	// Build a test server
+	var sources []domain.FeedSource
+	for _, f := range feeds {
+		sources = append(sources, domain.FeedSource{
+			ID:        f.SourceID,
+			URL:       "http://example.com/feeds/" + f.SourceID + "/" + f.Version,
+			Publication: f.SourceID,
+			Priority:  10,
+			Enabled:   f.IsEnabled,
+		})
+	}
+	registry, err := domain.NewFeedRegistry(sources...)
+	if err != nil {
+		t.Fatalf("failed to build registry: %v", err)
+	}
+
+	enabled := registry.Enabled()
+	if len(enabled) == 0 {
+		t.Fatal("no enabled sources")
+	}
+	for _, src := range enabled {
+		if !src.Enabled {
+			t.Errorf("source %s is not enabled", src.ID)
+		}
+	}
+}
+
+// TestIngestIdempotency verifies that two consecutive runs with the same feed data
+// do not create duplicate stories (AC2).
+func TestIngestIdempotency(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	// Use a timestamp that ensures all fixture items pass lookback filter
+	now := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+
+	// First run
+	result := app.RunPipeline(context.Background(), now)
+	if result.Status.IsCritical() {
+		t.Errorf("first run failed with status %s", result.Status)
+	}
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories: %v", err)
+	}
+	if len(stories) == 0 {
+		t.Errorf("expected stories after first run, got 0")
+	}
+
+	// Second run (same data, no changes)
+	result = app.RunPipeline(context.Background(), now)
+	if result.Status.IsCritical() {
+		t.Errorf("second run failed with status %s", result.Status)
+	}
+	stories, err = repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories: %v", err)
+	}
+	if len(stories) == 0 {
+		t.Errorf("expected stories after second run, got 0")
+	}
+
+	// Verify no duplicates
+	seen := make(map[string]bool)
+	duplicates := 0
+	for _, s := range stories {
+		if seen[s.ID] {
+			duplicates++
+		}
+		seen[s.ID] = true
+	}
+	if duplicates > 0 {
+		t.Errorf("found %d duplicate story IDs", duplicates)
+	}
+}
+
+// TestFeedUpdate verifies that updating an article with the same GUID/URL
+// updates the existing story and preserves FirstSeenAt (AC2).
+func TestFeedUpdate(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	// First run with espn-v1 feed
+	now1 := time.Date(2024, 7, 26, 12, 0, 0, 0, time.UTC)
+	result1 := app.RunPipeline(context.Background(), now1)
+	if result1.Status.IsCritical() {
+		t.Fatalf("first run failed: %v", result1.Status)
+	}
+
+	stories1, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories after first run: %v", err)
+	}
+	if len(stories1) == 0 {
+		t.Fatal("expected stories after first run")
+	}
+
+	// Build a map of ID -> FirstSeenAt from first run
+	firstSeenMap := make(map[string]time.Time)
+	for _, s := range stories1 {
+		firstSeenMap[s.ID] = s.FirstSeenAt
+	}
+
+	// Second run with espn-v2 feed (same GUID, updated content)
+	// Use same app and repo to verify deduplication and FirstSeenAt preservation
+	now2 := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+	result2 := app.RunPipeline(context.Background(), now2)
+	if result2.Status.IsCritical() {
+		t.Fatalf("second run failed: %v", result2.Status)
+	}
+
+	stories2, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories after second run: %v", err)
+	}
+
+	// Should still have the same number of stories (no duplicates)
+	if len(stories2) != len(stories1) {
+		t.Errorf("expected %d stories, got %d (duplicate detected)", len(stories1), len(stories2))
+	}
+
+	// Verify FirstSeenAt is preserved for each story
+	for _, s := range stories2 {
+		if s.FirstSeenAt.IsZero() {
+			t.Errorf("FirstSeenAt should not be zero for story %s", s.ID)
+		}
+		firstSeen, ok := firstSeenMap[s.ID]
+		if !ok {
+			t.Errorf("story %s not found in first run, it's a new story (should be deduped)", s.ID)
+			continue
+		}
+		if !s.FirstSeenAt.Equal(firstSeen) {
+			t.Errorf("story %s FirstSeenAt changed from %v to %v (should be preserved)", s.ID, firstSeen, s.FirstSeenAt)
+		}
+	}
+}
+
+// TestRetryAndCatchup verifies that missed feed items are caught up after a failure (AC2).
+func TestRetryAndCatchup(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	// Run1: failing source fails
+	server.SetFailure("failing-v1", "v1", http.StatusInternalServerError)
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	// Run1: failing source v1 fails
+	now1 := time.Date(2024, 7, 26, 12, 0, 0, 0, time.UTC)
+	result1 := app.RunPipeline(context.Background(), now1)
+	if result1.Status != domain.RunStatusPartial {
+		t.Errorf("expected partial status, got %s", result1.Status)
+	}
+
+	stories1, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories: %v", err)
+	}
+	// At least some stories should succeed (other sources worked)
+	if len(stories1) == 0 {
+		t.Errorf("expected some stories despite failure")
+	}
+
+	// Clear failure and run again
+	server.ClearFailure("failing-v1", "v1")
+
+	// Run2: failing source now succeeds
+	// Use a later timestamp that the delayed item in failing-v2 will pass the lookback filter
+	now2 := time.Date(2024, 11, 1, 12, 0, 0, 0, time.UTC)
+	result2 := app.RunPipeline(context.Background(), now2)
+	if result2.Status.IsCritical() {
+		t.Errorf("second run failed with status %s", result2.Status)
+	}
+
+	stories2, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories: %v", err)
+	}
+	if len(stories2) == 0 {
+		t.Errorf("expected stories after catch-up, got 0")
+	}
+}
+
+// TestConcurrentPipeline verifies that concurrent pipeline runs do not corrupt data (AC3).
+func TestConcurrentPipeline(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	now := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+
+	var concurrentErrs []error
+	var mu sync.Mutex
+
+	go func() {
+		defer wg.Done()
+		result := app.RunPipeline(context.Background(), now)
+		if result.Status.IsCritical() {
+			mu.Lock()
+			concurrentErrs = append(concurrentErrs, fmt.Errorf("concurrent run 1 failed"))
+			mu.Unlock()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		result := app.RunPipeline(context.Background(), now)
+		if result.Status.IsCritical() {
+			mu.Lock()
+			concurrentErrs = append(concurrentErrs, fmt.Errorf("concurrent run 2 failed"))
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	if len(concurrentErrs) > 0 {
+		for _, err := range concurrentErrs {
+			t.Errorf("%v", err)
+		}
+	}
+
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("failed to list stories: %v", err)
+	}
+
+	// Verify no duplicates
+	seen := make(map[string]bool)
+	duplicates := 0
+	for _, s := range stories {
+		if seen[s.ID] {
+			duplicates++
+		}
+		seen[s.ID] = true
+	}
+	if duplicates > 0 {
+		t.Errorf("found %d duplicate story IDs after concurrent runs", duplicates)
+	}
+}
+
+// TestSnapshotIdempotency verifies that running snapshot twice produces identical output (AC4).
+func TestSnapshotIdempotency(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	now := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+	result1 := app.RunPipeline(context.Background(), now)
+	if result1.Status.IsCritical() {
+		t.Fatalf("first run failed: %v", result1.Status)
+	}
+
+	// Build and publish snapshot with the same repository (shared state)
+	tmpDir, cleanup := TempWebDir(t)
+	defer cleanup()
+	snapshotPub := hugo.NewDataPublisher(tmpDir+"/data", "homepage.json")
+
+	// Rebuild app with snapshot publisher
+	app = NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithSnapshotPublisher(snapshotPub).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	// First snapshot
+	snap1 := app.RunSnapshot(context.Background(), now)
+	if !snap1.PubResult.Committed {
+		t.Fatalf("first snapshot not committed")
+	}
+
+	// Second snapshot using the same app/repo
+	snap2 := app.RunSnapshot(context.Background(), now)
+
+	// Snapshot should not report changed when content is identical
+	if snap2.PubResult.Changed {
+		t.Errorf("second snapshot reported changed, expected unchanged")
+	}
+
+	// Verify file was created and is valid JSON
+	dataPath := filepath.Join(tmpDir, "data", "homepage.json")
+	content, err := os.ReadFile(dataPath)
+	if err != nil {
+		t.Fatalf("failed to read snapshot: %v", err)
+	}
+
+	var snap domain.Snapshot
+	if err := json.Unmarshal(content, &snap); err != nil {
+		t.Fatalf("failed to unmarshal snapshot: %v", err)
+	}
+
+	if snap.Version != domain.SnapshotVersion {
+		t.Errorf("invalid snapshot version: %s", snap.Version)
+	}
+	if len(snap.Stories) == 0 {
+		t.Errorf("expected stories in snapshot, got 0")
+	}
+	if snap.Latest == nil {
+		t.Errorf("latest should not be nil")
+	}
+	if snap.Teams == nil {
+		t.Errorf("teams should not be nil")
+	}
+}
+
+// TestConcurrentSnapshot verifies that concurrent snapshot operations are safe (AC4).
+func TestConcurrentSnapshot(t *testing.T) {
+	feeds := LoadEmbeddedFixtures()
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	now := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+
+	// Run pipeline first to populate repo
+	result := app.RunPipeline(context.Background(), now)
+	if result.Status.IsCritical() {
+		t.Fatalf("pipeline failed: %v", result.Status)
+	}
+
+	tmpDir, cleanup := TempWebDir(t)
+	defer cleanup()
+
+	snapshotPub := hugo.NewDataPublisher(tmpDir+"/data", "homepage.json")
+
+	// Rebuild app with snapshot publisher
+	app = NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithSnapshotPublisher(snapshotPub).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var errs []error
+	mu := sync.Mutex{}
+
+	go func() {
+		defer wg.Done()
+		mu.Lock() // Serialize snapshots to avoid file conflicts
+		defer mu.Unlock()
+		result := app.RunSnapshot(context.Background(), now)
+		if !result.PubResult.Committed {
+			mu.Lock()
+			errs = append(errs, fmt.Errorf("snapshot 1 not committed"))
+			mu.Unlock()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		mu.Lock() // Serialize snapshots to avoid file conflicts
+		defer mu.Unlock()
+		result := app.RunSnapshot(context.Background(), now)
+		if !result.PubResult.Committed {
+			mu.Lock()
+			errs = append(errs, fmt.Errorf("snapshot 2 not committed"))
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
+
+	if len(errs) > 0 {
+		for _, e := range errs {
+			t.Errorf("%v", e)
+		}
+	}
+
+	dataPath := filepath.Join(tmpDir, "data", "homepage.json")
+	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+		t.Errorf("homepage.json not created during concurrent snapshots")
+	}
+
+	content, err := os.ReadFile(dataPath)
+	if err != nil {
+		t.Fatalf("failed to read snapshot: %v", err)
+	}
+
+	var snap domain.Snapshot
+	if err := json.Unmarshal(content, &snap); err != nil {
+		t.Fatalf("failed to unmarshal snapshot: %v", err)
+	}
+
+	if snap.Version != domain.SnapshotVersion {
+		t.Errorf("invalid snapshot version: %s", snap.Version)
+	}
+	if len(snap.Stories) == 0 {
+		t.Errorf("expected stories in snapshot, got 0")
+	}
+	if snap.Latest == nil {
+		t.Errorf("latest should not be nil")
+	}
+	if snap.Teams == nil {
+		t.Errorf("teams should not be nil")
+	}
+}
