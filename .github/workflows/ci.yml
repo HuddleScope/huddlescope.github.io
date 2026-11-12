@@ -37,7 +37,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache: true
 
       - name: Install linters
         # The Makefile expects golangci-lint, gosec and govulncheck on PATH
@@ -89,7 +88,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'none'
 
       - name: Install dependencies
         working-directory: scheduler
