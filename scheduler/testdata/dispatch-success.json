@@ -1,0 +1,13 @@
+{
+  "event": "scheduled_dispatch",
+  "repo": "HuddleScope/huddlescope.github.io",
+  "workflow": "refresh-news.yml",
+  "level": "info",
+  "status": "dispatched",
+  "durationMs": 123,
+  "dispatchResult": {
+    "status": 204,
+    "message": "Workflow dispatch queued",
+    "attempt": 1
+  }
+}
