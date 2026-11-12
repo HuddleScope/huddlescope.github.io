@@ -189,7 +189,13 @@ func (c *Config) loadFromEnv() {
 // Sources are loaded in this priority order:
 //  1. HSC_SOURCES environment variable (highest priority)
 //  2. Sources file (from SourcesFile or default conf/sources.yaml)
-//  3. Default sources from internal/feeds (lowest priority)
+//
+// If neither provides sources, c.Sources stays empty; the ingest command fails
+// fast in that case (see cmd/ingest). Export does not consume sources.
+//
+// A missing or empty sources file is not an error. A file that exists but fails
+// validation (duplicate id, bad URL, etc.) returns that error here so the user
+// sees the real cause instead of a misleading "no sources configured" message.
 func (c *Config) parseSources() error {
 	if len(c.Sources) > 0 {
 		return nil // already parsed
@@ -209,10 +215,13 @@ func (c *Config) parseSources() error {
 		return nil
 	}
 
-	// Try loading from YAML file
-	if sources, err := c.loadSourcesFromYAML(); err == nil && len(sources) > 0 {
-		c.Sources = sources
+	// Load from the configured YAML file. A missing or empty file yields no
+	// sources (ingest fails fast); a malformed file surfaces its error.
+	sources, err := c.loadSourcesFromYAML()
+	if err != nil {
+		return err
 	}
+	c.Sources = sources
 
 	return nil
 }
@@ -796,4 +805,17 @@ func (c Config) TeamRegistry() *domain.TeamRegistry {
 		panic("teams configuration is required but could not be loaded")
 	}
 	return domain.NewTeamRegistryFromSlice(c.ToDomainTeams())
+}
+
+// SourceRegistry returns the FeedRegistry built from the configured sources.
+// It mirrors TeamRegistry: source fields are validated when the configuration
+// is loaded, so a build failure here indicates an invariant violation and
+// panics. When no sources are configured it returns an empty (non-nil)
+// registry; callers that require at least one source must check the count.
+func (c Config) SourceRegistry() *domain.FeedRegistry {
+	registry, err := domain.NewFeedRegistry(c.ToDomain()...)
+	if err != nil {
+		panic(fmt.Sprintf("failed to build feed registry from configured sources: %v", err))
+	}
+	return registry
 }

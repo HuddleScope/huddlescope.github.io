@@ -14,7 +14,6 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
 	"github.com/HuddleScope/huddlescope.github.io/internal/config"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
-	"github.com/HuddleScope/huddlescope.github.io/internal/feeds"
 )
 
 func main() {
@@ -46,15 +45,19 @@ func main() {
 	// Build repository
 	repo := storage.NewMemoryRepository()
 
-	// Try to load registry from feeds seed data
-	registry, registryErr := feeds.Load()
-	if registryErr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to load feed registry: %v\n", registryErr)
+	// Build the feed registry from the configured sources. This is the single
+	// source of truth: conf/sources.yaml or HSC_SOURCES, both handled by config.
+	registry := cfg.SourceRegistry()
+
+	// Fail fast when no sources are configured.
+	if registry.Count() == 0 {
+		fmt.Fprintln(os.Stderr, "Error: no feed sources are configured. Provide a sources file (HSC_SOURCES_FILE or conf/sources.yaml) or set HSC_SOURCES.")
+		os.Exit(1)
 	}
 
 	// Load teams from config file
 	teamRegistry := cfg.TeamRegistry()
-	fmt.Printf("Loaded %d teams from config\n", len(cfg.Teams))
+	fmt.Printf("Loaded %d sources, %d teams from config\n", registry.Count(), len(cfg.Teams))
 
 	// Build application
 	var appOpts []application.Option
@@ -62,36 +65,22 @@ func main() {
 	appOpts = append(appOpts, application.WithPublisher(publisher))
 	appOpts = append(appOpts, application.WithLookback(cfg.LookbackWindow))
 
-	if registry != nil {
-		// Use registry-driven ingestion with real HTTP fetchers
-		rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
-		etagCache := rss.NewETagCache()
+	// Registry-driven ingestion with real HTTP fetchers
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
 
-		sourceFetchers := make(map[string]domain.FeedFetcher)
-		for _, src := range registry.Enabled() {
-			fetcher := rss.NewHTTPFetcher(src,
-				rss.WithUserAgent(cfg.UserAgent),
-				rss.WithDefaultTimeout(cfg.RequestTimeout),
-				rss.WithRateLimiter(rateLimiter),
-				rss.WithETagCache(etagCache),
-			)
-			sourceFetchers[src.ID] = fetcher
-		}
-		appOpts = append(appOpts, application.WithRegistry(registry))
-		appOpts = append(appOpts, application.WithFetcherMap(sourceFetchers))
-	} else {
-		// Fallback to legacy static fetcher
-		fetcher := rss.NewStaticFetcher([]domain.FeedEntry{
-			{
-				Title:       "Test Story",
-				Source:      "test-feed",
-				PublishedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-				Summary:     "Test summary",
-				URL:         "https://example.com/test",
-			},
-		})
-		appOpts = append(appOpts, application.WithFeedFetchers(fetcher))
+	sourceFetchers := make(map[string]domain.FeedFetcher)
+	for _, src := range registry.Enabled() {
+		fetcher := rss.NewHTTPFetcher(src,
+			rss.WithUserAgent(cfg.UserAgent),
+			rss.WithDefaultTimeout(cfg.RequestTimeout),
+			rss.WithRateLimiter(rateLimiter),
+			rss.WithETagCache(etagCache),
+		)
+		sourceFetchers[src.ID] = fetcher
 	}
+	appOpts = append(appOpts, application.WithRegistry(registry))
+	appOpts = append(appOpts, application.WithFetcherMap(sourceFetchers))
 
 	// Add clusterer and scorer (required for pipeline)
 	appOpts = append(appOpts, application.WithClusterer(domain.NewClusterer()))

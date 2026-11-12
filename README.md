@@ -10,7 +10,8 @@ The application follows a layered architecture with clear separation of concerns
 - **cmd/** — CLI entry points (ingest, export)
 - **internal/application/** — Business logic and orchestration
 - **internal/domain/** — Core domain models and interfaces (Story, Source, FeedEntry)
-- **internal/adapters/** — Pluggable implementations (RSS fetcher, storage backends)
+- **internal/adapters/** — Pluggable implementations (RSS fetcher, storage backends, Hugo publisher)
+- **internal/config/** — Configuration loading and validation (sources, teams)
 
 The Go engine is independent of hosting, database, and rendering adapters. Adapters implement domain interfaces (Repository, FeedFetcher) to enable swapping storage or feed sources without affecting core logic.
 
@@ -24,16 +25,18 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 | `internal/application` | Application orchestration and business logic |
 | `internal/adapters/rss` | RSS feed fetching adapter |
 | `internal/adapters/storage` | Storage adapters (in-memory, Turso, file) |
+| `internal/adapters/hugo` | Hugo data/snapshot publisher adapter |
+| `internal/adapters/publish` | Story publishing adapter |
 | `internal/config` | Configuration loading and validation |
 | `web/` | Hugo site source (see Website section below) |
 | `scheduler/` | Cloudflare Worker cron dispatcher (HS-019) |
-| `migrations/` | Database migrations (TBD) |
+| `internal/adapters/storage/sqlite/migrations` | SQLite schema migrations |
 | `docs/` | Project documentation |
 
 ## Development
 
 ### Prerequisites
-- Go 1.24.11+
+- Go 1.27+
 - Node.js 20+ (for scheduler/ worker)
 - Make (optional; used for convenience targets)
 
@@ -171,7 +174,10 @@ See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflo
 | `HSC_REQUEST_TIMEOUT` | `30s` | No | Request timeout (e.g., `60s`) |
 | `HSC_HUGO_BASE_URL` | `https://huddlescope.github.io/` | No | Base URL for Hugo exports |
 | `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file |
-| `HSC_SOURCES` | (none) | No | Source list: `id,name,url[,interval];...` |
+| `HSC_SOURCES` | (none) | No | Source list: `id,name,url[,interval];...` (legacy; prefer `HSC_SOURCES_FILE`) |
+| `HSC_SOURCES_FILE` | `conf/sources.yaml` | No | Path to the YAML sources file |
+| `HSC_TEAMS_FILE` | `conf/teams.yaml` | No | Path to the YAML teams file |
+| `HSC_LOOKBACK` | `24h` | No | Lookback window for incremental ingestion (e.g., `6h`) |
 | `HSC_ENV` | `dev` | Yes | Environment: dev, production |
 | `TURSO_DATABASE_URL` | (none) | Yes | Turso database URL |
 | `TURSO_AUTH_TOKEN` | (none) | Yes | Turso authentication token |
@@ -241,14 +247,28 @@ Status is recorded in memory and logged. For persistent tracking, check applicat
 
 ### Feed Registry
 
-HuddleScope includes a curated list of NFL RSS/Atom feeds in `internal/feeds/`. The registry supports:
+Feed sources are configured in `conf/sources.yaml` and loaded by `internal/config`, which builds the domain `FeedRegistry` (`Config.SourceRegistry()`). The registry supports:
 
 - **Per-source failure isolation**: One failing source never blocks others
 - **Priority-based ordering**: Sources polled in priority order
 - **Selective disabling**: Set `enabled=false` to skip a source without deleting it
 - **Acceptable-use policy**: Mark restricted/paywalled feeds appropriately
 
-See `internal/feeds/README.md` for how to add or remove feeds without code changes.
+To add a feed, append an entry under `sources:` in `conf/sources.yaml` (the field reference is under "Source Configuration" above) using a unique `id`; to remove a feed, delete its entry. No code changes are required. If no sources are configured, `ingest` exits with an error.
+
+#### Acceptable-Use Policy
+
+- **Allowed**: RSS/Atom syndication is permitted; publicly available content may be cached and displayed.
+- **Restricted**: Paywalled or subscription-required content. Set `enabled: false` so the feed is never fetched, preventing access attempts.
+
+HuddleScope honors publisher terms of service and never attempts to bypass access controls.
+
+#### Best Practices
+
+- Prefer public, well-known NFL feeds that explicitly permit RSS syndication.
+- Mark paywalled or restricted feeds as `enabled: false`.
+- Never hardcode credentials.
+- Use descriptive, stable IDs (`snake_case`; include the domain if it helps).
 
 ### Production Mode
 

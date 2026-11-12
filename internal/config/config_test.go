@@ -761,6 +761,99 @@ func TestConfig_ToDomain(t *testing.T) {
 	}
 }
 
+func TestSourceRegistry(t *testing.T) {
+	cfg := Config{
+		Sources: []Source{
+			{ID: "espn-nfl", Name: "ESPN", URL: "https://espn.com/nfl/rss", Publication: "ESPN NFL", Priority: 1, Enabled: true, AcceptableUse: "allowed"},
+			{ID: "cbs-nfl", Name: "CBS", URL: "https://cbs.com/nfl/rss", Priority: 2, Enabled: false, AcceptableUse: "allowed"},
+		},
+	}
+
+	reg := cfg.SourceRegistry()
+	if reg == nil {
+		t.Fatal("SourceRegistry() returned nil")
+	}
+	if reg.Count() != 2 {
+		t.Errorf("Count() = %d; want 2", reg.Count())
+	}
+	if reg.CountEnabled() != 1 {
+		t.Errorf("CountEnabled() = %d; want 1", reg.CountEnabled())
+	}
+	src, ok := reg.Get("espn-nfl")
+	if !ok {
+		t.Fatal("Get(\"espn-nfl\") not found")
+	}
+	if src.Publication != "ESPN NFL" {
+		t.Errorf("espn-nfl Publication = %q; want ESPN NFL", src.Publication)
+	}
+}
+
+func TestSourceRegistryEmpty(t *testing.T) {
+	reg := (Config{}).SourceRegistry()
+	if reg == nil {
+		t.Fatal("SourceRegistry() returned nil for empty config")
+	}
+	if reg.Count() != 0 {
+		t.Errorf("Count() = %d; want 0 for empty config", reg.Count())
+	}
+}
+
+func TestSourceRegistryInvalidPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("expected SourceRegistry() to panic on invalid (duplicate) sources")
+		}
+	}()
+	cfg := Config{
+		Sources: []Source{
+			{ID: "dup", Name: "A", URL: "https://a.com"},
+			{ID: "dup", Name: "B", URL: "https://b.com"},
+		},
+	}
+	cfg.SourceRegistry() // duplicate ID -> NewFeedRegistry fails -> panic
+}
+
+func TestParseSourcesSurfacesYAMLValidationError(t *testing.T) {
+	t.Setenv("HSC_SOURCES", "")
+
+	tmpfile, err := os.CreateTemp("", "sources-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
+	yaml := `sources:
+  - id: dup
+    url: https://a.com/feed
+  - id: dup
+    url: https://b.com/feed
+`
+	if _, err := tmpfile.Write([]byte(yaml)); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	_ = tmpfile.Close()
+
+	cfg := Config{SourcesFile: tmpfile.Name()}
+	err = cfg.parseSources()
+	if err == nil {
+		t.Fatal("parseSources() error = nil; want the duplicate ID error to surface")
+	}
+	if !contains(err.Error(), "duplicate source ID") {
+		t.Errorf("parseSources() error = %v; want it to mention 'duplicate source ID'", err)
+	}
+}
+
+func TestParseSourcesMissingFileIsNotAnError(t *testing.T) {
+	t.Setenv("HSC_SOURCES", "")
+
+	cfg := Config{SourcesFile: filepath.Join(t.TempDir(), "does-not-exist.yaml")}
+	if err := cfg.parseSources(); err != nil {
+		t.Fatalf("parseSources() error = %v; want nil for a missing file", err)
+	}
+	if len(cfg.Sources) != 0 {
+		t.Errorf("len(Sources) = %d; want 0 for a missing file", len(cfg.Sources))
+	}
+}
+
 func TestLoadSourcesFromYAML(t *testing.T) {
 	tests := []struct {
 		name      string
