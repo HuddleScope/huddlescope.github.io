@@ -164,7 +164,7 @@ func (h *Heartbeat) MergePublication(result PublicationResult, now time.Time) {
 		if h.Status != HeartbeatStatusFailed {
 			h.Status = HeartbeatStatusOK
 		}
-	} else if result.Errors != nil && len(result.Errors) > 0 {
+	} else if len(result.Errors) > 0 {
 		// Failed publish: keep published_at (don't update), set status to failed
 		h.Status = HeartbeatStatusFailed
 		// Add publish error(s)

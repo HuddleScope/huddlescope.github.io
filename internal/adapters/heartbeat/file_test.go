@@ -1,6 +1,7 @@
 package heartbeat
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func TestFilePublisher_Publish(t *testing.T) {
 		SourcesFailed:  0,
 	}
 
-	if err := p.Publish(nil, hb); err != nil {
+	if err := p.Publish(context.TODO(), hb); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
 
@@ -87,7 +88,7 @@ func TestFilePublisher_Publish_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := p.Publish(nil, tt.hb)
+			err := p.Publish(context.TODO(), tt.hb)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Publish() error = %v, wantErr %v", err, tt.wantErr)
 			}
