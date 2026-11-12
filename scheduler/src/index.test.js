@@ -18,7 +18,7 @@ const originalConsole = { ...globalThis.console };
 function setupFetchMock() {
   mockResponses = [];
   loggedMessages = [];
-  
+
   globalThis.fetch = async (url, options) => {
     if (mockResponses.length === 0) {
       throw new Error('No mock response configured for fetch');
@@ -253,7 +253,7 @@ describe('utilities', () => {
 
   it('should detect retryable errors', async () => {
     const { isRetryableError } = await import('./index.js');
-    
+
     ok(isRetryableError(new RetryableError('timeout', 0)), 'RetryableError should be retryable');
     ok(isRetryableError({ name: 'AbortError' }), 'AbortError should be retryable');
     ok(!isRetryableError(new Error('401 Unauthorized')), '401 should not be retryable');
