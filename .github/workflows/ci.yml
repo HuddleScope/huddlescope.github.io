@@ -71,6 +71,14 @@ jobs:
       - name: Build binaries
         run: make build
 
+      - name: Install Hugo extended
+        run: |
+          HUGO_VERSION="0.169.0"
+          HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
+          curl -sL "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_BINARY}" | tar -xzf - hugo
+          sudo mv hugo /usr/local/bin/
+          echo "Hugo version: $(hugo version)"
+
       - name: Verify binaries
         run: ls -la dist/
 
