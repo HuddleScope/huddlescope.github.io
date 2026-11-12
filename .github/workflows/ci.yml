@@ -90,11 +90,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: scheduler/package-lock.json
 
       - name: Install dependencies
         working-directory: scheduler
-        run: npm ci
+        run: npm install
 
       - name: Run tests
         working-directory: scheduler
