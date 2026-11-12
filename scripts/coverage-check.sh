@@ -38,14 +38,18 @@ done
 # Then check remaining packages with 70% threshold
 for pkg in $ALL_PKGS; do
   # Skip core packages (already checked above)
-  skip=false
   for core in "${CORE_PKGS[@]}"; do
     if [ "$pkg" = "$core" ]; then
-      skip=true
-      break
+      continue 2
     fi
   done
-  $skip && continue
+
+  # Test-only packages (no non-test .go files) have no production
+  # statements to measure, so no percentage gate applies to them.
+  if [ -z "$(go list -f '{{if .GoFiles}}has-production-go{{end}}' "$pkg")" ]; then
+    echo "SKIP: $pkg (test-only package, no production statements)"
+    continue
+  fi
 
   go clean -testcache >/dev/null 2>&1
   go test -coverprofile=/tmp/cover.out "$pkg" >/dev/null 2>&1 || { echo "FAIL: $pkg - test failed"; exit 1; }
