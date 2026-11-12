@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,13 +49,21 @@ var DefaultRetryPolicy = RetryPolicy{
 // randomFloat64 returns a random float64 in [0, 1) using crypto/rand.
 func randomFloat64() float64 {
 	var b [8]byte
-	_, err := cryptoRand.Read(b[:])
-	if err != nil {
-		// Fallback to math/rand if crypto/rand fails
-		return rand.Float64() //nolint:G404
+	if _, err := cryptoRand.Read(b[:]); err != nil {
+		// crypto/rand only fails when the system entropy source is broken;
+		// a neutral mid-range value keeps jitter working without a weak
+		// generator.
+		return 0.5
 	}
 	// Convert 8 bytes to float64 in [0, 1)
 	return float64(binary.BigEndian.Uint64(b[:])) / (1 << 64)
+}
+
+// closeResponseBody closes a response body whose payload was not (fully)
+// consumed. A close error on these paths carries no useful signal beyond
+// the error the caller already returns, so it is discarded explicitly.
+func closeResponseBody(resp *http.Response) {
+	_ = resp.Body.Close()
 }
 
 // HostRateLimiter enforces a minimum interval between requests to the same host.
@@ -312,7 +319,7 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 					// Continue to retry for 429
 				} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 					// 4xx errors are not retryable (except 429)
-					resp.Body.Close() //nolint:errcheck
+					closeResponseBody(resp)
 					return nil, fmt.Errorf("request failed with status %d: %w", resp.StatusCode, lastErr)
 				}
 				// For 5xx errors, continue to retry
@@ -331,7 +338,7 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 
 		// If we have a response, close the body before retry
 		if resp != nil {
-			resp.Body.Close() //nolint:errcheck
+			closeResponseBody(resp)
 		}
 
 		if attempt < f.retryPolicy.Attempts {
@@ -354,14 +361,14 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 
 	// Handle 304 Not Modified (unchanged) - this is a success case
 	if resp != nil && resp.StatusCode == http.StatusNotModified {
-		resp.Body.Close() //nolint:errcheck
+		closeResponseBody(resp)
 		result.Unchanged = true
 		return result, nil
 	}
 
 	// Check for error status codes
 	if resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
-		resp.Body.Close() //nolint:errcheck
+		closeResponseBody(resp)
 		return nil, fmt.Errorf("request failed after %d attempts with status %d: %w", attempt-1, resp.StatusCode, fmt.Errorf("unexpected status code %d", resp.StatusCode))
 	}
 
@@ -370,10 +377,12 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 	lr := io.LimitReader(resp.Body, f.maxBytes+1)
 	n, err := io.Copy(&bodyBuf, lr)
 	if err != nil {
-		resp.Body.Close() //nolint:errcheck
+		closeResponseBody(resp)
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	resp.Body.Close() //nolint:errcheck
+	if err := resp.Body.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close response body: %w", err)
+	}
 
 	// Check for body size limit
 	if n > f.maxBytes {

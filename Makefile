@@ -41,13 +41,14 @@ coverage: ## Run tests with coverage report
 	$(GOCOVER) -func=coverage.out
 
 # Security
-# Note: gosec and govulncheck binaries are installed via Homebrew.
-# Use local binaries directly to avoid Go version cache incompatibility.
-security: ## Run gosec security scanner and govulncheck
+# Note: gosec and govulncheck binaries live in ~/go/bin (installed via
+# `go install` locally; CI installs the same in `.github/workflows/ci.yml`).
+# Override with GOSEC / GOVULNCHECK env vars if installed elsewhere.
+security: ## Run gosec security scanner and govulncheck (fails CI on findings)
 	@$(GO) clean -cache
-	$(GOSEC) ./... || true
+	$(GOSEC) ./...
 	@$(GO) clean -cache
-	$(GOVULNCHECK) ./... || true
+	$(GOVULNCHECK) ./...
 
 # Coverage check
 check-coverage: ## Enforce >=80% coverage on internal packages

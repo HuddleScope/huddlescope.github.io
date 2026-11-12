@@ -39,12 +39,13 @@ func (p *Publisher) Publish(ctx context.Context, page domain.StoryDetailPage) er
 	outPath := filepath.Join(p.OutDir, "_content", "stories", slug+".md")
 
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o750); err != nil {
 		return fmt.Errorf("mkdir failed: %w", err)
 	}
 
 	// Write atomically: temp file then rename
 	tmpPath := outPath + ".tmp"
+	// #nosec G306: published story content is public static site content and must stay world-readable
 	if err := os.WriteFile(tmpPath, markdown, 0o644); err != nil {
 		return fmt.Errorf("temp write failed: %w", err)
 	}

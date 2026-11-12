@@ -43,6 +43,7 @@ func (p *DataPublisher) Publish(ctx context.Context, snapshot domain.Snapshot) (
 
 	// Read existing file if present
 	var existingContent []byte
+	// #nosec G304: dataPath is OutDir + configured DataFile, both operator-controlled
 	if existing, err := os.ReadFile(dataPath); err == nil {
 		existingContent = existing
 	}
@@ -76,13 +77,14 @@ func (p *DataPublisher) Publish(ctx context.Context, snapshot domain.Snapshot) (
 	}
 
 	// Ensure output directory exists
-	if err := os.MkdirAll(p.OutDir, 0o755); err != nil {
+	if err := os.MkdirAll(p.OutDir, 0o750); err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("mkdir failed: %w", err))
 		return result, nil
 	}
 
 	// Atomic write: temp file then rename
 	tmpPath := dataPath + ".tmp"
+	// #nosec G306: the rendered snapshot is public static site data and must stay world-readable
 	if err := os.WriteFile(tmpPath, rendered, 0o644); err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("temp write failed: %w", err))
 		return result, nil
