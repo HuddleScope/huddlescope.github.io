@@ -108,7 +108,7 @@ async function dispatchWorkflow(token) {
     const timeoutId = setTimeout(() => abortController.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      const response = await fetch(url, {
+      const response = await globalThis.fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -258,3 +258,6 @@ async function sleepWithBackoff(attempt, baseMs) {
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// Export functions for testing
+export { dispatchWorkflow, RetryableError, getRetryAfterSeconds, isRetryableError, sleep, sleepWithBackoff, safeReadResponse };
