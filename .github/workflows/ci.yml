@@ -37,7 +37,6 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache: true
 
       - name: Install linters
         # The Makefile expects golangci-lint, gosec and govulncheck on PATH
@@ -74,3 +73,26 @@ jobs:
 
       - name: Verify binaries
         run: ls -la dist/
+
+  # Scheduled worker: Cloudflare Worker Cron
+  # Independent job — does not block merges (not a required status check)
+  scheduler:
+    name: Scheduler worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: scheduler
+        run: npm install
+
+      - name: Run tests
+        working-directory: scheduler
+        run: npm test

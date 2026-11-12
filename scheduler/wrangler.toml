@@ -1,0 +1,21 @@
+name = "huddlescope-dispatcher"
+main = "src/index.js"
+compatibility_date = "2026-11-12"
+
+# Cron triggers
+# Run twice each hour at :07 and :37 UTC (as per HS-019 acceptance criteria)
+triggers = { crons = ["7,37 * * * *"] }
+
+# Workers Dev: free tier, no custom domain
+workers_dev = true
+
+# Environment variables (non-sensitive)
+# GITHUB_TOKEN must be set via: wrangler secret put GITHUB_TOKEN
+# See README for token creation instructions
+
+# Resource limits for Cloudflare Workers Free tier
+# - 100k requests/day
+# - 10ms CPU per request
+# - 128KiB scheduled event payload
+# - 50 scheduled events/day (we use 48, so we're within quota)
+# Reference: https://developers.cloudflare.com/workers/platform/limits/

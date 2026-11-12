@@ -26,7 +26,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 | `internal/adapters/storage` | Storage adapters (in-memory, Turso, file) |
 | `internal/config` | Configuration loading and validation |
 | `web/` | Hugo site source (see Website section below) |
-| `scheduler/` | Scheduled tasks (TBD) |
+| `scheduler/` | Cloudflare Worker cron dispatcher (HS-019) |
 | `migrations/` | Database migrations (TBD) |
 | `docs/` | Project documentation |
 
@@ -34,6 +34,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 
 ### Prerequisites
 - Go 1.24.11+
+- Node.js 20+ (for scheduler/ worker)
 - Make (optional; used for convenience targets)
 
 ### Clone and setup
@@ -44,16 +45,30 @@ cp .env.example .env
 # Edit .env with your local values (optional; defaults will be used if omitted)
 ```
 
-### Build
+### Build Go binaries
 ```sh
 make build
 # Binaries appear in dist/ingest and dist/export
+```
+
+### Build scheduler worker
+```sh
+cd scheduler
+npm install
+# Local dev: npm run dev
+# Deploy: wrangler deploy
 ```
 
 ### Run checks (CI pipeline)
 ```sh
 make check
 # Runs fmt, lint, test, coverage, security in sequence
+```
+
+### Run scheduler tests
+```sh
+cd scheduler
+npm test
 ```
 
 ### Available Make targets
