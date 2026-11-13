@@ -1,6 +1,7 @@
 +++
 title = "2024 NFL preseason Week 1 outlook"
 description = "Preview of the first week of NFL preseason action with key storylines"
+slug = "preseason-week-1-overview"
 source = "ESPN"
 sourceURL = "https://www.espn.com/nfl/story/_/id/40000001"
 publication = "ESPN NFL"

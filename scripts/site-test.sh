@@ -186,15 +186,15 @@ if ! grep -q 'coverage' "$WEB_DIR/public/index.html"; then
   exit 1
 fi
 
-# HS-015: Verify evidence badge (at least one unverified)
-if ! grep -q 'unverified' "$WEB_DIR/public/index.html"; then
-  log "FAIL: evidence badge (unverified) not found in homepage"
+# HS-015: Verify evidence badge (at least one confirmed)
+if ! grep -q 'story-evidence-confirmed' "$WEB_DIR/public/index.html"; then
+  log "FAIL: evidence badge (confirmed) not found in homepage"
   exit 1
 fi
 
-# HS-015: Verify disclaimer for rumour/speculation
-if ! grep -q 'Rumor/speculation' "$WEB_DIR/public/index.html"; then
-  log "FAIL: rumour/speculation disclaimer not found in homepage"
+# HS-015: Verify disclaimer for rumour/speculation is absent (all confirmed)
+if grep -q 'Rumor/speculation' "$WEB_DIR/public/index.html"; then
+  log "FAIL: Rumor/speculation disclaimer present but all stories are confirmed"
   exit 1
 fi
 
@@ -224,6 +224,162 @@ if [ "$FEATURED_SCORE" != "$MAX_SCORE" ]; then
 fi
 
 log "PASS: HS-015 homepage assertions (featured is top-scored)"
+
+# =============================================================================
+# HS-023: Launch verification — accessibility, SEO, sitemap, cache, data
+# =============================================================================
+
+log "TEST: HS-023 launch verification"
+
+# HS-023a: sitemap.xml emitted and contains home URL
+if [[ ! -f "$WEB_DIR/public/sitemap.xml" ]]; then
+  log "FAIL: sitemap.xml not found"
+  exit 1
+fi
+if ! grep -q 'https://huddlescope.github.io/' "$WEB_DIR/public/sitemap.xml"; then
+  log "FAIL: sitemap.xml does not contain home URL"
+  exit 1
+fi
+log "PASS: sitemap.xml present and references home"
+
+# HS-023b: robots.txt emitted and references sitemap
+if [[ ! -f "$WEB_DIR/public/robots.txt" ]]; then
+  log "FAIL: robots.txt not found"
+  exit 1
+fi
+if ! grep -q 'Sitemap:' "$WEB_DIR/public/robots.txt"; then
+  log "FAIL: robots.txt does not contain Sitemap directive"
+  exit 1
+fi
+if ! grep -q 'https://huddlescope.github.io/sitemap.xml' "$WEB_DIR/public/robots.txt"; then
+  log "FAIL: robots.txt does not reference sitemap.xml with full URL"
+  exit 1
+fi
+log "PASS: robots.txt present and references sitemap"
+
+# HS-023c: 404.html emitted
+if [[ ! -f "$WEB_DIR/public/404.html" ]]; then
+  log "FAIL: 404.html not found"
+  exit 1
+fi
+log "PASS: 404.html emitted"
+
+# HS-023d: Every HTML page has canonical, description, og:title
+for htmlfile in "$WEB_DIR/public"/*.html "$WEB_DIR/public"/*/*.html; do
+  [[ -f "$htmlfile" ]] || continue
+  if ! grep -q 'rel="canonical"' "$htmlfile"; then
+    log "FAIL: $htmlfile missing canonical link"
+    exit 1
+  fi
+  if ! grep -q '<meta name="description"' "$htmlfile"; then
+    log "FAIL: $htmlfile missing description meta"
+    exit 1
+  fi
+  if ! grep -q '<meta property="og:title"' "$htmlfile"; then
+    log "FAIL: $htmlfile missing og:title meta"
+    exit 1
+  fi
+done
+log "PASS: All HTML pages have canonical, description, og:title"
+
+# HS-023e: Internal link scan — every internal href resolves to a file
+# Skip script/style tags; resolve directory links to index.html
+while IFS= read -r href; do
+  [[ -z "$href" ]] && continue
+  # Skip external links
+  case "$href" in
+    http://*|https://*|mailto:*|tel:*|//*) continue ;;
+    \#*) continue ;;  # fragment only
+    /*) href="${href#/}" ;;  # absolute path within site
+  esac
+  # Normalize directory → index.html
+  target="$WEB_DIR/public/$href"
+  if [[ -d "$target" ]]; then
+    target="$target/index.html"
+  else
+    target="$target"
+  fi
+  # Allow hash-suffixed links to remain in site (anchor links on same page)
+  if [[ "$href" == *"#"* ]]; then
+    continue
+  fi
+  if [[ ! -f "$target" ]]; then
+    log "FAIL: broken internal link $href (target $target missing)"
+    exit 1
+  fi
+done < <(grep -oE 'href="[^"]*"' "$WEB_DIR/public/index.html" | sed 's/href="\(.*\)"/\1/' | grep -v '^https\?://' | grep -v '^//' | grep -v '^mailto:' | grep -v '^tel:')
+log "PASS: No broken internal links on homepage"
+
+# HS-023f: Homepage JSON validation
+if ! python3 -c "import json; json.load(open('$WEB_DIR/public/../data/homepage.json'))" 2>/dev/null; then
+  log "FAIL: homepage.json is not valid JSON"
+  exit 1
+fi
+if ! jq -e '.version and .generatedAt and (.stories | length > 0)' "$WEB_DIR/public/../data/homepage.json" > /dev/null 2>&1; then
+  log "FAIL: homepage.json missing required fields (version, generatedAt, stories)"
+  exit 1
+fi
+# Verify story IDs unique
+story_ids=$(jq -r '.stories[].id' "$WEB_DIR/public/../data/homepage.json" | sort)
+unique_ids=$(echo "$story_ids" | uniq)
+if [[ "$story_ids" != "$unique_ids" ]]; then
+  log "FAIL: homepage.json has duplicate story IDs"
+  exit 1
+fi
+log "PASS: homepage.json is valid with unique story IDs"
+
+# HS-023g: Homepage story IDs match content pages (WARN if missing, don't fail)
+content_pages=$(find "$WEB_DIR/content/stories" -type f -name '*.md' -exec basename {} .md \;)
+json_ids=$(jq -r '.stories[].id' "$WEB_DIR/public/../data/homepage.json")
+missing=0
+for id in $json_ids; do
+  if ! echo "$content_pages" | grep -q "^${id}$"; then
+    log "WARN: homepage story ID '$id' has no matching content/stories/$id.md (production may emit fresh IDs)"
+    missing=$((missing+1))
+  fi
+done
+if [[ $missing -gt 0 ]]; then
+  log "WARN: $missing homepage story IDs without content pages"
+fi
+log "PASS: story ID to content page check completed (warnings logged above if any)"
+
+# HS-023h: Secret/private-data scan
+# Exclude integrity hashes (sha256-...) and hugo cache identifiers
+SECRETS_FOUND=$(grep -rnE '(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|xoxb-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}|TURSO_AUTH_TOKEN=.*[a-zA-Z0-9]{20,})' "$WEB_DIR/public" "$WEB_DIR/public/../data" 2>/dev/null || true)
+if [[ -n "$SECRETS_FOUND" ]]; then
+  log "FAIL: possible secret/private data found in web/public or web/data"
+  echo "$SECRETS_FOUND"
+  exit 1
+fi
+log "PASS: No obvious secrets/private data in published artifacts"
+
+# HS-023i: Evidence badge assertions (data-driven, replacing hardcoded HS-015 greps)
+evidence_levels=$(jq -r '.stories[].evidenceLevel' "$WEB_DIR/public/../data/homepage.json" | sort -u)
+for level in $evidence_levels; do
+  if [[ "$level" == "unverified" ]]; then
+    if ! grep -q 'story-evidence-unverified' "$WEB_DIR/public/index.html"; then
+      log "FAIL: unverified evidence badge not rendered"
+      exit 1
+    fi
+    if ! grep -q 'Rumor/speculation' "$WEB_DIR/public/index.html"; then
+      log "FAIL: Rumor/speculation disclaimer missing for unverified stories"
+      exit 1
+    fi
+    log "PASS: unverified evidence badge and disclaimer present"
+  elif [[ "$level" == "confirmed" ]]; then
+    if ! grep -q 'story-evidence-confirmed' "$WEB_DIR/public/index.html"; then
+      log "FAIL: confirmed evidence badge not rendered"
+      exit 1
+    fi
+    log "PASS: confirmed evidence badge present"
+  fi
+done
+
+# SUMMARY
+# =============================================================================
+log "PASS: HS-023 launch verification (sitemap, robots, 404, metadata, internal links, data, secrets, evidence badges)"
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 log "=== All site tests passed ==="
