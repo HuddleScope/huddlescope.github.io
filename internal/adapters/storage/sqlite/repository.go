@@ -61,7 +61,7 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 		result, err := r.db.Exec(`UPDATE stories 
 			SET title = ?, summary = ?, canonical_url = ?, published_at = ?, 
 				story_data = ?, updated_at = datetime('now')
-			WHERE story_key = ?`, story.Title, story.Summary, story.CanonicalURL, 
+			WHERE story_key = ?`, story.Title, story.Summary, story.CanonicalURL,
 			timestampToString(story.PublishedAt), string(data), story.ID)
 		if err != nil {
 			return domain.UpsertUnchanged, fmt.Errorf("update: %w", err)
