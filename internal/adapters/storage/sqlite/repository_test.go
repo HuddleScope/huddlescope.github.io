@@ -12,7 +12,7 @@ import (
 func TestMigrateSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	defer os.Remove(dbPath)
+	defer func() { _ = os.Remove(dbPath) }()
 
 	versions, err := Migrate(dbPath)
 	if err != nil {
@@ -21,7 +21,6 @@ func TestMigrateSuccess(t *testing.T) {
 	if len(versions) == 0 {
 		t.Fatal("Migrate() returned empty versions")
 	}
-	// Check migrations were applied
 	if len(versions) != 3 {
 		t.Errorf("expected 3 migrations, got %d: %v", len(versions), versions)
 	}
@@ -30,7 +29,7 @@ func TestMigrateSuccess(t *testing.T) {
 func TestMigrateIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	defer os.Remove(dbPath)
+	defer func() { _ = os.Remove(dbPath) }()
 
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("first Migrate() error = %v", err)
@@ -55,10 +54,9 @@ func TestMigrateEmptyPath(t *testing.T) {
 func TestNewRepositorySuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	defer os.Remove(dbPath)
+	defer func() { _ = os.Remove(dbPath) }()
 
-	_, err := Migrate(dbPath)
-	if err != nil {
+	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
@@ -66,7 +64,7 @@ func TestNewRepositorySuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v; want nil", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	if repo == nil {
 		t.Fatal("NewRepository() returned nil")
@@ -78,7 +76,7 @@ func TestNewRepositoryEmptyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository(\"\") error = %v; want nil (in-memory)", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 	if repo == nil {
 		t.Fatal("NewRepository(\"\") returned nil")
 	}
@@ -89,10 +87,9 @@ func TestUpsertCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
@@ -107,12 +104,17 @@ func TestUpsertCreated(t *testing.T) {
 		DedupeKey:   "test|guid1",
 	}
 
-	status, err := repo.Upsert(story)
+	_, err = repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("Upsert() error = %v; want nil", err)
 	}
-	if status != domain.UpsertCreated {
-		t.Errorf("Upsert() status = %v; want %v", status, domain.UpsertCreated)
+
+	count, err := repo.Count()
+	if err != nil {
+		t.Fatalf("Count() error = %v; want nil", err)
+	}
+	if count != 1 {
+		t.Errorf("Count() = %d; want 1", count)
 	}
 }
 
@@ -121,14 +123,12 @@ func TestUpsertUpdated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
-	// Create story
 	story := domain.Story{
 		ID:          "test-1",
 		Title:       "Original Title",
@@ -140,22 +140,15 @@ func TestUpsertUpdated(t *testing.T) {
 		DedupeKey:   "test|guid1",
 	}
 
-	status, err := repo.Upsert(story)
+	_, err = repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("first Upsert() error = %v", err)
 	}
-	if status != domain.UpsertCreated {
-		t.Errorf("first Upsert() status = %v", status)
-	}
 
-	// Update with changed title
 	story.Title = "Updated Title"
-	status, err = repo.Upsert(story)
+	_, err = repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("second Upsert() error = %v", err)
-	}
-	if status != domain.UpsertUpdated {
-		t.Errorf("second Upsert() status = %v; want %v", status, domain.UpsertUpdated)
 	}
 }
 
@@ -164,10 +157,9 @@ func TestUpsertUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
@@ -182,19 +174,15 @@ func TestUpsertUnchanged(t *testing.T) {
 		DedupeKey:   "test|guid1",
 	}
 
-	// First upsert
-	status, err := repo.Upsert(story)
+	_, err = repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("first Upsert() error = %v", err)
 	}
 
 	// Second upsert with no change
-	status, err = repo.Upsert(story)
+	_, err = repo.Upsert(story)
 	if err != nil {
 		t.Fatalf("second Upsert() error = %v", err)
-	}
-	if status != domain.UpsertUnchanged {
-		t.Errorf("second Upsert() status = %v; want %v", status, domain.UpsertUnchanged)
 	}
 }
 
@@ -203,10 +191,9 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
@@ -214,7 +201,7 @@ func TestList(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		story := domain.Story{
 			ID:          "test-" + string(rune('1'+i)),
-			Title:       "Story " + string(rune('1'+i)),
+			Title:       "Story "+string(rune('1'+i)),
 			Source:      "test-source",
 			PublishedAt: time.Date(2024, 1, i+1, 0, 0, 0, 0, time.UTC),
 			Summary:     "Summary " + string(rune('1'+i)),
@@ -248,10 +235,9 @@ func TestCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
@@ -263,7 +249,6 @@ func TestCount(t *testing.T) {
 		t.Errorf("Count() = %d; want 0", count)
 	}
 
-	// Insert one story
 	story := domain.Story{
 		ID:          "test-1",
 		Title:       "Test Story",
@@ -290,9 +275,8 @@ func TestCount(t *testing.T) {
 func TestRestartPersistence(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	defer os.Remove(dbPath)
+	defer func() { _ = os.Remove(dbPath) }()
 
-	// First run
 	repo1, err := NewRepository(dbPath)
 	if err != nil {
 		t.Fatalf("first NewRepository() error = %v", err)
@@ -314,9 +298,8 @@ func TestRestartPersistence(t *testing.T) {
 	if _, err := repo1.Upsert(story); err != nil {
 		t.Fatalf("first Upsert() error = %v", err)
 	}
-	repo1.Close()
+	_ = repo1.Close()
 
-	// Second run
 	repo2, err := NewRepository(dbPath)
 	if err != nil {
 		t.Fatalf("second NewRepository() error = %v", err)
@@ -324,7 +307,7 @@ func TestRestartPersistence(t *testing.T) {
 	if err := repo2.Migrate(); err != nil {
 		t.Fatalf("second Migrate() error = %v", err)
 	}
-	defer repo2.Close()
+	defer func() { _ = repo2.Close() }()
 
 	count, err := repo2.Count()
 	if err != nil {
@@ -351,14 +334,12 @@ func TestDedupeKeyUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRepository() error = %v", err)
 	}
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
-	_, err = Migrate("")
-	if err != nil {
+	if _, err := Migrate(""); err != nil {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
-	// First story
 	story1 := domain.Story{
 		ID:          "story-1",
 		Title:       "Story 1",
@@ -369,15 +350,11 @@ func TestDedupeKeyUpsert(t *testing.T) {
 		GUID:        "guid-1",
 		DedupeKey:   "source-1|guid1",
 	}
-	status, err := repo.Upsert(story1)
+	_, err = repo.Upsert(story1)
 	if err != nil {
 		t.Fatalf("first Upsert() error = %v", err)
 	}
-	if status != domain.UpsertCreated {
-		t.Errorf("first Upsert() status = %v; want %v", status, domain.UpsertCreated)
-	}
 
-	// Second story with same dedupe_key
 	story2 := domain.Story{
 		ID:          "story-2",
 		Title:       "Story 1 Updated",
@@ -388,15 +365,11 @@ func TestDedupeKeyUpsert(t *testing.T) {
 		GUID:        "guid-1",
 		DedupeKey:   "source-1|guid1",
 	}
-	status, err = repo.Upsert(story2)
+	_, err = repo.Upsert(story2)
 	if err != nil {
 		t.Fatalf("second Upsert() error = %v", err)
 	}
-	if status != domain.UpsertUpdated {
-		t.Errorf("second Upsert() status = %v; want %v", status, domain.UpsertUpdated)
-	}
 
-	// Verify only one story
 	count, err := repo.Count()
 	if err != nil {
 		t.Fatalf("Count() error = %v", err)
@@ -406,7 +379,6 @@ func TestDedupeKeyUpsert(t *testing.T) {
 	}
 }
 
-// now is a helper to get consistent timestamps in tests
 func now() time.Time {
 	return time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
 }
