@@ -201,7 +201,7 @@ func TestList(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		story := domain.Story{
 			ID:          "test-" + string(rune('1'+i)),
-			Title:       "Story "+string(rune('1'+i)),
+			Title:       "Story " + string(rune('1'+i)),
 			Source:      "test-source",
 			PublishedAt: time.Date(2024, 1, i+1, 0, 0, 0, 0, time.UTC),
 			Summary:     "Summary " + string(rune('1'+i)),
