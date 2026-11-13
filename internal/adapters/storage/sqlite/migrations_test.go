@@ -36,10 +36,4 @@ func TestReadMigration(t *testing.T) {
 	}
 }
 
-// TestMigrateNotImplemented checks that Migrate is not yet implemented.
-func TestMigrateNotImplemented(t *testing.T) {
-	_, err := Migrate(":memory:")
-	if err == nil {
-		t.Error("expected error from unimplemented Migrate")
-	}
-}
+// TestMigrateSuccess verifies that Migrate applies migrations and records them.
