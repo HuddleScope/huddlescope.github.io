@@ -329,7 +329,7 @@ func (s Story) Canonicalize(entry FeedEntry) Story {
 }
 
 // MeaningfulFieldsChanged returns true if some meaningful fields changed.
-// Compares title, summary, canonical URL, publishedAt, and GUID.
+// Compares title, summary, canonical URL, publishedAt, GUID, and Entities (order-insensitive).
 // Ignores FirstSeenAt, UpdatedAt, and ID (identity fields).
 func (s Story) MeaningfulFieldsChanged(other Story) bool {
 	if s.Title != other.Title {
@@ -347,10 +347,45 @@ func (s Story) MeaningfulFieldsChanged(other Story) bool {
 	if s.GUID != other.GUID {
 		return true
 	}
+	if !sliceEqual(s.Entities, other.Entities) {
+		return true
+	}
 	return false
+}
+
+func sliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	set := make(map[string]bool, len(a))
+	for _, v := range a {
+		set[v] = true
+	}
+	for _, v := range b {
+		if !set[v] {
+			return false
+		}
+	}
+	return true
 }
 
 // IsEqual checks if two stories are the same by ID.
 func (s Story) IsEqual(other Story) bool {
 	return s.ID == other.ID
+}
+
+// RepositoryError represents an error from the repository.
+type RepositoryError struct {
+	Message string
+}
+
+func (e RepositoryError) Error() string {
+	return "repository: " + e.Message
+}
+
+func (e RepositoryError) Unwrap() error {
+	return nil
 }

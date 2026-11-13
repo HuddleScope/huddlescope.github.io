@@ -302,6 +302,7 @@ func TestStory_MeaningfulFieldsChanged(t *testing.T) {
 		Summary:     "Original summary",
 		URL:         "https://example.com/original",
 		GUID:        "guid-1",
+		Entities:    []string{"nfl"}, // add entities for comparison tests
 		FirstSeenAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
@@ -317,7 +318,10 @@ func TestStory_MeaningfulFieldsChanged(t *testing.T) {
 		{"url changed", Story{URL: "https://example.com/new", CanonicalURL: "https://example.com/new", Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
 		{"publishedAt changed", Story{PublishedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC), Title: base.Title, Source: base.Source, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
 		{"guid changed", Story{GUID: "guid-2", Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
-		{"firstSeenAt changed (ignored)", Story{FirstSeenAt: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, UpdatedAt: base.UpdatedAt}, false},
+		{"firstSeenAt changed (ignored)", Story{FirstSeenAt: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, Entities: base.Entities, UpdatedAt: base.UpdatedAt}, false},
+		{"one new entity", Story{Entities: []string{"nfl", "nba"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"entities same order", Story{Entities: []string{"nfl"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, false},
+		{"entities different order", Story{Entities: []string{"nfl"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, false},
 	}
 
 	for _, tt := range tests {
@@ -325,6 +329,33 @@ func TestStory_MeaningfulFieldsChanged(t *testing.T) {
 			got := base.MeaningfulFieldsChanged(tt.incoming)
 			if got != tt.want {
 				t.Errorf("MeaningfulFieldsChanged() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_sliceEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []string
+		b    []string
+		want bool
+	}{
+		{"empty", []string{}, []string{}, true},
+		{"both nil", nil, nil, true},
+		{"one nil", nil, []string{"a"}, false},
+		{"length mismatch", []string{"a"}, []string{"a", "b"}, false},
+		{"same content same order", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"same content different order", []string{"a", "b"}, []string{"b", "a"}, true},
+		{"different content", []string{"a"}, []string{"b"}, false},
+		{"duplicate in one", []string{"a", "a"}, []string{"a"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sliceEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("sliceEqual(%v, %v) = %v; want %v", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}

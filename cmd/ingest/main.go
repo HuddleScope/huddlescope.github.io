@@ -43,8 +43,15 @@ func main() {
 	// Build publisher
 	publisher := publish.NewLogPublisher()
 
-	// Build repository
-	repo := storage.NewMemoryRepository()
+	// Build repository based on storage backend
+	repo, err := storage.NewRepository(storage.RepositoryOptions{
+		Backend: cfg.StorageBackend,
+		Path:    cfg.StoragePath,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating repository: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Build the feed registry from the configured sources. This is the single
 	// source of truth: conf/sources.yaml or HSC_SOURCES, both handled by config.

@@ -1,0 +1,28 @@
+[2026-11-13 11:40:32] === Site build verification started ===
+[2026-11-13 11:40:32] Hugo version: hugo v0.169.0+extended+withdeploy darwin/arm64 BuildDate=2026-10-27T14:52:20Z VendorInfo=Homebrew
+[2026-11-13 11:40:32] TEST: success path
+[2026-11-13 11:40:32] PASS: HS-016 multi-source story structure (story page exists)
+[2026-11-13 11:40:32] PASS: success path
+[2026-11-13 11:40:32]   - index.html built
+[2026-11-13 11:40:32]   - stories/ directory present
+[2026-11-13 11:40:32]   - sources/ directory present
+[2026-11-13 11:40:32]   - no external tracking scripts
+[2026-11-13 11:40:32]   - story/source pages generated
+[2026-11-13 11:40:32] TEST: failure path
+[2026-11-13 11:40:32] PASS: failure path (missing source directory rejected)
+[2026-11-13 11:40:32] TEST: idempotency
+[2026-11-13 11:40:33] PASS: idempotency path (outputs identical across builds)
+[2026-11-13 11:40:33] TEST: HS-015 homepage assertions
+[2026-11-13 11:40:33] PASS: HS-015 homepage assertions (featured is top-scored)
+[2026-11-13 11:40:33] TEST: HS-023 launch verification
+[2026-11-13 11:40:33] PASS: sitemap.xml present and references home
+[2026-11-13 11:40:33] PASS: robots.txt present and references sitemap
+[2026-11-13 11:40:33] PASS: 404.html emitted
+[2026-11-13 11:40:33] PASS: All HTML pages have canonical, description, og:title
+[2026-11-13 11:40:33] PASS: No broken internal links on homepage
+[2026-11-13 11:40:33] PASS: homepage.json is valid with unique story IDs
+[2026-11-13 11:40:33] PASS: story ID to content page check completed (warnings logged above if any)
+[2026-11-13 11:40:33] PASS: No obvious secrets/private data in published artifacts
+[2026-11-13 11:40:33] PASS: confirmed evidence badge present
+[2026-11-13 11:40:33] PASS: HS-023 launch verification (sitemap, robots, 404, metadata, internal links, data, secrets, evidence badges)
+[2026-11-13 11:40:33] === All site tests passed ===

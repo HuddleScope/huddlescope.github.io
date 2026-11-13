@@ -78,6 +78,7 @@ type Config struct {
 	StorageBackend   string
 	TursoDatabaseURL string
 	TursoAuthToken   string
+	StoragePath      string // Path for sqlite-file backend
 	Sources          []Source
 	Teams            []Team
 	Env              string
@@ -93,6 +94,7 @@ const (
 	defaultRequestTimeout = 30 * time.Second
 	defaultHugoBaseURL    = "https://huddlescope.github.io/"
 	defaultStorageBackend = "memory"
+	defaultStoragePath    = "data/huddlescope.db"
 	defaultTeamsFile      = "conf/teams.yaml"
 	defaultEnv            = "dev"
 	defaultLookbackWindow = 24 * time.Hour
@@ -108,6 +110,7 @@ func Load(configFile string) (Config, error) {
 		RequestTimeout: defaultRequestTimeout,
 		HugoBaseURL:    defaultHugoBaseURL,
 		StorageBackend: defaultStorageBackend,
+		StoragePath:    defaultStoragePath,
 		Env:            defaultEnv,
 		LookbackWindow: defaultLookbackWindow,
 		HeartbeatFile:  defaultHeartbeatFile,
@@ -158,6 +161,9 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_STORAGE_BACKEND"); v != "" {
 		c.StorageBackend = v
+	}
+	if v := os.Getenv("HSC_STORAGE_PATH"); v != "" {
+		c.StoragePath = v
 	}
 	if v := os.Getenv("TURSO_DATABASE_URL"); v != "" {
 		c.TursoDatabaseURL = v
@@ -575,6 +581,8 @@ func loadEnvFile(path string, cfg *Config) error {
 			cfg.HugoBaseURL = value
 		case "HSC_STORAGE_BACKEND":
 			cfg.StorageBackend = value
+		case "HSC_STORAGE_PATH":
+			cfg.StoragePath = value
 		case "TURSO_DATABASE_URL":
 			cfg.TursoDatabaseURL = value
 		case "TURSO_AUTH_TOKEN":

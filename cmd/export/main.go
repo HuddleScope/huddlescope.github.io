@@ -43,8 +43,15 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Build repository (memory for now; Turso via HS-040 when ready)
-	repo := storage.NewMemoryRepository()
+	// Build repository
+	repo, err := storage.NewRepository(storage.RepositoryOptions{
+		Backend: cfg.StorageBackend,
+		Path:    cfg.StoragePath,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating repository: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Load teams from config file
 	teamRegistry := cfg.TeamRegistry()
