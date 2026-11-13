@@ -18,7 +18,7 @@ We do not republish full copyrighted articles or unlicensed images. Our publishi
   - Images not licensed for republication
   - Translations without explicit permission
 
-This approach is enforced in our rendering model (`internal/domain/heartbeat.go`), where the `PublisherArticle` struct deliberately omits article body/content fields.
+This approach is enforced in our rendering model (`internal/domain/storypage.go`), where the `PublisherArticle` struct deliberately omits article body/content fields.
 
 ## RSS availability is not blanket permission
 

@@ -19,7 +19,7 @@ We do not use external tracking scripts or analytics. Your browsing activity is 
 - No unlicensed images are stored or distributed.
 - All data comes from publicly available RSS feeds; users are responsible for complying with feed source terms of service.
 
-See [Editorial/Source Policy](../editorial-policy) for our detailed editorial boundaries, copyright approach, and operational practices, including:
+See [Editorial/Source Policy](https://github.com/HuddleScope/huddlescope.github.io/blob/main/docs/editorial-policy.md) for our detailed editorial boundaries, copyright approach, and operational practices, including:
 
 - What we publish (sources, publisher credits, original links, short excerpts only)
 - RSS availability is not blanket permission (per-source `license` and `acceptable_use`)
@@ -28,7 +28,7 @@ See [Editorial/Source Policy](../editorial-policy) for our detailed editorial bo
 
 ### Feed disable and removal
 
-If a source publisher requests removal of their feed or specific content, see [Ops Runbook](../ops-runbook#feed-disable-procedure) for the disable procedure and [Data deletion](../editorial-policy#data-deletion-and-opt-out-requests) in the editorial policy.
+If a source publisher requests removal of their feed or specific content, see [Ops Runbook](https://github.com/HuddleScope/huddlescope.github.io/blob/main/docs/ops-runbook.md#feed-disable-procedure) for the disable procedure and [Data deletion](https://github.com/HuddleScope/huddlescope.github.io/blob/main/docs/editorial-policy.md#data-deletion-and-opt-out-requests) in the editorial policy.
 
 ## Source
 
