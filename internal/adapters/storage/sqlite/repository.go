@@ -13,7 +13,7 @@ import (
 // It does NOT run Migrate(); call Migrate() separately.
 func NewRepository(dbPath string) (*Repository, error) {
 	if dbPath == "" {
-		dbPath = ":memory:"
+		dbPath = "file::memory:?cache=shared"
 	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -23,6 +23,11 @@ func NewRepository(dbPath string) (*Repository, error) {
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	// Apply migrations on open
+	if _, err := Migrate(dbPath); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Repository{db: db}, nil
 }
@@ -98,13 +103,14 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 	// Insert new story
 	data, _ := story.MarshalJSON()
 	uuid := uuid.New().String()
+	nowStr := timestampToString(time.Now().UTC())
 	result, err := r.db.Exec(`INSERT INTO stories 
-		(story_id, story_key, source_id, article_id, title, summary, published_at, 
+		(story_id, story_key, title, summary, published_at, 
 		 canonical_url, guid, story_data, dedupe_key, status, created_at, first_seen_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'), datetime('now'))`,
-		uuid, story.ID, story.Source, story.ID, story.Title, story.Summary,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
+		uuid, story.ID, story.Title, story.Summary,
 		timestampToString(story.PublishedAt), story.CanonicalURL, story.GUID,
-		string(data), story.DedupeKey)
+		string(data), story.DedupeKey, nowStr, nowStr, nowStr)
 	if err != nil {
 		return domain.UpsertUnchanged, fmt.Errorf("insert: %w", err)
 	}

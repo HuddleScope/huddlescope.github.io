@@ -22,7 +22,7 @@ const schemaMigrationsTable = "schema_migrations"
 // This is idempotent: running Migrate multiple times has the same effect.
 func Migrate(dbPath string) ([]int, error) {
 	if dbPath == "" {
-		dbPath = ":memory:"
+		dbPath = "file::memory:?cache=shared"
 	}
 
 	db, err := sql.Open("sqlite", dbPath)

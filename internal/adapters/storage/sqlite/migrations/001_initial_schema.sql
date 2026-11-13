@@ -1,5 +1,5 @@
 -- HS-005: Initial schema with normalized tables for sources, articles, stories, teams, and ranking history
--- Forward-only migrations; Turso/SQLite compatible.
+-- Forward-only migrations; SQLite compatible.
 
 -- Enable foreign keys (must be set per connection)
 PRAGMA foreign_keys = ON;
@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sources (
     name TEXT NOT NULL,
     feed_url TEXT NOT NULL,
     guid TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(created_at) = 20 AND substr(created_at, 20) = 'Z')
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(created_at) = 20 AND substr(created_at, 20) = 'Z')
 );
 
 -- source_fetches: fetch history per source
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS source_fetches (
     source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
     guid TEXT,
     feed_title TEXT,
-    fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(fetched_at) = 20 AND substr(fetched_at, 20) = 'Z'),
+    fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(fetched_at) = 20 AND substr(fetched_at, 20) = 'Z'),
     items_total INTEGER NOT NULL DEFAULT 0,
     items_new INTEGER NOT NULL DEFAULT 0
 );
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS articles (
     title TEXT NOT NULL,
     summary TEXT,
     author TEXT,
-    published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(published_at) = 20 AND substr(published_at, 20) = 'Z'),
-    first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(first_seen_at) = 20 AND substr(first_seen_at, 20) = 'Z'),
+    published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(published_at) = 20 AND substr(published_at, 20) = 'Z'),
+    first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(first_seen_at) = 20 AND substr(first_seen_at, 20) = 'Z'),
     UNIQUE(source_id, guid),
     UNIQUE(url)
 );
@@ -50,19 +50,21 @@ CREATE INDEX IF NOT EXISTS idx_articles_guid ON articles(guid);
 -- story_key = normalized(title|source|published) for stable dedup
 CREATE TABLE IF NOT EXISTS stories (
     story_id TEXT PRIMARY KEY CHECK (length(story_id) = 36),  -- UUID
-    source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
-    article_id TEXT NOT NULL REFERENCES articles(article_id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     summary TEXT,
-    published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(published_at) = 20 AND substr(published_at, 20) = 'Z'),
-    first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(first_seen_at) = 20 AND substr(first_seen_at, 20) = 'Z'),
+    published_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(published_at) = 20 AND substr(published_at, 20) = 'Z'),
+    first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(first_seen_at) = 20 AND substr(first_seen_at, 20) = 'Z'),
     story_key TEXT NOT NULL UNIQUE,
+    canonical_url TEXT,
+    guid TEXT,
+    story_data TEXT,  -- JSON payload for full story persistence
+    dedupe_key TEXT,  -- secondary dedup key for deduplication
+    updated_at TEXT,  -- last update timestamp
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived', 'duplicate', 'removed')),
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(created_at) = 20 AND substr(created_at, 20) = 'Z')
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(created_at) = 20 AND substr(created_at, 20) = 'Z')
 );
 
 CREATE INDEX IF NOT EXISTS idx_stories_status_firstseen ON stories(status, first_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_stories_source_published ON stories(source_id, published_at DESC);
 
 -- story_articles: many-to-many link between stories and articles
 CREATE TABLE IF NOT EXISTS story_articles (
@@ -107,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_ranking_snapshots_team_date ON ranking_snapshots(
 -- ingestion_runs: ingestion execution history
 CREATE TABLE IF NOT EXISTS ingestion_runs (
     run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),  -- UUID
-    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) CHECK (length(started_at) = 20 AND substr(started_at, 20) = 'Z'),
+    started_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')) CHECK (length(started_at) = 20 AND substr(started_at, 20) = 'Z'),
     finished_at TEXT,
     sources_total INTEGER NOT NULL DEFAULT 0,
     sources_ok INTEGER NOT NULL DEFAULT 0,
@@ -117,40 +119,3 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_runs_started ON ingestion_runs(started_at DESC);
-
--- archive schema for historical data retention (same columns as hot tables, minus lifecycle columns)
-CREATE SCHEMA IF NOT EXISTS archive;
-
-CREATE TABLE IF NOT EXISTS archive.articles_archive (
-    article_id TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    url TEXT NOT NULL,
-    guid TEXT,
-    title TEXT NOT NULL,
-    summary TEXT,
-    author TEXT,
-    published_at TEXT NOT NULL,
-    first_seen_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS archive.stories_archive (
-    story_id TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    article_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    summary TEXT,
-    published_at TEXT NOT NULL,
-    first_seen_at TEXT NOT NULL,
-    story_key TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS archive.ranking_snapshots_archive (
-    snapshot_id TEXT NOT NULL,
-    rank_date TEXT NOT NULL,
-    team_id TEXT NOT NULL,
-    rank INTEGER NOT NULL,
-    metric TEXT NOT NULL,
-    value REAL NOT NULL
-);
