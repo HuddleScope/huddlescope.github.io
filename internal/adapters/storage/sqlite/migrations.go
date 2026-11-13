@@ -29,7 +29,7 @@ func Migrate(dbPath string) ([]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Enable foreign keys per connection
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
