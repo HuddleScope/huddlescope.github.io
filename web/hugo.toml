@@ -14,7 +14,7 @@ description = "Independent NFL news discovery and story aggregation"
 
 # Content types
 hasCJKLanguage = false
-disableKinds = ["taxonomy", "term", "robotsTXT", "404"]
+disableKinds = ["taxonomy", "term"]
 
 # Permalinks
 [permalinks]

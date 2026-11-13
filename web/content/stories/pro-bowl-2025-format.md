@@ -1,6 +1,7 @@
 +++
 title = "Pro Bowl Game 2025 format changes"
 description = "How the Pro Bowl has evolved in recent years"
+slug = "pro-bowl-2025-format"
 source = "WBNS"
 sourceURL = "https://www.wbns.com/sports/pro-bowl-format-changes"
 publication = "WBNS Sports"

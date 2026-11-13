@@ -1,24 +1,26 @@
 {
   "version": "1",
-  "generatedAt": "2026-11-11T17:00:00Z",
+  "generatedAt": "2026-11-13T10:00:00Z",
   "stories": [
     {
       "id": "top-free-agents-2024",
-      "title": "Top 10 free agent signings of the offseason",
-      "summary": "With the trade deadline approaching and training camp around the corner, here are the biggest free agent acquisitions that could change playoff races. Teams like the Eagles, 49ers, and Ravens made major moves to address key needs.",
-      "firstPublishedAt": "2024-07-25T15:30:00Z",
-      "lastPublishedAt": "2024-08-01T10:00:00Z",
-      "score": 81.5,
+      "title": "Top free agents 2024: Complete player movement tracker",
+      "summary": "Real-time tracking of free agent signings and movements across the league",
+      "firstPublishedAt": "2024-03-10T10:00:00Z",
+      "lastPublishedAt": "2024-03-15T14:00:00Z",
+      "score": 90.5,
       "evidenceLevel": "confirmed",
       "publishers": [
-        { "id": "nfl-com", "name": "NFL.com", "url": "https://www.nfl.com/news/top-free-agent-signings-2024" },
-        { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/40000001" }
+        { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/40000001" },
+        { "id": "nfl-com", "name": "NFL.com", "url": "https://www.nfl.com/news/top-free-agents-2024" },
+        { "id": "cbs-nfl", "name": "CBS Sports NFL", "url": "https://www.cbssports.com/nfl/free-agents/" },
+        { "id": "the-athletic-nfl", "name": "The Athletic NFL", "url": "https://theathletic.com/nfl/free-agents/" }
       ]
     },
     {
-      "id": "pro-bowl-format-changes",
+      "id": "pro-bowl-2025-format",
       "title": "Pro Bowl Game 2025 format changes",
-      "summary": "The NFL announced changes to the Pro Bowl format for 2025, moving away from the traditional game to skills competitions with team elements. Fans will have more ways to participate through voting and fantasy integration.",
+      "summary": "The NFL announced changes to the Pro Bowl format for 2025, moving away from the traditional game to skills competitions with team elements",
       "firstPublishedAt": "2024-07-20T09:15:00Z",
       "lastPublishedAt": "2024-07-20T09:15:00Z",
       "score": 67.2,
@@ -30,7 +32,7 @@
     {
       "id": "preseason-week-1-overview",
       "title": "2024 NFL preseason Week 1 outlook",
-      "summary": "Preview of the first week of NFL preseason action with key storylines. Key storylines include quarterback competitions in several markets and the first look at rookie talent across the league.",
+      "summary": "Preview of the first week of NFL preseason action with key storylines",
       "firstPublishedAt": "2024-08-01T10:00:00Z",
       "lastPublishedAt": "2024-08-01T10:00:00Z",
       "score": 78.4,
@@ -38,70 +40,15 @@
       "publishers": [
         { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/40000001" }
       ]
-    },
-    {
-      "id": "rumor-brady-return",
-      "title": "Tom Brady rumored to be considering a return to the league",
-      "summary": "Sources say Tom Brady is reportedly evaluating a return to the NFL this season. While nothing has been officially confirmed, the speculation has generated buzz across the league. Brady has not played since February 2022.",
-      "firstPublishedAt": "2026-10-15T11:20:00Z",
-      "lastPublishedAt": "2026-11-10T14:30:00Z",
-      "score": 92.3,
-      "evidenceLevel": "unverified",
-      "publishers": [
-        { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/brady-return-rumor" },
-        { "id": "nfl-com", "name": "NFL.com", "url": "https://www.nfl.com/news/brady-return-rumor-report" },
-        { "id": "mlb-com", "name": "MLB.com", "url": "https://www.mlb.com/news/brady-considering-return" }
-      ]
-    },
-    {
-      "id": "super-bowl-lviii-recap",
-      "title": "Super Bowl LVIII championship recap",
-      "summary": "The Kansas City Chiefs made history by winning their second consecutive Super Bowl. Patrick Mahomes delivered another legendary performance, securing his third Super Bowl MVP award.",
-      "firstPublishedAt": "2024-02-11T05:00:00Z",
-      "lastPublishedAt": "2024-02-12T09:00:00Z",
-      "score": 95.7,
-      "evidenceLevel": "confirmed",
-      "publishers": [
-        { "id": "nfl-com", "name": "NFL.com", "url": "https://www.nfl.com/news/super-bowl-lviii-recap" },
-        { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/super-bowl-lviii-recap" }
-      ]
-    },
-    {
-      "id": "rookie-wildcard-race",
-      "title": "Rookie quarterbacks shake up the Wild Card race",
-      "summary": "Three rookie quarterbacks have led their teams to unexpected playoff contention this season, defying pre-season projections and raising questions about NFL parity and development timelines.",
-      "firstPublishedAt": "2026-10-01T14:00:00Z",
-      "lastPublishedAt": "2026-11-08T16:45:00Z",
-      "score": 74.1,
-      "evidenceLevel": "confirmed",
-      "publishers": [
-        { "id": "espn-nfl", "name": "ESPN", "url": "https://www.espn.com/nfl/story/_/id/rookie-qbs-wildcard" },
-        { "id": "nfl-com", "name": "NFL.com", "url": "https://www.nfl.com/news/rookie-qbs-wildcard-race" },
-        { "id": "wbns", "name": "WBNS", "url": "https://www.wbns.com/sports/rookie-qbs-wildcard" }
-      ]
     }
   ],
   "latest": [
     {
-      "source_id": "nfl-com",
-      "source_name": "NFL.com",
-      "title": "Super Bowl LVIII championship recap",
-      "url": "https://www.nfl.com/news/super-bowl-lviii-recap",
-      "published_at": "2024-02-12T09:00:00Z"
-    },
-    {
-      "source_id": "espn-nfl",
-      "source_name": "ESPN",
-      "title": "Tom Brady rumored to be considering a return to the league",
-      "url": "https://www.espn.com/nfl/story/_/id/brady-return-rumor",
-      "published_at": "2026-11-10T14:30:00Z"
-    },
-    {
       "source_id": "wbns",
       "source_name": "WBNS",
-      "title": "Rookie quarterbacks shake up the Wild Card race",
-      "url": "https://www.wbns.com/sports/rookie-qbs-wildcard",
-      "published_at": "2026-11-08T16:45:00Z"
+      "title": "Pro Bowl Game 2025 format changes",
+      "url": "https://www.wbns.com/sports/pro-bowl-format-changes",
+      "published_at": "2024-07-20T09:15:00Z"
     },
     {
       "source_id": "espn-nfl",
@@ -111,11 +58,18 @@
       "published_at": "2024-08-01T10:00:00Z"
     },
     {
-      "source_id": "wbns",
-      "source_name": "WBNS",
-      "title": "Pro Bowl Game 2025 format changes",
-      "url": "https://www.wbns.com/sports/pro-bowl-format-changes",
-      "published_at": "2024-07-20T09:15:00Z"
+      "source_id": "cbs-nfl",
+      "source_name": "CBS Sports NFL",
+      "title": "2024 NFL free agency tracker",
+      "url": "https://www.cbssports.com/nfl/free-agents/",
+      "published_at": "2024-03-10T12:00:00Z"
+    },
+    {
+      "source_id": "the-athletic-nfl",
+      "source_name": "The Athletic NFL",
+      "title": "2024 NFL free agency: Analysis and projections",
+      "url": "https://theathletic.com/nfl/free-agents/",
+      "published_at": "2024-03-10T13:00:00Z"
     }
   ],
   "teams": [
