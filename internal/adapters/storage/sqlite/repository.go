@@ -20,7 +20,10 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	// Enable foreign keys per connection
-	db.Exec("PRAGMA foreign_keys = ON")
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 	return &Repository{db: db}, nil
 }
 
@@ -113,9 +116,10 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 func (r *Repository) List() ([]domain.Story, error) {
 	rows, err := r.db.Query(`SELECT story_data FROM stories ORDER BY published_at DESC, story_id ASC`)
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var stories []domain.Story
 	for rows.Next() {
 		var data []byte

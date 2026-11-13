@@ -33,6 +33,7 @@ func Migrate(dbPath string) ([]int, error) {
 
 	// Enable foreign keys per connection
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		_ = db.Close() // best-effort close on error
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
@@ -107,9 +108,10 @@ func Migrate(dbPath string) ([]int, error) {
 func getAppliedMigrations(db *sql.DB) (map[int]bool, error) {
 	rows, err := db.Query(fmt.Sprintf("SELECT version FROM %s ORDER BY version", schemaMigrationsTable))
 	if err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("query schema_migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	applied := make(map[int]bool)
 	for rows.Next() {
