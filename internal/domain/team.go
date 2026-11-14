@@ -3,6 +3,7 @@ package domain
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -16,11 +17,49 @@ type Team struct {
 	Aliases      []string // Common alternative names and nicknames
 }
 
+// aliasPattern holds a pre-compiled regex for an alias and its slug.
+type aliasPattern struct {
+	alias string
+	re    *regexp.Regexp
+	slug  string
+}
+
 // TeamRegistry holds a lookup map for all known team names/aliases to slugs.
 type TeamRegistry struct {
-	mu      sync.RWMutex
-	bySlug  map[string]*Team
-	byAlias map[string]string // normalized alias → slug
+	mu       sync.RWMutex
+	bySlug   map[string]*Team
+	byAlias  map[string]string // normalized alias → slug
+	patterns []aliasPattern    // pre-compiled patterns for Extract
+}
+
+// compileAliasPattern compiles a word-boundary regex for an alias.
+// Returns empty pattern if alias is empty after normalization.
+func compileAliasPattern(alias string) aliasPattern {
+	normalized := normalizeAlias(alias)
+	if normalized == "" {
+		return aliasPattern{}
+	}
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(normalized) + `\b`)
+	return aliasPattern{alias: normalized, re: re, slug: ""}
+}
+
+// buildPatterns builds the pre-compiled patterns slice from byAlias.
+// It sorts aliases for deterministic construction order.
+func (r *TeamRegistry) buildPatterns() {
+	aliases := make([]string, 0, len(r.byAlias))
+	for alias := range r.byAlias {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+
+	r.patterns = make([]aliasPattern, 0, len(aliases))
+	for _, alias := range aliases {
+		p := compileAliasPattern(alias)
+		if p.re != nil {
+			p.slug = r.byAlias[alias]
+			r.patterns = append(r.patterns, p)
+		}
+	}
 }
 
 // NewTeamRegistry creates a new registry from a slice of Team.
@@ -32,6 +71,7 @@ func NewTeamRegistry(teams ...Team) *TeamRegistry {
 	for i := range teams {
 		r.addTeam(&teams[i])
 	}
+	r.buildPatterns()
 	return r
 }
 
@@ -56,7 +96,11 @@ func (r *TeamRegistry) addTeam(t *Team) {
 
 	// Register aliases
 	for _, alias := range t.Aliases {
-		r.byAlias[normalizeAlias(alias)] = t.Slug
+		normalized := normalizeAlias(alias)
+		// Skip empty aliases (shouldn't happen in config, but defensive)
+		if normalized != "" {
+			r.byAlias[normalized] = t.Slug
+		}
 	}
 }
 
@@ -83,6 +127,7 @@ func (r *TeamRegistry) Get(slug string) (*Team, bool) {
 
 // Extract finds all team mentions in the given text and returns their slugs.
 // It matches team names using word boundaries.
+// The output is deterministic (sorted) and the regexes are compiled once at registry construction.
 func (r *TeamRegistry) Extract(text string) []string {
 	if text == "" {
 		return nil
@@ -91,37 +136,22 @@ func (r *TeamRegistry) Extract(text string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var matches []string
+	normalizedText := strings.ToLower(text)
 	matchedSlugs := make(map[string]bool) // dedupe
 
-	// Scan for all known aliases using word boundaries
-	for alias, slug := range r.byAlias {
-		if r.matchText(alias, text, matchedSlugs) {
-			matches = append(matches, slug)
+	for _, p := range r.patterns {
+		if p.re.MatchString(normalizedText) {
+			matchedSlugs[p.slug] = true
 		}
 	}
 
-	return matches
-}
-
-// matchText checks if the alias appears in the text with word boundaries.
-func (r *TeamRegistry) matchText(alias, text string, matchedSlugs map[string]bool) bool {
-	normalizedText := strings.ToLower(text)
-	normalizedAlias := normalizeAlias(alias)
-
-	// Use word boundary regex to match standalone tokens
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(normalizedAlias) + `\b`)
-
-	// Check if the alias matches
-	if re.MatchString(normalizedText) {
-		// Find the actual slug for this alias
-		slug, _ := r.byAlias[normalizedAlias]
-		if slug != "" && !matchedSlugs[slug] {
-			matchedSlugs[slug] = true
-			return true
-		}
+	// Build sorted result
+	result := make([]string, 0, len(matchedSlugs))
+	for slug := range matchedSlugs {
+		result = append(result, slug)
 	}
-	return false
+	sort.Strings(result)
+	return result
 }
 
 // All returns all teams in the registry (copy).

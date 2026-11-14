@@ -295,7 +295,8 @@ func DedupeKey(sourceID, guid, url string) string {
 
 // Canonicalize creates a canonical Story from a FeedEntry.
 // FirstSeenAt is set by the Repository on first insertion; callers should leave it zero.
-// Entities are populated by extracting team mentions from title and summary using the default registry.
+// Entities are populated from entry.Entities; the dead DefaultTeamRegistry() extraction
+// has been removed as the app layer already re-extracts with the real registry.
 func (s Story) Canonicalize(entry FeedEntry) Story {
 	// Start with a base canonical story
 	story := Story{
@@ -311,18 +312,11 @@ func (s Story) Canonicalize(entry FeedEntry) Story {
 		Entities:     entry.Entities, // copy existing entities if any
 	}
 
-	// Extract teams from title and summary and merge with existing entities
-	teamSlugs := DefaultTeamRegistry().Extract(story.Title + " " + story.Summary)
-
-	// Merge entities, avoiding duplicates
-	existing := make(map[string]bool)
-	for _, e := range story.Entities {
-		existing[e] = true
-	}
-	for _, slug := range teamSlugs {
-		if !existing[slug] {
-			story.Entities = append(story.Entities, slug)
-		}
+	// Defensive copy: ensure we don't alias the entry's backing array
+	if len(entry.Entities) > 0 {
+		copyEntities := make([]string, len(entry.Entities))
+		copy(copyEntities, entry.Entities)
+		story.Entities = copyEntities
 	}
 
 	return story
