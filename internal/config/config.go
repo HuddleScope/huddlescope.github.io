@@ -172,12 +172,9 @@ func (c *Config) loadFromEnv() {
 		c.TursoAuthToken = v
 	}
 	if v := os.Getenv("HSC_SOURCES"); v != "" {
-		// Clear sources first to allow env to override file
+		// Clear sources first to allow env to override file;
+		// parsing and validation happens in parseSources().
 		c.Sources = nil
-		if err := c.parseSourcesRaw(v); err != nil {
-			// Store raw value for error reporting; don't set c.Sources
-			_ = err // will be caught by Validate
-		}
 	}
 	if v := os.Getenv("HSC_ENV"); v != "" {
 		c.Env = v
@@ -219,12 +216,11 @@ func (c *Config) parseSources() error {
 		c.SourcesFile = "conf/sources.yaml"
 	}
 
-	// Fall back to env var first (highest priority)
+	// env HSC_SOURCES takes priority over file sources
 	if v := os.Getenv("HSC_SOURCES"); v != "" {
 		if err := c.parseSourcesRaw(v); err != nil {
-			return err
+			return fmt.Errorf("invalid HSC_SOURCES: %w", err)
 		}
-		// Don't load from file if env var is set
 		return nil
 	}
 
@@ -243,7 +239,9 @@ func (c *Config) parseSources() error {
 // Teams are loaded in this priority order:
 //  1. HSC_TEAMS_FILE environment variable (highest priority)
 //  2. Teams file (from TeamsFile or default conf/teams.yaml)
-//  3. Default teams from SeedNFLTeams (lowest priority)
+//
+// Missing or empty files yield no teams; callers must check and handle that case.
+// Malformed files return an error that Load propagates.
 func (c *Config) parseTeams() error {
 	if len(c.Teams) > 0 {
 		return nil // already parsed
@@ -255,15 +253,21 @@ func (c *Config) parseTeams() error {
 	}
 
 	// Try loading from YAML file
-	if teams, err := c.loadTeamsFromYAML(); err == nil && len(teams) > 0 {
+	if teams, err := c.loadTeamsFromYAML(); err != nil {
+		// malformed file → propagate error
+		return err
+	} else if len(teams) > 0 {
 		c.Teams = teams
 		return nil
 	}
-
+	// missing or empty file → no error, callers must handle empty teams
 	return nil
 }
 
 // parseSourcesRaw parses HSC_SOURCES environment value into Sources.
+// It returns a slice of sources parsed successfully; if the raw string is
+// invalid, the returned slice is nil and an error describes the cause.
+// This method is safe to call multiple times — it always starts fresh.
 // Format: "id,name,url[,interval][,priority][,enabled][,publication][,language][,timeout][,license][,accept-use];..."
 // e.g., "nfl-news,NFL News,http://example.com,300,1,true,ESPN,en,60,allowed"
 // Optional fields after URL are parsed positionally; omitted fields use defaults.
@@ -823,11 +827,11 @@ func (c Config) ToDomainTeams() []domain.Team {
 
 // TeamRegistry returns a TeamRegistry initialized with the teams from config.
 // It is a required configuration and the app will fail if teams cannot be loaded.
-func (c Config) TeamRegistry() *domain.TeamRegistry {
+func (c Config) TeamRegistry() (*domain.TeamRegistry, error) {
 	if len(c.Teams) == 0 {
-		panic("teams configuration is required but could not be loaded")
+		return nil, fmt.Errorf("teams are required but no teams were loaded (teams file: %q)", c.TeamsFile)
 	}
-	return domain.NewTeamRegistryFromSlice(c.ToDomainTeams())
+	return domain.NewTeamRegistryFromSlice(c.ToDomainTeams()), nil
 }
 
 // SourceRegistry returns the FeedRegistry built from the configured sources.

@@ -54,7 +54,11 @@ func main() {
 	}
 
 	// Load teams from config file
-	teamRegistry := cfg.TeamRegistry()
+	teamRegistry, err := cfg.TeamRegistry()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Build clusterer and scorer (fixed time for determinism in tests)
 	clustering := domain.NewClusterer()
