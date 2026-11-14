@@ -104,9 +104,6 @@ func (r *TeamRegistry) addTeam(t *Team) {
 	}
 }
 
-// buildPatterns builds the pre-compiled patterns slice from byAlias.
-// It sorts aliases for deterministic construction order.
-
 // normalizeAlias normalizes an alias for lookup (lowercase, trimmed).
 func normalizeAlias(alias string) string {
 	return strings.TrimSpace(strings.ToLower(alias))
