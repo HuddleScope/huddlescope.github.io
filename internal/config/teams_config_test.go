@@ -340,7 +340,10 @@ func TestTeamRegistry(t *testing.T) {
 			{Slug: "buffalo-bills", Name: "Buffalo Bills", ShortName: "Bills", Abbreviation: "BUF"},
 		},
 	}
-	reg := cfg.TeamRegistry()
+	reg, err := cfg.TeamRegistry()
+	if err != nil {
+		t.Fatalf("TeamRegistry() error = %v; want nil", err)
+	}
 	if reg == nil {
 		t.Fatal("TeamRegistry() = nil; want registry")
 	}
@@ -352,14 +355,18 @@ func TestTeamRegistry(t *testing.T) {
 	}
 }
 
-func TestTeamRegistryPanicsOnEmptyTeams(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("TeamRegistry() with empty Teams did not panic; want panic")
-		}
-	}()
+func TestTeamRegistryErrorOnEmptyTeams(t *testing.T) {
 	cfg := Config{}
-	_ = cfg.TeamRegistry()
+	reg, err := cfg.TeamRegistry()
+	if err == nil {
+		t.Fatal("TeamRegistry() with empty Teams did not error; want error")
+	}
+	if reg != nil {
+		t.Errorf("TeamRegistry() reg = %v; want nil on error", reg)
+	}
+	if !contains(err.Error(), "teams are required") {
+		t.Errorf("TeamRegistry() error = %v; want it to mention 'teams are required'", err)
+	}
 }
 
 // baseValidConfig returns a Config that passes Validate with no teams or sources.

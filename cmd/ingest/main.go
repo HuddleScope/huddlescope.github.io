@@ -64,7 +64,11 @@ func main() {
 	}
 
 	// Load teams from config file
-	teamRegistry := cfg.TeamRegistry()
+	teamRegistry, err := cfg.TeamRegistry()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("Loaded %d sources, %d teams from config\n", registry.Count(), len(cfg.Teams))
 
 	// Build application

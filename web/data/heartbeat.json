@@ -1,8 +1,13 @@
 {
   "version": "1",
-  "status": 0,
-  "run_id": "seed-heartbeat",
-  "attempted_at": "2026-11-12T00:00:00Z",
-  "sources_checked": 0,
-  "sources_failed": 0
+  "status": 1,
+  "run_id": "QoEzTVs7q6udSKOf-PtfYg==",
+  "attempted_at": "2026-11-14T12:26:01Z",
+  "ingested_at": "2026-11-14T12:26:01Z",
+  "sources_checked": 1,
+  "sources_failed": 1,
+  "errors": [
+    "[source:ok] source ok: failed to parse feed: failed to detect feed type",
+    "source ok: failed to parse feed: failed to detect feed type"
+  ]
 }
