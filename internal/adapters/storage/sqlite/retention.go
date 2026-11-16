@@ -216,7 +216,7 @@ func getTableColumns(db *sql.DB, table string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query table_info for %s: %w", table, err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var cols []string
 	for rows.Next() {

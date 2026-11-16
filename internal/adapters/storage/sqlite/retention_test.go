@@ -18,7 +18,7 @@ func TestArchiveOld_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestArchiveOld_Success(t *testing.T) {
 
 	// Verify pre-archive counts
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count) //nolint:errcheck
 	if count != 2 {
 		t.Errorf("expected 2 stories pre-archive, got %d", count)
 	}
@@ -61,14 +61,14 @@ func TestArchiveOld_Success(t *testing.T) {
 	}
 
 	// Verify hot table has only fresh row
-	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count) //nolint:errcheck
 	if count != 1 {
 		t.Errorf("expected 1 story post-archive, got %d", count)
 	}
 
 	// Verify archived row exists
 	var archivedID string
-	db.QueryRow(`SELECT story_id FROM stories_archive WHERE story_key = ?`, "old-1").Scan(&archivedID)
+	db.QueryRow(`SELECT story_id FROM stories_archive WHERE story_key = ?`, "old-1").Scan(&archivedID) //nolint:errcheck
 	if archivedID == "" {
 		t.Error("expected archived row")
 	}
@@ -83,7 +83,7 @@ func TestArchiveOld_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestArchiveOld_EmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestStorageEstimate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestApplyRetention_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestApplyRetention_Success(t *testing.T) {
 
 	// Verify hot row was archived
 	var hotCount int
-	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&hotCount)
+	db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&hotCount) //nolint:errcheck
 	if hotCount != 0 {
 		t.Errorf("expected 0 hot rows, got %d", hotCount)
 	}

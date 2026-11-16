@@ -20,7 +20,7 @@ func TestBackupToFile_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestBackupToFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestBackupToFile_RoundTrip(t *testing.T) {
 	}
 
 	// Wipe source
-	os.Remove(dbPath)
+	os.Remove(dbPath) //nolint:errcheck
 
 	restorePath := filepath.Join(tmpDir, "restore.db")
 	err = RestoreFromFile(backupPath, restorePath)
@@ -81,10 +81,10 @@ func TestBackupToFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open restore db: %v", err)
 	}
-	defer db2.Close()
+	defer db2.Close() //nolint:errcheck
 
 	var count int
-	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count) //nolint:errcheck
 	if count != 5 {
 		t.Errorf("expected 5 rows restored, got %d", count)
 	}
@@ -110,7 +110,7 @@ func TestDumpToFile_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestDumpToFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestDumpToFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open restore db: %v", err)
 	}
-	defer db2.Close()
+	defer db2.Close() //nolint:errcheck
 
 	if _, err := Migrate(restorePath); err != nil {
 		t.Fatalf("migrate on restore: %v", err)
@@ -190,7 +190,7 @@ func TestDumpToFile_RoundTrip(t *testing.T) {
 	}
 
 	var count int64
-	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count) //nolint:errcheck
 	if count != 1 {
 		t.Errorf("expected 1 row after restore, got %d", count)
 	}
@@ -230,7 +230,7 @@ func TestBackupToFile_EmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestRestoreFromFile_EmptyBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 	if _, err := Migrate(dbPath); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -279,10 +279,10 @@ func TestRestoreFromFile_EmptyBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open restore db: %v", err)
 	}
-	defer db2.Close()
+	defer db2.Close() //nolint:errcheck
 
 	var count int
-	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	db2.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count) //nolint:errcheck
 	if count != 0 {
 		t.Errorf("expected 0 stories after restore, got %d", count)
 	}

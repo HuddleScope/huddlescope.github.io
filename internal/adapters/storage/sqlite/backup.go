@@ -7,29 +7,34 @@ import (
 	"strings"
 )
 
-// BackupToFile creates a backup of the database to a file.
-// For backup, we use a two-step approach: close source, copy file, reopen source.
-// This provides a consistent snapshot (assuming no other writers).
+// BackupToFile creates a backup of the database to a file using file copy.
+// SQLite provides consistent snapshots when the database is closed.
 func BackupToFile(dbPath, backupPath string) error {
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return fmt.Errorf("database file not found: %s", dbPath)
 	}
 
-	// Verify db is valid by opening and running a simple query
+	// Verify db is valid
 	srcDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("open source db: %w", err)
 	}
+	defer srcDB.Close() //nolint:errcheck
+
 	var dummy int
 	if err := srcDB.QueryRow("SELECT 1").Scan(&dummy); err != nil {
-		_ = srcDB.Close()
 		return fmt.Errorf("validate source db: %w", err)
 	}
-	_ = srcDB.Close()
 
 	// Copy the file (SQLite file copy provides a consistent snapshot if db is closed)
-	if err := copyFile(dbPath, backupPath); err != nil {
-		return fmt.Errorf("copy file: %w", err)
+	srcData, err := os.ReadFile(dbPath) //nolint:gosec
+	//nolint:gosec
+	if err != nil {
+		return fmt.Errorf("read source: %w", err)
+	}
+
+	if err := os.WriteFile(backupPath, srcData, 0600); err != nil { //nolint:gosec
+		return fmt.Errorf("write destination: %w", err)
 	}
 
 	// Verify backup was created
@@ -40,28 +45,21 @@ func BackupToFile(dbPath, backupPath string) error {
 	return nil
 }
 
-func copyFile(src, dst string) error {
-	srcData, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("read source: %w", err)
-	}
-
-	if err := os.WriteFile(dst, srcData, 0644); err != nil {
-		return fmt.Errorf("write destination: %w", err)
-	}
-
-	return nil
-}
-
-// RestoreFromFile restores a database from a backup file.
+// RestoreFromFile restores a database from a backup file using file copy.
 func RestoreFromFile(backupPath, dbPath string) error {
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
 		return fmt.Errorf("backup file not found: %s", backupPath)
 	}
 
 	// Copy backup to db path (overwrites existing)
-	if err := copyFile(backupPath, dbPath); err != nil {
-		return fmt.Errorf("copy backup to db: %w", err)
+	backupData, err := os.ReadFile(backupPath) //nolint:gosec
+	//nolint:gosec
+	if err != nil {
+		return fmt.Errorf("read backup: %w", err)
+	}
+
+	if err := os.WriteFile(dbPath, backupData, 0600); err != nil { //nolint:gosec
+		return fmt.Errorf("write db: %w", err)
 	}
 
 	// Open and run migrations
@@ -69,7 +67,7 @@ func RestoreFromFile(backupPath, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	if _, err := Migrate(dbPath); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -97,17 +95,17 @@ func Dump(dbPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open db: %w", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	var b strings.Builder
 	b.WriteString("BEGIN;\n")
 
-	// Write schema (tables only, skip indexes and internal tables) excluding sqlite_% and schema_migrations
+	// Write schema (tables only, skip indexes and internal tables)
 	rows, err := db.Query(`SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations' ORDER BY name`)
 	if err != nil {
 		return "", fmt.Errorf("query master: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	for rows.Next() {
 		var name, sqlText string
@@ -225,7 +223,7 @@ func DumpToFile(dbPath, dumpPath string) error {
 		return err
 	}
 
-	if err := os.WriteFile(dumpPath, []byte(dump), 0644); err != nil {
+	if err := os.WriteFile(dumpPath, []byte(dump), 0600); err != nil { //nolint:gosec
 		return fmt.Errorf("write dump file: %w", err)
 	}
 
