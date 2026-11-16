@@ -460,7 +460,7 @@ type legacyMockFetcher struct {
 	failMsg string
 }
 
-func (m *legacyMockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+func (m *legacyMockFetcher) Fetch(ctx context.Context, sourceID string) ([]domain.FeedEntry, error) {
 	if m.fail {
 		return nil, fmt.Errorf("fetcher error: %s", m.failMsg)
 	}
@@ -963,7 +963,7 @@ type mockFetcher struct {
 	err     error
 }
 
-func (f *mockFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
+func (f *mockFetcher) Fetch(ctx context.Context, sourceID string) ([]domain.FeedEntry, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

@@ -227,7 +227,7 @@ func (a *Application) RunIngest(ctx context.Context) domain.IngestionResult {
 	}
 
 	for _, fetcher := range a.fetchers {
-		entries, err := fetcher.Fetch("default")
+		entries, err := fetcher.Fetch(ctx, "default")
 		if err != nil {
 			result.Errors = append(result.Errors, err)
 			continue
@@ -283,7 +283,7 @@ func (a *Application) runIngestWithRegistry(ctx context.Context, result domain.I
 			continue
 		}
 
-		entries, err := fetcher.Fetch(src.ID)
+		entries, err := fetcher.Fetch(ctx, src.ID)
 		a.registry.RecordStatus(src.ID, err == nil, err)
 
 		if err != nil {
@@ -548,7 +548,7 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 			return record
 		}
 		// Legacy single fetcher path (not recommended for production)
-		entries, err := a.fetchers[0].Fetch("default")
+		entries, err := a.fetchers[0].Fetch(ctx, "default")
 		if err != nil {
 			record.AddError(fmt.Errorf("fetcher failed: %w", err))
 			record.Status = domain.RunStatusFailed
@@ -577,7 +577,7 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 			continue
 		}
 
-		entries, err := fetcher.Fetch(src.ID)
+		entries, err := fetcher.Fetch(ctx, src.ID)
 		if err != nil {
 			status := domain.SourceRunStatus{
 				SourceID: src.ID,

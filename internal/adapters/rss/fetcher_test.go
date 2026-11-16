@@ -27,7 +27,7 @@ func TestHTTPFetcher_Success_RSS(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestHTTPFetcher_Success_Atom(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestHTTPFetcher_Success_JSON(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestHTTPFetcher_MalformedFeed(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected error for malformed feed, got nil")
 	}
@@ -168,7 +168,7 @@ func TestHTTPFetcher_HTTPError_404(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected error for 404, got nil")
 	}
@@ -194,7 +194,7 @@ func TestHTTPFetcher_Retry_5xx(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() after retries returned error: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestHTTPFetcher_Timeout(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL}, WithDefaultTimeout(500*time.Millisecond))
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected timeout error, got nil")
 	}
@@ -241,7 +241,7 @@ func TestHTTPFetcher_Redirect(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() after redirect returned error: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestHTTPFetcher_UTF8(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestStaticFetcher(t *testing.T) {
 	}
 	fetcher := NewStaticFetcher(entries)
 
-	result, err := fetcher.Fetch("default")
+	result, err := fetcher.Fetch(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestHTTPFetcher_NoDateEntry(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestHTTPFetcher_429_RateLimited(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() after retries returned error: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestHTTPFetcher_RetryExhausted(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL}, WithRetryPolicy(RetryPolicy{Attempts: 2}))
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected error after exhausting retries, got nil")
 	}
@@ -474,7 +474,7 @@ func TestHTTPFetcher_DomainFeedEntry(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "custom-source-id", URL: server.URL})
 
-	entries, err := fetcher.Fetch("ignored-id")
+	entries, err := fetcher.Fetch(context.Background(), "ignored-id")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestHTTPFetcher_Windows1252(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	entries, err := fetcher.Fetch("test")
+	entries, err := fetcher.Fetch(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestHTTPFetcher_PerAttemptTimeout(t *testing.T) {
 		WithRetryPolicy(RetryPolicy{Attempts: 3}),
 	)
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected error after exhausting retries, got nil")
 	}
@@ -609,7 +609,7 @@ func TestHTTPFetcher_404_ErrorText(t *testing.T) {
 
 	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
 
-	_, err := fetcher.Fetch("test")
+	_, err := fetcher.Fetch(context.Background(), "test")
 	if err == nil {
 		t.Error("Expected error for 404, got nil")
 	}
@@ -658,5 +658,66 @@ func TestHostRateLimiter_TwoHostConcurrency(t *testing.T) {
 		if elapsed > 1100*time.Millisecond {
 			t.Errorf("host%d completed in %v; expected ~1s (not serialized)", i+1, elapsed)
 		}
+	}
+}
+
+// TestHTTPFetcher_CancellationAbortsInFlightFetch verifies that cancelling the context
+// aborts an in-flight fetch (per AC3 of HS-046).
+func TestHTTPFetcher_CancellationAbortsInFlightFetch(t *testing.T) {
+	var mu sync.Mutex
+	var fetchStarted = false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fetchStarted = true
+		mu.Unlock()
+
+		// Block until context is done (simulates hung feed)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "test", URL: server.URL})
+
+	// Create a cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start fetch in goroutine
+	var err error
+	done := make(chan struct{})
+
+	go func() {
+		_, err = fetcher.Fetch(ctx, "test")
+		close(done)
+	}()
+
+	// Give the fetch a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify fetch started
+	mu.Lock()
+	if !fetchStarted {
+		mu.Unlock()
+		t.Fatal("Fetch did not start")
+	}
+	mu.Unlock()
+
+	// Cancel the context
+	cancel()
+
+	// Wait for fetch to complete (should exit promptly due to context cancellation)
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("Fetch did not complete after context cancellation")
+	}
+
+	// Verify fetch was aborted with context error
+	if err == nil {
+		t.Fatal("Expected context cancellation error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Expected context.Canceled or context.DeadlineExceeded, got: %v", err)
 	}
 }
