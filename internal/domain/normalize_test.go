@@ -41,6 +41,47 @@ func TestNormalizeTitleIdempotent(t *testing.T) {
 	}
 }
 
+func TestNormalizeUnicode(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"Café pre-composed", "Caf\u00E9", "Caf\u00E9"},
+		{"Café decomposed", "Cafe\u0301", "Caf\u00E9"},
+		{"résumé pre-composed", "r\u00E9sum\u00E9", "r\u00E9sum\u00E9"},
+		{"résumé decomposed", "re\u0301sume\u0301", "r\u00E9sum\u00E9"},
+		{"ASCII passthrough", "hello world", "hello world"},
+		{"empty string", "", ""},
+		{"already NFC", "café", "café"},
+		{"mixed ASCII and accented", "Cafe\u0301 résumé", "Caf\u00E9 résumé"},
+		{"invalid UTF-8 passthrough", "\xff\xfe", "\xff\xfe"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeUnicode(tt.input)
+			if got != tt.expected {
+				t.Errorf("NormalizeUnicode(%q) = %q; want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeUnicodeIdempotent(t *testing.T) {
+	// Use a decomposed input (e) + combining acute accent (U+0301)
+	input := "cafe\u0301"
+	normalized := NormalizeUnicode(input)
+	normalized2 := NormalizeUnicode(normalized)
+	if normalized != normalized2 {
+		t.Errorf("NormalizeUnicode not idempotent: %q != %q", normalized, normalized2)
+	}
+	// Verify normalization actually changes the decomposed form
+	if normalized == input {
+		t.Errorf("NormalizeUnicode did not change decomposed input; NFC should have composed it")
+	}
+}
+
 func TestNormalizeSourceID(t *testing.T) {
 	tests := []struct {
 		input    string
