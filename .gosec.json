@@ -1,0 +1,13 @@
+{
+  "global": {
+    "out": "stdout",
+    "format": "checkstyle",
+    "severity": "low",
+    "confidence": "low"
+  },
+  "rules": {
+    "G304": false,
+    "G703": false
+  },
+  "fail": false
+}

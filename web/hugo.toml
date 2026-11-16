@@ -75,6 +75,12 @@ enableEmoji = false
     url = "/about/"
     weight = 40
 
+  [[menu.main]]
+    identifier = "status"
+    name = "Status"
+    url = "/status/feeds/"
+    weight = 50
+
 # Disable external services (analytics, disqus)
 [services]
   [services.analytics]

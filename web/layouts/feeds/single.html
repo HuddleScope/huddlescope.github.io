@@ -1,0 +1,192 @@
+{{ define "main" }}
+{{- $data := .Site.Data.feeds }}
+{{- if $data }}
+<section class="content-feeds">
+  <header class="content-header">
+    <h1 class="content-title">Feed Health Dashboard</h1>
+    <p class="content-intro">Real-time health status of all RSS feed sources</p>
+    <p class="content-meta">Data as of {{ $data.generatedAt }} | Run ID: {{ $data.run_id }}</p>
+  </header>
+
+  {{- with $data.summary }}
+  <div class="dashboard-summary">
+    <div class="summary-card summary-card-healthy">
+      <span class="summary-label">Healthy</span>
+      <span class="summary-value">{{ .healthy }}</span>
+    </div>
+    <div class="summary-card summary-card-no-updates">
+      <span class="summary-label">No Updates</span>
+      <span class="summary-value">{{ .no_updates }}</span>
+    </div>
+    <div class="summary-card summary-card-failed">
+      <span class="summary-label">Failed</span>
+      <span class="summary-value">{{ .failed }}</span>
+    </div>
+    <div class="summary-card summary-card-stale">
+      <span class="summary-label">Stale</span>
+      <span class="summary-value">{{ .stale }}</span>
+    </div>
+  </div>
+  {{- end }}
+
+  <div class="dashboard-controls">
+    <input type="text" id="search-input" placeholder="Search feeds..." aria-label="Search feeds">
+    <select id="status-filter" aria-label="Filter by status">
+      <option value="all">All Statuses</option>
+      <option value="healthy">Healthy</option>
+      <option value="no-updates">No Updates</option>
+      <option value="failed">Failed</option>
+      <option value="disabled">Disabled</option>
+      <option value="not-checked">Not Checked</option>
+    </select>
+  </div>
+
+  <div class="dashboard-table-container">
+    <table class="dashboard-table" id="feed-table">
+      <thead>
+        <tr>
+          <th>Feed</th>
+          <th>Category</th>
+          <th>Status</th>
+          <th>Last Checked</th>
+          <th>Last Success</th>
+          <th>Entries</th>
+          <th>New</th>
+          <th>Dups</th>
+          <th>Duration</th>
+          <th>HTTP</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{- range $data.feeds }}
+        <tr class="feed-row feed-status-{{ .status }}{{ if .stale }} feed-stale{{ end }}" data-status="{{ .status }}" data-category="{{ .category | default "" }}">
+          <td class="feed-name">
+            <a href="{{ .url }}" target="_blank" rel="noopener noreferrer">{{ .name }}</a>
+            <br><span class="feed-source-id">ID: {{ .source_id }}</span>
+          </td>
+          <td class="feed-category">{{ .category | default "" }}</td>
+          <td class="feed-status">
+            <span class="status-pill status-{{ .status }}">{{ .status }}</span>
+          </td>
+          <td class="feed-last-checked">
+            {{- if .last_checked }}
+            {{ .last_checked }}
+            {{- else }}
+            N/A
+            {{- end }}
+          </td>
+          <td class="feed-last-succeeded">
+            {{- if .last_succeeded }}
+            {{ .last_succeeded }}
+            {{- else }}
+            N/A
+            {{- end }}
+          </td>
+          <td class="feed-entries">{{ .entries_total }}</td>
+          <td class="feed-new">{{ .new }}</td>
+          <td class="feed-duplicates">{{ .duplicates }}</td>
+          <td class="feed-duration">{{ .duration_ms | default 0 }}ms</td>
+          <td class="feed-http">{{ .http_status | default 0 }}</td>
+          <td class="feed-error">
+            {{- if .error }}
+            <span class="error-text" title="{{ .error }}">{{ .error }}</span>
+            {{- end }}
+          </td>
+        </tr>
+        {{- end }}
+      </tbody>
+    </table>
+    <div id="no-results" class="no-results" style="display:none;">No feeds match the current filters</div>
+  </div>
+
+  <details class="dashboard-stats">
+    <summary>Statistics</summary>
+    <ul>
+      <li>Total configured: {{ $data.summary.configured }}</li>
+      <li>Enabled: {{ $data.summary.enabled }}</li>
+      <li>Disabled: {{ $data.summary.disabled }}</li>
+      <li>Processed: {{ $data.summary.processed }}</li>
+      <li>Total entries: {{ $data.summary.entries }}</li>
+      <li>Stories created: {{ $data.summary.new }}</li>
+      <li>Stories duplicated: {{ $data.summary.duplicates }}</li>
+    </ul>
+  </details>
+</section>
+{{ else }}
+<section class="content-error">
+  <h1 class="content-title">Dashboard Unavailable</h1>
+  <p>Feed health data is not yet available. Please run the ingestion pipeline first.</p>
+</section>
+{{ end }}
+{{ end }}
+
+{{ define "scripts" }}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const table = document.getElementById('feed-table');
+  const searchInput = document.getElementById('search-input');
+  const statusFilter = document.getElementById('status-filter');
+  const noResults = document.getElementById('no-results');
+
+  if (!table) return;
+
+  const statusMap = {
+    'healthy': 0,
+    'no_updates': 1,
+    'failed': 2,
+    'disabled': 3,
+    'not_checked': 4
+  };
+
+  function getStatusRank(status) {
+    return statusMap[status] || 99;
+  }
+
+  function sortRows() {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a, b) => {
+      const statusA = a.dataset.status;
+      const statusB = b.dataset.status;
+      return getStatusRank(statusA) - getStatusRank(statusB);
+    });
+    rows.forEach(row => tbody.appendChild(row));
+  }
+
+  function filterRows() {
+    const search = searchInput.value.toLowerCase();
+    const status = statusFilter.value;
+
+    let visibleCount = 0;
+    const rows = table.querySelectorAll('tr.feed-row');
+    rows.forEach(row => {
+      const rowStatus = row.dataset.status;
+      const rowCategory = row.dataset.category || '';
+      const rowText = row.innerText.toLowerCase();
+
+      const matchesSearch = search === '' || rowText.includes(search);
+      const matchesStatus = status === 'all' || rowStatus === status;
+      const matchesCategory = status === 'all' || rowCategory === status;
+
+      const isVisible = matchesSearch && matchesStatus;
+      row.style.display = isVisible ? '' : 'none';
+
+      if (isVisible) visibleCount++;
+    });
+
+    noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+  }
+
+  // Initial sort
+  sortRows();
+
+  // Event listeners
+  searchInput.addEventListener('input', filterRows);
+  statusFilter.addEventListener('change', filterRows);
+
+  // Expose for potential external use
+  window.dashboardFilter = { filterRows, sortRows };
+});
+</script>
+{{ end }}
