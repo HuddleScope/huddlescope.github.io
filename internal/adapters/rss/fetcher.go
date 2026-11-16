@@ -216,7 +216,8 @@ type HTTPFetcher struct {
 	limiter        *HostRateLimiter
 	etagCache      *ETagCache
 	maxBytes       int64
-	lastStatus     int // HTTP status of the last fetch attempt
+	lastStatus     int        // HTTP status of the last fetch attempt
+	mu             sync.Mutex // protects lastStatus
 }
 
 // Option configures an HTTPFetcher.
@@ -356,7 +357,9 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 
 		// Record HTTP status if we have a response
 		if resp != nil {
+			f.mu.Lock()
 			f.lastStatus = resp.StatusCode
+			f.mu.Unlock()
 		}
 
 		// Close response if we have one and need to retry
@@ -524,6 +527,8 @@ func (f *HTTPFetcher) calculateSimpleBackoff(attempt int) time.Duration {
 
 // LastHTTPStatus returns the HTTP status code from the last fetch attempt.
 func (f *HTTPFetcher) LastHTTPStatus() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.lastStatus
 }
 
