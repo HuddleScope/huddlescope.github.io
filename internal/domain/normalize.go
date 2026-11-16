@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/net/html"
+	"golang.org/x/text/unicode/norm"
 )
 
 // NormalizeTitle normalizes a title for stable ID generation.
@@ -35,7 +36,7 @@ func NormalizeTitle(title string) string {
 
 // NormalizeUnicode applies NFC normalization to the input string.
 func NormalizeUnicode(s string) string {
-	return s
+	return norm.NFC.String(s)
 }
 
 // CanonicalURLEntry returns a normalized URL string for FeedEntry.

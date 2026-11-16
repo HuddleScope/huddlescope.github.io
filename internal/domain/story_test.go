@@ -31,6 +31,22 @@ func TestComputeStoryIDIdempotent(t *testing.T) {
 	}
 }
 
+func TestComputeStoryIDUnicodeNormalization(t *testing.T) {
+	// Pre-composed é (U+00E9)
+	precomposed := "Caf\u00E9 Story"
+	// Decomposed e + combining acute accent (U+0301)
+	decomposed := "Cafe\u0301 Story"
+	source := "test-source"
+	published := time.Date(2024, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	idPrecomposed := ComputeStoryID(precomposed, source, published)
+	idDecomposed := ComputeStoryID(decomposed, source, published)
+
+	if idPrecomposed != idDecomposed {
+		t.Errorf("ComputeStoryID not Unicode-normalized: pre-composed %q != decomposed %q", idPrecomposed, idDecomposed)
+	}
+}
+
 func TestIsEqual(t *testing.T) {
 	id := "test-id"
 	s1 := Story{ID: id}
