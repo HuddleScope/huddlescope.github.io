@@ -379,6 +379,127 @@ func TestDedupeKeyUpsert(t *testing.T) {
 	}
 }
 
+func TestUpsertEntityChange(t *testing.T) {
+	repo, err := NewRepository("")
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	if _, err := Migrate(""); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	// First upsert with one entity
+	baseStory := domain.Story{
+		ID:          "test-entity-1",
+		Title:       "Test Story with Entity",
+		Source:      "test-source",
+		PublishedAt: now(),
+		Summary:     "Test summary",
+		URL:         "https://example.com/test",
+		GUID:        "guid-entity-1",
+		DedupeKey:   "test-source|guid-entity-1",
+		Entities:    []string{"nfl"},
+	}
+
+	status, err := repo.Upsert(baseStory)
+	if err != nil {
+		t.Fatalf("first Upsert() error = %v", err)
+	}
+	if status != domain.UpsertCreated {
+		t.Errorf("expected UpsertCreated, got %v", status)
+	}
+
+	// Second upsert with one new entity (same title, etc.)
+	updatedStory := baseStory
+	updatedStory.Entities = []string{"nfl", "nba"}
+
+	status, err = repo.Upsert(updatedStory)
+	if err != nil {
+		t.Fatalf("second Upsert() error = %v", err)
+	}
+	if status != domain.UpsertUpdated {
+		t.Errorf("expected UpsertUpdated for new entity, got %v", status)
+	}
+
+	// Verify entities persisted
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("expected 1 story, got %d", len(stories))
+	}
+
+	// Verify both entities are present
+	entities := stories[0].Entities
+	if len(entities) != 2 {
+		t.Errorf("expected 2 entities, got %d: %v", len(entities), entities)
+	}
+	entitySet := make(map[string]bool)
+	for _, e := range entities {
+		entitySet[e] = true
+	}
+	if !entitySet["nfl"] || !entitySet["nba"] {
+		t.Errorf("expected entities [nfl, nba], got %v", entities)
+	}
+}
+
+func TestUpsertEntityOrderUnchanged(t *testing.T) {
+	repo, err := NewRepository("")
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	if _, err := Migrate(""); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	// First upsert with entities in specific order
+	baseStory := domain.Story{
+		ID:          "test-entity-order-1",
+		Title:       "Test Story Entity Order",
+		Source:      "test-source",
+		PublishedAt: now(),
+		Summary:     "Test summary",
+		URL:         "https://example.com/order-test",
+		GUID:        "guid-order-1",
+		DedupeKey:   "test-source|guid-order-1",
+		Entities:    []string{"nba", "nfl", "mlb"},
+	}
+
+	status, err := repo.Upsert(baseStory)
+	if err != nil {
+		t.Fatalf("first Upsert() error = %v", err)
+	}
+	if status != domain.UpsertCreated {
+		t.Errorf("expected UpsertCreated, got %v", status)
+	}
+
+	// Second upsert with identical entities in different order
+	reorderedStory := baseStory
+	reorderedStory.Entities = []string{"mlb", "nba", "nfl"}
+
+	status, err = repo.Upsert(reorderedStory)
+	if err != nil {
+		t.Fatalf("second Upsert() error = %v", err)
+	}
+	if status != domain.UpsertUnchanged {
+		t.Errorf("expected UpsertUnchanged for same entities reordered, got %v", status)
+	}
+
+	// Verify list returns the same story (count 1)
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("expected 1 story (reorder should not create duplicate), got %d", len(stories))
+	}
+}
+
 func now() time.Time {
 	return time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
 }
