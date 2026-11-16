@@ -1,0 +1,7 @@
+version: "2"
+linters:
+  disable-all: true
+  enable:
+    - unused
+run:
+  timeout: 5m

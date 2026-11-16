@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<rss version="2.0">
+  <channel>
+    <title>Test € y ™</title>
+    <link>https://example.com/windows1252</link>
+    <description>Prueba con caracteres windows-1252</description>
+    <item>
+      <title>Test € y ™</title>
+      <link>https://example.com/windows1252-entry</link>
+      <description>Texto con simbolos de euro y marca registrada</description>
+      <pubDate>Mon, 10 Nov 2026 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
