@@ -7,7 +7,7 @@ This is a non-commercial, independent news aggregator for NFL-related content. T
 ## Architecture
 The application follows a layered architecture with clear separation of concerns:
 
-- **cmd/** — CLI entry points (ingest, export)
+- **cmd/** — CLI entry points (ingest, export, heartbeat)
 - **internal/application/** — Business logic and orchestration
 - **internal/domain/** — Core domain models and interfaces (Story, Source, FeedEntry)
 - **internal/adapters/** — Pluggable implementations (RSS fetcher, storage backends, Hugo publisher)
@@ -21,10 +21,11 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 |------|-------------|
 | `cmd/ingest` | CLI to fetch RSS feeds and store stories |
 | `cmd/export` | CLI to export stories to the configured backend |
+| `cmd/heartbeat` | CLI to publish heartbeat records |
 | `internal/domain` | Core domain models and interfaces |
 | `internal/application` | Application orchestration and business logic |
 | `internal/adapters/rss` | RSS feed fetching adapter |
-| `internal/adapters/storage` | Storage adapters (in-memory, Turso, file) |
+| `internal/adapters/storage` | Storage adapters (in-memory, SQLite file; Turso planned) |
 | `internal/adapters/hugo` | Hugo data/snapshot publisher adapter |
 | `internal/adapters/publish` | Story publishing adapter |
 | `internal/config` | Configuration loading and validation |
@@ -36,7 +37,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 ## Development
 
 ### Prerequisites
-- Go 1.27+
+- Go 1.27.4+ (go.mod declares `go 1.27.4`)
 - Node.js 20+ (for scheduler/ worker)
 - Make (optional; used for convenience targets)
 
@@ -51,7 +52,7 @@ cp .env.example .env
 ### Build Go binaries
 ```sh
 make build
-# Binaries appear in dist/ingest and dist/export
+# Binaries appear in dist/ingest, dist/export, and dist/heartbeat
 ```
 
 ### Build scheduler worker
@@ -160,6 +161,7 @@ This repository uses a GitHub Actions workflow (`.github/workflows/refresh-news.
 - **Secrets required**: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` must be configured in repository settings for production mode.
 - **Environment**: The workflow uses the `github-pages` environment and deploys via GitHub Pages with `pages: write` and `id-token: write` permissions.
 - **Safety**: If the export pipeline produces an empty snapshot (no stories), the workflow restores the last-committed homepage.json and warns instead of publishing an empty site.
+- **Known issue**: The refresh workflow currently sets `HSC_STORAGE_BACKEND=turso`, but the turso backend is unimplemented and causes the ingest step to fail; see docs/ops-runbook.md Known issues for details.
 
 See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflow.
 
@@ -173,7 +175,7 @@ See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflo
 | `HSC_USER_AGENT` | `huddlescope/0.1` | No | User agent string for HTTP requests |
 | `HSC_REQUEST_TIMEOUT` | `30s` | No | Request timeout (e.g., `60s`) |
 | `HSC_HUGO_BASE_URL` | `https://huddlescope.github.io/` | No | Base URL for Hugo exports |
-| `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file |
+| `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file; turso is unimplemented and causes ingest to exit with an error at startup until the driver is implemented |
 | `HSC_SOURCES` | (none) | No | Source list: `id,name,url[,interval];...` (legacy; prefer `HSC_SOURCES_FILE`) |
 | `HSC_SOURCES_FILE` | `conf/sources.yaml` | No | Path to the YAML sources file |
 | `HSC_TEAMS_FILE` | `conf/teams.yaml` | No | Path to the YAML teams file |
@@ -272,11 +274,7 @@ HuddleScope honors publisher terms of service and never attempts to bypass acces
 
 ### Issue tracking
 
-See [docs/issue-hs-002-status.md](docs/issue-hs-002-status.md) for issue tracking and [docs/ci-status.md](docs/ci-status.md) for CI status.
-
-#### Issue HS-043 (issue #62)
-
-Issue #62 unified source loading into one config path and removed the teams panic. The implementation was merged in PR #91 (squash commit 3abbce9). The commit message uses "Refs #62" instead of "Closes #62"; the issue is tracked here and will be closed manually after review.
+See [docs/ops-runbook.md](docs/ops-runbook.md) for issue tracking and CI status.
 
 ### Production Mode
 
@@ -284,6 +282,8 @@ Set `HSC_ENV=production` to enable production mode. Production requires:
 - `HSC_STORAGE_BACKEND` must be `turso` or `sqlite-file` (not `memory`)
 - `TURSO_DATABASE_URL` must be set
 - `TURSO_AUTH_TOKEN` must be set
+
+The turso backend is currently unimplemented (factory returns an error at startup); use `sqlite-file` until the driver is implemented.
 
 Invalid production configuration causes the application to fail with a clear error message listing all missing/invalid fields.
 

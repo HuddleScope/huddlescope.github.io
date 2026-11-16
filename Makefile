@@ -1,5 +1,5 @@
 # Makefile for HuddleScope monorepo
-# HS-001 baseline; see docs/architecture.md for layout.
+# HS-001 baseline.
 
 SHELL := /bin/bash
 .ONESHELL:
