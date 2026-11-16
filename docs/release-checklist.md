@@ -47,10 +47,7 @@
 
 ## Known limitations (recorded for v0.1)
 
-- **Turso persistence (HS-040)**: The Go ingestion pipeline runs with an in-memory
-  repository and discards all fetched entries on exit. Full Turso persistence
-  requires PR #59 (depends on #68) — mark as incomplete until Turso adapter is
-  implemented.
+- **Turso persistence (HS-040)**: The sqlite adapter + migration runner is implemented (PR #89); Turso-specific driver still unimplemented (pipeline defaults to memory until driver is implemented).
 
 - **Cloudflare Worker delivery (HS-019)**: The Cloudflare Worker dispatches the
   refresh workflow, but deployment status cannot be verified from this environment
@@ -61,8 +58,7 @@
   not yet implemented (code referenced in issue exists in a feature branch but
   is not committed). Pending.
 
-- **Stale docs (HS-050)**: `docs/ci-status.md` references removed make targets
-  and may be misleading. Pending.
+- **Stale docs (HS-050)**: `docs/ci-status.md` removed; reference consolidated onto `docs/ops-runbook.md`. Resolved.
 
 ## Rollback plan
 

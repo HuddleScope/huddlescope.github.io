@@ -1,5 +1,5 @@
 # GitHub Actions CI/CD workflow for HuddleScope
-# See docs/ci-status.md for status and known issues
+# See docs/ops-runbook.md for status and known issues
 
 name: CI
 

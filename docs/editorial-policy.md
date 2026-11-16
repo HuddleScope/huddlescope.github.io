@@ -88,12 +88,12 @@ To disable a feed source without deleting it permanently:
 See `docs/ops-runbook.md` for detailed operational procedures:
 
 - **Free-tier topology**: Cloudflare Workers (48/day cron), GitHub Actions, GitHub Pages, Turso free tier (~1 GB DB)
-- **Backup/restore**: Operational Turso backup procedure (code stubs pending HS-041)
+- **Backup/restore**: Operational Turso backup procedure (implemented in sqlite package, HS-041)
 - **Monitoring**: Turso storage usage, Actions usage, Worker requests dashboard
 - **Secret rotation**: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN (GitHub Secrets), GITHUB_TOKEN (Cloudflare Workers, 90-day)
 - **Local execution**: `make build`, `./dist/ingest`, `./dist/export`, `make site`, `make site-test`
 
 ## Known limitations
 
-- **Backups**: The in-repo `BackupToFile`, `RestoreFromFile`, `Dump`, and `ApplyRetention` functions are currently stubs; the operational backup path uses Turso Cloud console or `turso db shell` (pending HS-041 implementation)
-- **Retention**: Automatic archival of old data is not yet implemented; manual Turso queries required to archive rows older than 90 days (pending HS-041)
+- **Backups**: The in-repo `BackupToFile`, `RestoreFromFile`, `Dump`, and `ApplyRetention` functions are implemented in the sqlite package (HS-041); the operational backup path remains Turso Cloud console or `turso db shell`
+- **Retention**: Automatic archival implemented in sqlite package (HS-041), not yet wired into the pipeline; manual Turso queries required to archive rows older than 90 days

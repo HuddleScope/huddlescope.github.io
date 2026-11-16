@@ -61,12 +61,12 @@ HuddleScope is designed to run entirely on free tiers:
 | Cloudflare Workers | 100k requests/day; 50 scheduled events/day | 48 cron triggers/day | Cron runs every 30 minutes (7,37 * * * * UTC) |
 | GitHub Actions | 2000 minutes/month (private repos) | ~5–10 minutes/run × 2–4 runs/day | CI and refresh/news workflows |
 | GitHub Pages | Unlimited bandwidth, 1 GB storage | <10 MB (site + assets) | Static site only |
-| Turso Cloud | ~1 GB free database storage | <100 MB estimated | Monitor storage growth; retention/archiving pending HS-041 |
+| Turso Cloud | ~1 GB free database storage | <100 MB estimated | Monitor storage growth; retention/archiving HS-041, implemented in sqlite package |
 
 **What degrades first** (and how to detect):
 - Cloudflare Workers: Workers dashboard shows request count; if approaching 100k/day, trim sources or reduce cron frequency
 - GitHub Actions: GitHub Actions usage page shows minutes; if approaching 2000, defer non-critical workflows
-- Turso storage: Turso Cloud console or `turso db info` shows storage bytes; if approaching 1 GB, archive old data (pending HS-041)
+- Turso storage: Turso Cloud console or `turso db info` shows storage bytes; if approaching 1 GB, archive old data (HS-041, implemented in sqlite package)
 
 ## Feed disable procedure
 
@@ -93,7 +93,11 @@ To disable a feed source without deleting it permanently:
 
 ## Turso backup/restore
 
-**Important note**: The in-repo functions `BackupToFile`, `RestoreFromFile`, `Dump`, and `ApplyRetention` are currently stubs returning "not implemented". The current production backup path uses Turso Cloud services.
+## Turso backup/restore
+
+See `internal/adapters/storage/sqlite/backup.go` and `internal/adapters/storage/sqlite/retention.go` for the in-repo implementation (HS-041).
+
+### Operational backup ( Turso Cloud)
 
 ### Operational backup ( Turso Cloud)
 
@@ -114,15 +118,17 @@ To disable a feed source without deleting it permanently:
    - Run the SQL dump: `turso db shell new-db < backup.sql`
    - Point your application to the new database
 
-### In-repo backup functions (pending HS-041)
+### In-repo backup functions (HS-041, implemented)
 
-When HS-041 is implemented, the following functions will be available:
+The following functions are available in the sqlite package:
 
 - `BackupToFile(dbPath, backupPath)` — full Turso-compatible backup
 - `RestoreFromFile(backupPath, dbPath)` — restore from backup file
 - `Dump(dbPath)` — SQL dump as string
 - `DumpToFile(dbPath, dumpPath)` — SQL dump to file
 - `ApplyRetention(dbPath)` — archive rows older than 90 days in bounded batches
+
+These functions are not yet wired into the ingest/export pipeline; the operational backup path remains Turso Cloud services.
 
 ## Free-tier monitoring
 
@@ -134,7 +140,7 @@ When HS-041 is implemented, the following functions will be available:
 | Data freshness | Heartbeat > 90 minutes stale | `dist/heartbeat check` |
 
 **Response to warnings**:
-- Turso near limit: archive old data (pending HS-041) or review sources for trimming
+- Turso near limit: archive old data (HS-041, implemented in sqlite package) or review sources for trimming
 - Cloudflare near limit: reduce cron frequency or trim sources
 - GitHub Actions near limit: defer non-critical workflows
 
@@ -164,7 +170,7 @@ When HS-041 is implemented, the following functions will be available:
 ## Local execution steps
 
 ### Prerequisites
-- Go 1.27+ (`go version`)
+- Go 1.27.4+ (`go version`)
 - Node.js 20+ for scheduler (`node --version`)
 - wrangler CLI for Cloudflare Worker deployment (if needed)
 
@@ -255,7 +261,7 @@ Heartbeat staleness is visually indicated in workflow run output:
 
 ## Known issues
 
-- Export always uses memory repository (Turso via HS-040 pending) ⇒ site content never changes beyond committed fixture data
+- Export always uses memory repository (default `HSC_STORAGE_BACKEND=memory`); turso backend unimplemented (factory error, verified exit 1) — see Known issues
 - The heartbeat file commits to the repo; the refresh workflow does not push any data back to the default branch
-- Backup/restore code stubs pending HS-041 implementation
-- Retention/archiving pending HS-041 implementation
+- Backup/restore code implemented in sqlite package (HS-041), not yet wired into the pipeline
+- Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline

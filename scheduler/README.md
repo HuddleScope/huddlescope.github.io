@@ -133,7 +133,7 @@ To monitor actual workflow status:
      --jq '.workflow_runs[] | select(.name=="Refresh news")'
    ```
 
-See `docs/ci-status.md` for real-time status and known issues.
+See `docs/ops-runbook.md` for real-time status and known issues.
 
 ## Operations runbook
 
