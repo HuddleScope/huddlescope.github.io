@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
@@ -107,7 +108,18 @@ func main() {
 	now := time.Now().UTC()
 
 	// Run pipeline
-	result := app.RunPipeline(context.Background(), now)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Catch interrupt to cancel the pipeline
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
+	go func() {
+		<-signalChan
+		cancel()
+	}()
+
+	result := app.RunPipeline(ctx, now)
 
 	// Publish heartbeat (best-effort: failures don't affect run exit)
 	heartbeatPath := os.Getenv("HSC_HEARTBEAT_FILE")

@@ -1,6 +1,7 @@
 package rss
 
 import (
+	"context"
 	"testing"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
@@ -14,7 +15,7 @@ func TestStaticFetcher_Fetch(t *testing.T) {
 
 	fetcher := NewStaticFetcher(entries)
 
-	result, err := fetcher.Fetch("default")
+	result, err := fetcher.Fetch(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
 	}
@@ -28,7 +29,7 @@ func TestStaticFetcher_Fetch(t *testing.T) {
 	}
 
 	// Test idempotency
-	result2, err := fetcher.Fetch("default")
+	result2, err := fetcher.Fetch(context.Background(), "default")
 	if err != nil {
 		t.Fatalf("Second Fetch() returned error: %v", err)
 	}

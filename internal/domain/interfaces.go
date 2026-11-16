@@ -25,7 +25,7 @@ package domain
 
 // FeedFetcher interface for fetching entries from feeds.
 //type FeedFetcher interface {
-//	Fetch(sourceID string) ([]FeedEntry, error)
+//	Fetch(ctx context.Context, sourceID string) ([]FeedEntry, error)
 //}
 
 // NOTE: Types and interfaces are now defined in source.go and story.go.

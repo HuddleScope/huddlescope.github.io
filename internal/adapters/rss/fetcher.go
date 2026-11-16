@@ -288,8 +288,7 @@ func NewHTTPFetcher(src domain.FeedSource, opts ...Option) *HTTPFetcher {
 }
 
 // Fetch implements domain.FeedFetcher.
-func (f *HTTPFetcher) Fetch(sourceID string) ([]domain.FeedEntry, error) {
-	ctx := context.Background()
+func (f *HTTPFetcher) Fetch(ctx context.Context, sourceID string) ([]domain.FeedEntry, error) {
 	result, err := f.FetchFeed(ctx)
 	if err != nil {
 		return nil, err

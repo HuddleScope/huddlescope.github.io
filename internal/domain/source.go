@@ -2,6 +2,7 @@
 package domain
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,7 +33,7 @@ type Repository interface {
 
 // FeedFetcher interface for fetching entries from feeds.
 type FeedFetcher interface {
-	Fetch(sourceID string) ([]FeedEntry, error)
+	Fetch(ctx context.Context, sourceID string) ([]FeedEntry, error)
 }
 
 // FeedEntry represents a raw item fetched from a feed source.
