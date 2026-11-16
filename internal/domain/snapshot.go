@@ -336,22 +336,6 @@ func (s Snapshot) Validate() error {
 	return nil
 }
 
-// isSecretPattern checks for common secret patterns (case-insensitive).
-func isSecretPattern(s string) bool {
-	lower := strings.ToLower(s)
-	commonPatterns := []string{
-		"password", "secret", "token", "credential", "api_key", "apikey",
-		"private_key", "auth_token", "access_token", "refresh_token",
-		"aws_secret", "database_url", "db_password",
-	}
-	for _, pat := range commonPatterns {
-		if strings.Contains(lower, pat) {
-			return true
-		}
-	}
-	return false
-}
-
 // ContentEqual returns true if content matches excluding the generatedAt timestamp.
 func (s Snapshot) ContentEqual(other Snapshot) bool {
 	if s.Version != other.Version {

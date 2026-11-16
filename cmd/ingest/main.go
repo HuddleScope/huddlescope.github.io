@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/publish"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
@@ -131,6 +133,23 @@ func main() {
 			hb.FromRunRecord(result, *result.EndedAt)
 			if err := hbPub.Publish(context.Background(), hb); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to publish heartbeat: %v\n", err)
+			}
+		}
+	}
+
+	// Publish feed health (best-effort: failures don't affect run exit)
+	feedsPath := os.Getenv("HSC_FEEDS_FILE")
+	if feedsPath == "" {
+		feedsPath = "web/data/feeds.json"
+	}
+	// Extract outDir and dataFile from full path
+	feedsDir := filepath.Dir(feedsPath)
+	feedsFile := filepath.Base(feedsPath)
+	if fhPub := hugo.NewFeedsDataPublisher(feedsDir, feedsFile); fhPub != nil {
+		if feedHealth := app.BuildFeedHealth(result, *result.EndedAt); feedHealth.Version != "" {
+			_, err := fhPub.Publish(context.Background(), feedHealth)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to publish feed health: %v\n", err)
 			}
 		}
 	}

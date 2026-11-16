@@ -36,6 +36,12 @@ type FeedFetcher interface {
 	Fetch(ctx context.Context, sourceID string) ([]FeedEntry, error)
 }
 
+// HTTPStatuser is an optional interface for FeedFetcher to expose HTTP status.
+type HTTPStatuser interface {
+	Fetch(ctx context.Context, sourceID string) ([]FeedEntry, error)
+	LastHTTPStatus() int
+}
+
 // FeedEntry represents a raw item fetched from a feed source.
 type FeedEntry struct {
 	Title       string
@@ -95,6 +101,8 @@ type FeedSource struct {
 	Timeout       time.Duration
 	License       string
 	AcceptableUse AcceptableUse
+	Name          string // Human-readable feed name
+	Category      string // Content category (e.g., "national", "all-sports", "team-official")
 }
 
 // Validate validates a FeedSource.

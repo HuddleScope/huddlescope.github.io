@@ -708,3 +708,148 @@ button:hover,
     page-break-inside: avoid;
   }
 }
+
+/* Dashboard styles — HS-38: RSS feed health dashboard */
+.dashboard-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.summary-card {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  text-align: center;
+  background: #f8f9fa;
+}
+
+.summary-card-healthy { background: #d4edda; border: 1px solid #c3e6cb; }
+.summary-card-no-updates { background: #fff3cd; border: 1px solid #ffeeba; }
+.summary-card-failed { background: #f8d7da; border: 1px solid #f5c6cb; }
+.summary-card-stale { background: #e2e3e5; border: 1px solid #d6d8db; }
+
+.summary-label {
+  display: block;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.summary-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #333;
+}
+
+.dashboard-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.dashboard-controls input,
+.dashboard-controls select {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 0.25rem;
+  font-size: 1rem;
+}
+
+.dashboard-table-container {
+  overflow-x: auto;
+}
+
+.dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+
+.dashboard-table th {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+
+.feed-name a {
+  color: #0366d6;
+  text-decoration: none;
+}
+
+.feed-name a:hover {
+  text-decoration: underline;
+}
+
+.feed-source-id {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.status-healthy { background: #d4edda; color: #155724; }
+.status-no-updates { background: #fff3cd; color: #856404; }
+.status-failed { background: #f8d7da; color: #721c24; }
+.status-disabled { background: #e2e3e5; color: #383d41; }
+.status-not-checked { background: #d1ecf1; color: #0c5460; }
+
+.feed-stale .feed-name {
+  color: #dc3545;
+}
+
+.dashboard-stats {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 0.5rem;
+}
+
+.dashboard-stats summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.dashboard-stats ul {
+  margin: 0.5rem 0 0 1.5rem;
+  padding: 0;
+}
+
+.dashboard-stats li {
+  margin-bottom: 0.25rem;
+}
+
+.no-results {
+  padding: 1rem;
+  color: #666;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .dashboard-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .dashboard-table {
+    font-size: 0.875rem;
+  }
+
+  .dashboard-table th,
+  .dashboard-table td {
+    padding: 0.375rem 0.5rem;
+  }
+}

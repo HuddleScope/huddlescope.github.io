@@ -216,6 +216,7 @@ type HTTPFetcher struct {
 	limiter        *HostRateLimiter
 	etagCache      *ETagCache
 	maxBytes       int64
+	lastStatus     int // HTTP status of the last fetch attempt
 }
 
 // Option configures an HTTPFetcher.
@@ -352,6 +353,11 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 
 		// Perform request
 		resp, lastErr = f.client.Do(req)
+
+		// Record HTTP status if we have a response
+		if resp != nil {
+			f.lastStatus = resp.StatusCode
+		}
 
 		// Close response if we have one and need to retry
 		if lastErr != nil || (resp != nil && resp.StatusCode >= 300) {
@@ -514,6 +520,11 @@ func (f *HTTPFetcher) calculateSimpleBackoff(attempt int) time.Duration {
 		delay = f.retryPolicy.MaxDelay
 	}
 	return delay
+}
+
+// LastHTTPStatus returns the HTTP status code from the last fetch attempt.
+func (f *HTTPFetcher) LastHTTPStatus() int {
+	return f.lastStatus
 }
 
 // getCharsetFromHeader extracts charset from Content-Type header.

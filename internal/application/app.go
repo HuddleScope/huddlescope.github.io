@@ -589,6 +589,15 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 			continue
 		}
 
+		// Capture HTTP status and entries count (before lookback filter)
+		var entriesTotal int
+		var httpStatus int
+		if hs, ok := fetcher.(domain.HTTPStatuser); ok {
+			httpStatus = hs.LastHTTPStatus()
+		}
+		// entriesTotal will be the count before lookback filter
+		entriesTotal = len(entries)
+
 		// Apply lookback filter
 		var filtered []domain.FeedEntry
 		for _, entry := range entries {
@@ -650,6 +659,8 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 			StoriesUpdated: storiesUpdated,
 			StoriesSkipped: storiesSkipped,
 			FetchedAt:      &lastPublishedAt,
+			EntriesTotal:   entriesTotal,
+			HTTPStatus:     httpStatus,
 		}
 		record.AddSourceStatus(status)
 		record.LastPublishedAt = &lastPublishedAt

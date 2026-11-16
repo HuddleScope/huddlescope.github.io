@@ -67,6 +67,11 @@ type SourceRunStatus struct {
 	StoriesSkipped int
 	Errors         []error
 	FetchedAt      *time.Time
+	CheckedAt      *time.Time // Timestamp when the source was checked
+	SucceededAt    *time.Time // Timestamp of last successful check (no error)
+	HTTPStatus     int        // HTTP status code of the last fetch attempt (0 if unknown)
+	Duration       time.Duration
+	EntriesTotal   int // Total feed entries seen (before lookback filter)
 }
 
 // AddError appends an error to the source status.

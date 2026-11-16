@@ -30,6 +30,7 @@ type Source struct {
 	Timeout       int // seconds
 	License       string
 	AcceptableUse string
+	Category      string // Content category (e.g., "national", "all-sports", "team-official")
 }
 
 // YAMLTeam represents the structure of a team in YAML config files.
@@ -794,6 +795,8 @@ func (c Config) ToDomain() []domain.FeedSource {
 			Language:    s.Language,
 			Timeout:     time.Duration(s.Timeout) * time.Second,
 			License:     s.License,
+			Name:        s.Name,
+			Category:    s.Category,
 		}
 		switch s.AcceptableUse {
 		case "allowed":
