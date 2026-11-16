@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +17,13 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/korean"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
@@ -44,6 +52,30 @@ var DefaultRetryPolicy = RetryPolicy{
 	BaseDelay: 500 * time.Millisecond,
 	MaxDelay:  30 * time.Second,
 	Jitter:    func(base time.Duration) time.Duration { return time.Duration(int64(float64(base) * randomFloat64())) },
+}
+
+// charsetEncodings maps common IANA charset names to encodings.
+// Based on https://encoding.spec.whatwg.org/#names-and-labels
+var charsetEncodings = map[string]encoding.Encoding{
+	"ascii":        charmap.ISO8859_1,
+	"iso-8859-1":   charmap.ISO8859_1,
+	"iso8859-1":    charmap.ISO8859_1,
+	"latin1":       charmap.ISO8859_1,
+	"latin-1":      charmap.ISO8859_1,
+	"utf-8":        encoding.Nop,
+	"utf8":         encoding.Nop,
+	"windows-1252": charmap.Windows1252,
+	"cp1252":       charmap.Windows1252,
+	"iso-2022-jp":  japanese.ISO2022JP,
+	"iso2022-jp":   japanese.ISO2022JP,
+	"shift_jis":    japanese.ShiftJIS,
+	"sjis":         japanese.ShiftJIS,
+	"euc-jp":       japanese.EUCJP,
+	"euc-kr":       korean.EUCKR,
+	"gbk":          simplifiedchinese.GBK,
+	"gb2312":       simplifiedchinese.GB18030,
+	"big5":         traditionalchinese.Big5,
+	"big5-hkcs":    traditionalchinese.Big5,
 }
 
 // randomFloat64 returns a random float64 in [0, 1) using crypto/rand.
@@ -93,27 +125,40 @@ func (l *HostRateLimiter) Wait(ctx context.Context, host string) error {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	now := l.now()
+	var waitFor time.Duration
+
 	if next, ok := l.next[host]; ok && now.Before(next) {
-		waitFor := next.Sub(now)
+		waitFor = next.Sub(now)
 		if waitFor > l.interval {
 			waitFor = l.interval
 		}
 
-		// Check if context is cancelled before waiting
+		// Check if context is cancelled while holding the lock
+		select {
+		case <-ctx.Done():
+			l.mu.Unlock()
+			return ctx.Err()
+		default:
+			// Continue with sleep below
+		}
+
+		// Update next time before releasing lock
+		l.next[host] = now.Add(l.interval)
+	}
+
+	l.mu.Unlock()
+
+	// Sleep while not holding the lock (allows other hosts to proceed)
+	if waitFor > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(waitFor):
-			// continue
+			// Continue
 		}
-
-		now = l.now()
 	}
 
-	l.next[host] = now.Add(l.interval)
 	return nil
 }
 
@@ -269,44 +314,53 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 		timeout = f.defaultTimeout
 	}
 
-	// Create request context with timeout
-	reqCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	// Wait for rate limiter
 	if f.limiter != nil {
-		if err := f.limiter.Wait(reqCtx, u.Host); err != nil {
+		if err := f.limiter.Wait(ctx, u.Host); err != nil {
 			return nil, fmt.Errorf("rate limit wait failed: %w", err)
 		}
 	}
 
-	// Prepare request
-	req, err := http.NewRequestWithContext(reqCtx, "GET", f.source.URL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("User-Agent", f.userAgent)
-
-	// Add conditional GET headers if we have cached validators
-	if f.etagCache != nil {
-		if etag, lastModified, ok := f.etagCache.Get(f.source.URL); ok {
-			if etag != "" {
-				req.Header.Set("If-None-Match", etag)
-			}
-			if lastModified != "" {
-				req.Header.Set("If-Modified-Since", lastModified)
-			}
-		}
-	}
-
-	// Perform request
+	// Perform request with per-attempt timeout
 	var resp *http.Response
 	var attempt int
 	var lastErr error
 
 	for attempt = 1; attempt <= f.retryPolicy.Attempts; attempt++ {
+		// Create per-attempt timeout context
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, timeout)
+		defer attemptCancel()
+
+		// Prepare request tied to this attempt's context
+		req, err := http.NewRequestWithContext(attemptCtx, "GET", f.source.URL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("User-Agent", f.userAgent)
+
+		// Add conditional GET headers if we have cached validators
+		if f.etagCache != nil {
+			if etag, lastModified, ok := f.etagCache.Get(f.source.URL); ok {
+				if etag != "" {
+					req.Header.Set("If-None-Match", etag)
+				}
+				if lastModified != "" {
+					req.Header.Set("If-Modified-Since", lastModified)
+				}
+			}
+		}
+
+		// Perform request
 		resp, lastErr = f.client.Do(req)
+
+		// Close response if we have one and need to retry
+		if lastErr != nil || (resp != nil && resp.StatusCode >= 300) {
+			if resp != nil {
+				closeResponseBody(resp)
+			}
+		}
+
 		if lastErr == nil && resp != nil {
 			// Check response status
 			if resp.StatusCode == http.StatusNotModified {
@@ -319,8 +373,7 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 					// Continue to retry for 429
 				} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 					// 4xx errors are not retryable (except 429)
-					closeResponseBody(resp)
-					return nil, fmt.Errorf("request failed with status %d: %w", resp.StatusCode, lastErr)
+					return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
 				}
 				// For 5xx errors, continue to retry
 			} else {
@@ -336,24 +389,16 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 			}
 		}
 
-		// If we have a response, close the body before retry
-		if resp != nil {
-			closeResponseBody(resp)
-		}
-
 		if attempt < f.retryPolicy.Attempts {
 			delay := f.calculateBackoff(attempt)
 			select {
-			case <-reqCtx.Done():
-				return nil, fmt.Errorf("request cancelled during backoff: %w", reqCtx.Err())
+			case <-attemptCtx.Done():
+				return nil, fmt.Errorf("request cancelled during backoff: %w", attemptCtx.Err())
 			case <-time.After(delay):
 				// Continue to next attempt
 			}
 		}
-	}
-
-	if lastErr != nil {
-		return nil, fmt.Errorf("request failed after %d attempts: %w", attempt-1, lastErr)
+		// Cancel the attempt context if we're continuing to next iteration
 	}
 
 	// Process response
@@ -361,18 +406,16 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 
 	// Handle 304 Not Modified (unchanged) - this is a success case
 	if resp != nil && resp.StatusCode == http.StatusNotModified {
-		closeResponseBody(resp)
 		result.Unchanged = true
 		return result, nil
 	}
 
 	// Check for error status codes
 	if resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
-		closeResponseBody(resp)
-		return nil, fmt.Errorf("request failed after %d attempts with status %d: %w", attempt-1, resp.StatusCode, fmt.Errorf("unexpected status code %d", resp.StatusCode))
+		return nil, fmt.Errorf("request failed after %d attempts with status %d", attempt-1, resp.StatusCode)
 	}
 
-	// Read body with limit
+	// Read body with limit (ignore context cancellation)
 	var bodyBuf bytes.Buffer
 	lr := io.LimitReader(resp.Body, f.maxBytes+1)
 	n, err := io.Copy(&bodyBuf, lr)
@@ -488,22 +531,22 @@ func getCharsetFromHeader(contentType string) string {
 }
 
 // decodeWithCharset decodes bytes from the given charset to UTF-8.
+// Returns original bytes and nil for unsupported charsets (logs warning).
 func decodeWithCharset(data []byte, charset string) ([]byte, error) {
-	// Handle common charsets
-	charset = strings.ToLower(charset)
-	switch charset {
-	case "iso-8859-1", "iso8859-1", "latin1", "latin-1":
-		// ISO-8859-1 maps directly to first 256 Unicode codepoints
-		// We need to properly decode it
-		decoded := make([]rune, len(data))
-		for i, b := range data {
-			decoded[i] = rune(b)
-		}
-		return []byte(string(decoded)), nil
-	case "utf-8", "utf8":
+	// Normalize charset name
+	charset = strings.ToLower(strings.TrimSpace(charset))
+
+	enc, ok := charsetEncodings[charset]
+	if !ok {
+		// Unsupported charset: log warning and pass through unchanged
+		log.Printf("[rss] unsupported charset %q, passing bytes through unchanged", charset)
 		return data, nil
-	default:
-		// For other charsets, try to use golang.org/x/text
-		return nil, fmt.Errorf("unsupported charset: %s", charset)
 	}
+
+	// Use decoder to convert from source charset to UTF-8
+	decoded, err := enc.NewDecoder().Bytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode with charset %s: %w", charset, err)
+	}
+	return decoded, nil
 }
