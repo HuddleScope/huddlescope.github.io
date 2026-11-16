@@ -270,6 +270,14 @@ HuddleScope honors publisher terms of service and never attempts to bypass acces
 - Never hardcode credentials.
 - Use descriptive, stable IDs (`snake_case`; include the domain if it helps).
 
+### Issue tracking
+
+See [docs/issue-hs-002-status.md](docs/issue-hs-002-status.md) for issue tracking and [docs/ci-status.md](docs/ci-status.md) for CI status.
+
+#### Issue HS-043 (issue #62)
+
+Issue #62 unified source loading into one config path and removed the teams panic. The implementation was merged in PR #91 (squash commit 3abbce9). The commit message uses "Refs #62" instead of "Closes #62"; the issue is tracked here and will be closed manually after review.
+
 ### Production Mode
 
 Set `HSC_ENV=production` to enable production mode. Production requires:
