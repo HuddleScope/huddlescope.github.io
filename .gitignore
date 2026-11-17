@@ -1,6 +1,9 @@
 # Build artifacts
 dist/
 coverage.out
+/ingest
+/export
+/heartbeat
 
 # Hugo site build artifacts
 web/public/
@@ -30,3 +33,6 @@ Thumbs.db
 # Node scheduler
 scheduler/node_modules/
 scheduler/.wrangler/
+
+# Stale backups
+*.bak
