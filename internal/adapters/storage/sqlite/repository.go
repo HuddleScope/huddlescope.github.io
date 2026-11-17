@@ -32,6 +32,21 @@ func NewRepository(dbPath string) (*Repository, error) {
 	return &Repository{db: db}, nil
 }
 
+// NewRepositoryFromDB wraps an existing *sql.DB handle and runs migrations on it.
+// Use this when you already have an open database handle (e.g., Turso).
+// The handle is NOT closed by this function.
+func NewRepositoryFromDB(db *sql.DB) (*Repository, error) {
+	// Enable foreign keys per connection
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	// Apply migrations
+	if _, err := MigrateDB(db); err != nil {
+		return nil, err
+	}
+	return &Repository{db: db}, nil
+}
+
 // Repository implements domain.Repository using modernc.org/sqlite.
 type Repository struct {
 	db *sql.DB
@@ -39,14 +54,40 @@ type Repository struct {
 
 // Upsert implements domain.Repository.Upsert.
 func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
+	return Upsert(r.db, story)
+}
+
+// List implements domain.Repository.List.
+func (r *Repository) List() ([]domain.Story, error) {
+	return List(r.db)
+}
+
+// Count implements domain.Repository.Count.
+func (r *Repository) Count() (int, error) {
+	return Count(r.db)
+}
+
+// Migrate applies schema migrations.
+func (r *Repository) Migrate() error {
+	_, err := MigrateDB(r.db)
+	return err
+}
+
+// Close closes the database connection.
+func (r *Repository) Close() error {
+	return r.db.Close()
+}
+
+// Upsert is a database/sql compatible Upsert implementation.
+func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 	// Check by story_key (story.ID)
 	var existingID string
-	err := r.db.QueryRow("SELECT story_id FROM stories WHERE story_key = ?", story.ID).Scan(&existingID)
+	err := db.QueryRow("SELECT story_id FROM stories WHERE story_key = ?", story.ID).Scan(&existingID)
 	if err == nil {
 		// Found by story_key, check meaningful fields
 		var title, summary, canonicalURL, publishedAt, guid string
 		var storyData []byte
-		err = r.db.QueryRow("SELECT title, summary, canonical_url, published_at, story_data FROM stories WHERE story_key = ?", story.ID).Scan(&title, &summary, &canonicalURL, &publishedAt, &storyData)
+		err = db.QueryRow("SELECT title, summary, canonical_url, published_at, story_data FROM stories WHERE story_key = ?", story.ID).Scan(&title, &summary, &canonicalURL, &publishedAt, &storyData)
 		if err != nil {
 			return domain.UpsertUnchanged, fmt.Errorf("read story: %w", err)
 		}
@@ -66,7 +107,7 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 		}
 		// Update
 		data, _ := story.MarshalJSON()
-		result, err := r.db.Exec(`UPDATE stories 
+		result, err := db.Exec(`UPDATE stories 
 			SET title = ?, summary = ?, canonical_url = ?, published_at = ?, 
 				story_data = ?, updated_at = datetime('now')
 			WHERE story_key = ?`, story.Title, story.Summary, story.CanonicalURL,
@@ -83,10 +124,10 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 
 	// Not found, try dedupe_key
 	var dedupeFound bool
-	err = r.db.QueryRow("SELECT 1 FROM stories WHERE dedupe_key = ? LIMIT 1", story.DedupeKey).Scan(&dedupeFound)
+	err = db.QueryRow("SELECT 1 FROM stories WHERE dedupe_key = ? LIMIT 1", story.DedupeKey).Scan(&dedupeFound)
 	if err == nil && dedupeFound {
 		// Dedupe hit: update existing
-		result, err := r.db.Exec(`UPDATE stories 
+		result, err := db.Exec(`UPDATE stories 
 			SET title = ?, summary = ?, canonical_url = ?, published_at = ?, 
 				updated_at = datetime('now')
 			WHERE dedupe_key = ?`, story.Title, story.Summary, story.CanonicalURL,
@@ -104,7 +145,7 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 	data, _ := story.MarshalJSON()
 	uuid := uuid.New().String()
 	nowStr := timestampToString(time.Now().UTC())
-	result, err := r.db.Exec(`INSERT INTO stories 
+	result, err := db.Exec(`INSERT INTO stories 
 		(story_id, story_key, title, summary, published_at, 
 		 canonical_url, guid, story_data, dedupe_key, status, created_at, first_seen_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
@@ -118,9 +159,9 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 	return domain.UpsertCreated, nil
 }
 
-// List implements domain.Repository.List.
-func (r *Repository) List() ([]domain.Story, error) {
-	rows, err := r.db.Query(`SELECT story_data FROM stories ORDER BY published_at DESC, story_id ASC`)
+// List is a database/sql compatible List implementation.
+func List(db *sql.DB) ([]domain.Story, error) {
+	rows, err := db.Query(`SELECT story_data FROM stories ORDER BY published_at DESC, story_id ASC`)
 	if err != nil {
 		_ = rows.Close()
 		return nil, fmt.Errorf("list: %w", err)
@@ -141,25 +182,14 @@ func (r *Repository) List() ([]domain.Story, error) {
 	return stories, rows.Err()
 }
 
-// Count implements domain.Repository.Count.
-func (r *Repository) Count() (int, error) {
+// Count is a database/sql compatible Count implementation.
+func Count(db *sql.DB) (int, error) {
 	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM stories").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count: %w", err)
 	}
 	return count, nil
-}
-
-// Migrate applies schema migrations.
-func (r *Repository) Migrate() error {
-	_, err := Migrate("")
-	return err
-}
-
-// Close closes the database connection.
-func (r *Repository) Close() error {
-	return r.db.Close()
 }
 
 // timestampToString converts time.Time to ISO8601 string (20 chars).
