@@ -53,23 +53,6 @@ type FeedEntry struct {
 	Entities    []string // normalized team slugs, player names
 }
 
-// Source represents a news source or feed.
-type Source struct {
-	ID          string
-	Name        string
-	URL         string
-	LastFetched *time.Time
-	ItemCount   int
-	// Additional registry fields (HS-006)
-	Publication   string
-	Priority      int
-	Enabled       bool
-	Language      string
-	Timeout       time.Duration
-	License       string
-	AcceptableUse AcceptableUse
-}
-
 // AcceptableUse captures publisher acceptable-use posture.
 type AcceptableUse int
 

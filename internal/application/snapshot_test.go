@@ -255,3 +255,78 @@ func TestBuildSnapshotWithStoriesAndClustering(t *testing.T) {
 		t.Errorf("Errors should be empty: %v", result.Errors)
 	}
 }
+
+// TestRunSnapshotPreview tests that preview builds snapshot without writing.
+func TestRunSnapshotPreview(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	teamReg := domain.NewTeamRegistry()
+	clustering := domain.NewClusterer()
+	scorer := domain.NewScorer()
+
+	// Add a story
+	if _, err := repo.Upsert(domain.Story{
+		ID:          "s1",
+		Title:       "Test Story",
+		Source:      "test-feed",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "Summary",
+		URL:         "http://example.com/s1",
+	}); err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	app := New(
+		WithRepository(repo),
+		WithTeamRegistry(teamReg),
+		WithClusterer(clustering),
+		WithScorer(scorer),
+	)
+
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	result := app.RunSnapshotPreview(context.Background(), now)
+
+	// Snapshot should be built
+	if result.StoriesBuilt != 1 {
+		t.Errorf("StoriesBuilt = %d; want 1", result.StoriesBuilt)
+	}
+	if result.Snapshot.Version != domain.SnapshotVersion {
+		t.Errorf("Snapshot version = %q; want %q", result.Snapshot.Version, domain.SnapshotVersion)
+	}
+	// Preview should not commit (no write)
+	if result.PubResult.Committed {
+		t.Error("PubResult.Committed should be false for preview")
+	}
+	if len(result.Errors) > 0 {
+		t.Errorf("Errors should be empty for preview: %v", result.Errors)
+	}
+}
+
+// TestRunSnapshotPreviewEmpty tests preview with no stories.
+func TestRunSnapshotPreviewEmpty(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	teamReg := domain.NewTeamRegistry()
+	clustering := domain.NewClusterer()
+	scorer := domain.NewScorer()
+
+	app := New(
+		WithRepository(repo),
+		WithTeamRegistry(teamReg),
+		WithClusterer(clustering),
+		WithScorer(scorer),
+	)
+
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	result := app.RunSnapshotPreview(context.Background(), now)
+
+	// Empty snapshot built
+	if result.StoriesBuilt != 0 {
+		t.Errorf("StoriesBuilt = %d; want 0", result.StoriesBuilt)
+	}
+	// Preview should not commit
+	if result.PubResult.Committed {
+		t.Error("PubResult.Committed should be false for preview")
+	}
+	if len(result.Errors) > 0 {
+		t.Errorf("Errors should be empty: %v", result.Errors)
+	}
+}
