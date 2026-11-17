@@ -276,6 +276,8 @@ HuddleScope honors publisher terms of service and never attempts to bypass acces
 
 See [docs/ops-runbook.md](docs/ops-runbook.md) for issue tracking and CI status.
 
+See [docs/worker-deployment.md](docs/worker-deployment.md) for step-by-step Cloudflare Worker first-time deployment.
+
 ### Production Mode
 
 Set `HSC_ENV=production` to enable production mode. Production requires:

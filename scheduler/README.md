@@ -50,19 +50,39 @@ GitHub Actions itself does not support native cron scheduling — it must be tri
 ### Prerequisites
 - Node.js 20+ (`node --version`)
 - Wrangler CLI (`npm install -g wrangler`)
-- GitHub personal access token with `repo` scope
+- GitHub fine-grained personal access token (Actions: Read and write)
+
+### Authentication
+
+Before deploying, log in to Cloudflare:
+
+```bash
+cd scheduler
+npx wrangler login
+```
+
+This opens a browser window. Authorize with your Cloudflare account.
+
+Verify your account details:
+
+```bash
+npx wrangler whoami
+```
 
 ### Token creation (fine-grained)
 
-1. Go to GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
-2. Click "Generate new token" → "Generate new token (classic)"
-3. Set:
-   - Note: `huddlescope-cf-worker`
-   - Expiration: 90 days (rotate quarterly)
-   - Select "Only select repositories" → `huddlescope.github.io`
-   - Select "Select permissions"
-     - **Repository permissions** → **Actions**: Write (only)
-4. Click "Generate token" and **copy the token immediately** (it won't be shown again)
+> **Tip**: For first-time deployment and diagnostics, see `docs/worker-deployment.md` for a complete step-by-step guide including free Cloudflare account setup, `wrangler login`, and verification tests.
+
+1. Go to GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → **Generate new token**.
+2. Set:
+   - **Note**: `huddlescope-cf-worker`
+   - **Expiration**: 90 days (rotate quarterly)
+   - **Repository access**: Only select repositories → `huddlescope.github.io`
+   - **Permissions** → **Repository permissions** → **Actions** → **Read and write**
+   - **Organization approvals**: If your account is part of a GitHub organization, request approval.
+3. Click **Generate token** and copy it immediately (shown only once).
+
+> **Security note**: Never commit the token to Git, store it in workflow YAML, or add it to `.env.example`. The worker stores it as a Cloudflare secret.
 
 ### Deployment steps
 
@@ -73,10 +93,10 @@ cd scheduler
 npm install
 
 # Set the GitHub token as a secret (never commit this)
-wrangler secret put GITHUB_TOKEN
+npx wrangler secret put GITHUB_TOKEN
 
 # Deploy to Cloudflare Workers
-wrangler deploy
+npx wrangler deploy
 ```
 
 The deployment outputs the Workers URL (e.g., `https://huddlescope-dispatcher.<your-subdomain>.workers.dev`).
