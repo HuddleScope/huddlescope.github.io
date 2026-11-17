@@ -470,3 +470,133 @@ func TestContentEqual(t *testing.T) {
 		t.Error("ContentEqual() should return false when content differs")
 	}
 }
+
+// TestSnapshotStorySummary (#122): the summary fallback must always produce
+// non-empty output for rows persisted with empty summaries, and must be
+// deterministic.
+func TestSnapshotStorySummary(t *testing.T) {
+	tests := []struct {
+		name  string
+		group StoryGroup
+		want  string
+	}{
+		{
+			"first article summary wins",
+			StoryGroup{Headline: "Headline", Articles: []Article{
+				{Title: "A", Summary: "First summary"},
+				{Title: "B", Summary: "Second summary"},
+			}},
+			"First summary",
+		},
+		{
+			"empty first article falls back to first non-empty",
+			StoryGroup{Headline: "Headline", Articles: []Article{
+				{Title: "A", Summary: ""},
+				{Title: "B", Summary: "Second summary"},
+			}},
+			"Second summary",
+		},
+		{
+			"whitespace-only summaries fall back to headline",
+			StoryGroup{Headline: "Headline", Articles: []Article{
+				{Title: "A", Summary: "   "},
+				{Title: "B", Summary: ""},
+			}},
+			"Headline",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := snapshotStorySummary(tt.group); got != tt.want {
+				t.Errorf("snapshotStorySummary() = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildSnapshot_EmptySummaryRow (#122): a repository row persisted with an
+// empty summary (the production failure from run 44089554701) must build and
+// validate without failing the export; the headline stands in as summary.
+func TestBuildSnapshot_EmptySummaryRow(t *testing.T) {
+	registry := NewTeamRegistry()
+	scorer := NewScorer()
+	resolver := NewStaticSourceResolver(map[string]string{"official-min": "Minnesota Vikings official"})
+
+	articles := []Article{
+		{ID: "0a46e1fa099c319a", SourceID: "official-min", Title: "young players factor in vikings win", Summary: "", URL: "https://www.vikings.com/news/young-players-factor-packers-win-dallas-turner-week-10", PublishedAt: "2026-11-16T22:18:58Z"},
+		{ID: "ok-story", SourceID: "official-chi", Title: "bears hoping to hit the ground running", Summary: "The Bears were back at practice Monday.", URL: "https://www.chicagobears.com/news/bears-hoping-to-hit-the-ground-running-after-bye-week", PublishedAt: "2026-11-16T23:30:45Z"},
+	}
+
+	groups := []StoryGroup{
+		{ID: "0a46e1fa099c319a", Headline: "young players factor in vikings win", Articles: []Article{articles[0]}, FirstPublishedAt: time.Date(2026, 11, 16, 22, 18, 58, 0, time.UTC), LastPublishedAt: time.Date(2026, 11, 16, 22, 18, 58, 0, time.UTC)},
+		{ID: "ok-story", Headline: "bears hoping to hit the ground running", Articles: []Article{articles[1]}, FirstPublishedAt: time.Date(2026, 11, 16, 23, 30, 45, 0, time.UTC), LastPublishedAt: time.Date(2026, 11, 16, 23, 30, 45, 0, time.UTC)},
+	}
+
+	stories := []Story{
+		{ID: "0a46e1fa099c319a", Title: "young players factor in vikings win", Source: "official-min", Summary: "", URL: articles[0].URL, PublishedAt: time.Date(2026, 11, 16, 22, 18, 58, 0, time.UTC)},
+		{ID: "ok-story", Title: "bears hoping to hit the ground running", Source: "official-chi", Summary: "The Bears were back at practice Monday.", URL: articles[1].URL, PublishedAt: time.Date(2026, 11, 16, 23, 30, 45, 0, time.UTC)},
+	}
+
+	now := time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC)
+	snap, err := BuildSnapshot(stories, groups, scorer, now, resolver, registry, 10)
+	if err != nil {
+		t.Fatalf("BuildSnapshot failed: %v", err)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("snapshot with empty-summary row must validate: %v", err)
+	}
+
+	for _, story := range snap.Stories {
+		if story.ID == "0a46e1fa099c319a" {
+			if story.Summary != "young players factor in vikings win" {
+				t.Errorf("poisoned row summary = %q; want headline fallback", story.Summary)
+			}
+		}
+		if story.ID == "ok-story" {
+			if story.Summary != "The Bears were back at practice Monday." {
+				t.Errorf("healthy row summary = %q; want unchanged", story.Summary)
+			}
+		}
+		if strings.TrimSpace(story.Summary) == "" {
+			t.Errorf("story %s has empty summary after fallback", story.ID)
+		}
+	}
+}
+
+// TestBuildSnapshot_MixedSummaryGroup (#122): a cluster whose first article
+// stored an empty summary uses the first non-empty article summary.
+func TestBuildSnapshot_MixedSummaryGroup(t *testing.T) {
+	registry := NewTeamRegistry()
+	scorer := NewScorer()
+	resolver := NewStaticSourceResolver(map[string]string{"official-min": "Minnesota Vikings official"})
+
+	articles := []Article{
+		{ID: "empty-first", SourceID: "official-min", Title: "first headline", Summary: "", URL: "https://www.vikings.com/news/first", PublishedAt: "2026-11-16T22:00:00Z"},
+		{ID: "filled-second", SourceID: "official-min", Title: "second headline", Summary: "Useful second summary.", URL: "https://www.vikings.com/news/second", PublishedAt: "2026-11-16T23:00:00Z"},
+	}
+
+	groups := []StoryGroup{
+		{ID: "g1", Headline: "first headline", Articles: articles, FirstPublishedAt: time.Date(2026, 11, 16, 22, 0, 0, 0, time.UTC), LastPublishedAt: time.Date(2026, 11, 16, 23, 0, 0, 0, time.UTC)},
+	}
+
+	stories := []Story{
+		{ID: "empty-first", Title: "first headline", Source: "official-min", Summary: "", URL: articles[0].URL, PublishedAt: time.Date(2026, 11, 16, 22, 0, 0, 0, time.UTC)},
+		{ID: "filled-second", Title: "second headline", Source: "official-min", Summary: "Useful second summary.", URL: articles[1].URL, PublishedAt: time.Date(2026, 11, 16, 23, 0, 0, 0, time.UTC)},
+	}
+
+	now := time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC)
+	snap, err := BuildSnapshot(stories, groups, scorer, now, resolver, registry, 10)
+	if err != nil {
+		t.Fatalf("BuildSnapshot failed: %v", err)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("Validate failed: %v", err)
+	}
+	if len(snap.Stories) != 1 {
+		t.Fatalf("expected 1 story, got %d", len(snap.Stories))
+	}
+	if got := snap.Stories[0].Summary; got != "Useful second summary." {
+		t.Errorf("mixed-group summary = %q; want first non-empty article summary", got)
+	}
+}

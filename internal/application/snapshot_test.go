@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,5 +329,77 @@ func TestRunSnapshotPreviewEmpty(t *testing.T) {
 	}
 	if len(result.Errors) > 0 {
 		t.Errorf("Errors should be empty: %v", result.Errors)
+	}
+}
+
+// TestRunSnapshot_EmptySummaryRowStored (#122): a row persisted before the
+// fix with an empty summary (production incident, run 44089554701) must not
+// fail the snapshot export; the snapshot falls back to the title.
+func TestRunSnapshot_EmptySummaryRowStored(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	teamReg := domain.NewTeamRegistry()
+	clustering := domain.NewClusterer()
+	scorer := domain.NewScorer()
+
+	stories := []domain.Story{
+		{
+			// Mirrors the failing production row: description-less feed item
+			ID:          "0a46e1fa099c319a",
+			Title:       "young players factor in vikings win at packers",
+			Source:      "official-min",
+			PublishedAt: time.Date(2026, 11, 16, 22, 18, 58, 0, time.UTC),
+			Summary:     "",
+			URL:         "https://www.vikings.com/news/young-players-factor-packers-win-dallas-turner-week-10",
+		},
+		{
+			ID:          "healthy",
+			Title:       "bears hoping to hit the ground running",
+			Source:      "official-chi",
+			PublishedAt: time.Date(2026, 11, 16, 23, 30, 45, 0, time.UTC),
+			Summary:     "The Bears were back at practice Monday.",
+			URL:         "https://www.chicagobears.com/news/bears-hoping-to-hit-the-ground-running-after-bye-week",
+		},
+	}
+	for _, s := range stories {
+		if _, err := repo.Upsert(s); err != nil {
+			t.Fatalf("Upsert failed: %v", err)
+		}
+	}
+
+	app := New(
+		WithRepository(repo),
+		WithTeamRegistry(teamReg),
+		WithClusterer(clustering),
+		WithScorer(scorer),
+	)
+
+	now := time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC)
+	result := app.RunSnapshot(context.Background(), now)
+
+	if len(result.Errors) > 0 {
+		t.Fatalf("RunSnapshot must not fail with a stored empty-summary row: %v", result.Errors)
+	}
+	if !result.PubResult.Committed {
+		t.Error("PubResult.Committed should be true")
+	}
+	if len(result.PubResult.Errors) > 0 {
+		t.Errorf("PubResult.Errors should be empty: %v", result.PubResult.Errors)
+	}
+	if err := result.Snapshot.Validate(); err != nil {
+		t.Fatalf("published snapshot must validate: %v", err)
+	}
+
+	for _, story := range result.Snapshot.Stories {
+		if story.ID == "0a46e1fa099c319a" {
+			if got := strings.TrimSpace(story.Summary); got == "" {
+				t.Error("poisoned row must get a non-empty fallback summary")
+			}
+			if got := story.Summary; got != story.Title {
+				t.Errorf("poisoned row summary = %q; want title %q", got, story.Title)
+			}
+		}
+		if story.ID == "healthy" && story.Summary != "The Bears were back at practice Monday." {
+			t.Errorf("healthy row summary changed: %q", story.Summary)
+		}
 	}
 }

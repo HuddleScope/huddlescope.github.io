@@ -135,7 +135,7 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 		ss = append(ss, SnapshotStory{
 			ID:               g.ID,
 			Title:            g.Headline,
-			Summary:          g.Articles[0].Summary, // Use first article's summary
+			Summary:          snapshotStorySummary(g),
 			FirstPublishedAt: g.FirstPublishedAt.UTC().Format(time.RFC3339),
 			LastPublishedAt:  g.LastPublishedAt.UTC().Format(time.RFC3339),
 			Score:            score,
@@ -150,6 +150,20 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 	})
 
 	return ss, nil
+}
+
+// snapshotStorySummary returns a summary for a clustered story that always
+// survives Snapshot.Validate. Rows persisted before #122 (and rows whose feed
+// item carried no description) may store an empty summary; the first
+// non-empty article summary is used, falling back to the group headline so
+// one poisoned row cannot fail the whole export.
+func snapshotStorySummary(g StoryGroup) string {
+	for _, a := range g.Articles {
+		if sum := strings.TrimSpace(a.Summary); sum != "" {
+			return sum
+		}
+	}
+	return g.Headline
 }
 
 func buildPublishers(articles []Article, resolver SourceNameResolver) []PublisherRef {

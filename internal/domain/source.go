@@ -289,14 +289,23 @@ func DedupeKey(sourceID, guid, url string) string {
 // FirstSeenAt is set by the Repository on first insertion; callers should leave it zero.
 // Entities are populated from entry.Entities; the dead DefaultTeamRegistry() extraction
 // has been removed as the app layer already re-extracts with the real registry.
+// A description-less entry (empty summary) falls back to the sanitized title so a single
+// malformed feed item cannot poison later snapshot exports (#122).
 func (s Story) Canonicalize(entry FeedEntry) Story {
 	// Start with a base canonical story
+	summary := SanitizeHTML(entry.Summary, 1024)
+	if strings.TrimSpace(summary) == "" {
+		// Fallback: derive a deterministic summary from the title when the feed
+		// item carries neither description nor content.
+		summary = SanitizeHTML(entry.Title, 1024)
+	}
+
 	story := Story{
 		ID:           ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt),
 		Title:        NormalizeTitle(entry.Title),
 		Source:       NormalizeSourceID(entry.Source),
 		PublishedAt:  NormalizeTimestamp(entry.PublishedAt),
-		Summary:      SanitizeHTML(entry.Summary, 1024),
+		Summary:      summary,
 		URL:          CanonicalURLEntry(entry.URL),
 		GUID:         strings.TrimSpace(entry.GUID),
 		CanonicalURL: CanonicalURLEntry(entry.URL),
