@@ -16,8 +16,9 @@ type SnapshotResult struct {
 	Errors       []error
 }
 
-// RunSnapshot builds a versioned snapshot and publishes it.
-func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotResult {
+// runSnapshot builds a versioned snapshot and optionally publishes it.
+// If dryRun is true, the snapshot is built but not written.
+func (a *Application) runSnapshot(ctx context.Context, now time.Time, dryRun bool) SnapshotResult {
 	result := SnapshotResult{}
 
 	if a.repo == nil {
@@ -33,12 +34,6 @@ func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotRe
 	if a.scorer == nil {
 		result.Errors = append(result.Errors, fmt.Errorf("scorer not configured"))
 		return result
-	}
-
-	// Use configured snapshot publisher, or default if none provided
-	publisher := a.snapshotPublisher
-	if publisher == nil {
-		publisher = &domain.DefaultSnapshotPublisher{}
 	}
 
 	// Build the snapshot
@@ -58,7 +53,25 @@ func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotRe
 	result.Snapshot = snapshot
 	result.StoriesBuilt = len(snapshot.Stories)
 
-	// Publish
+	if dryRun {
+		// Dry run: build snapshot but skip write
+		result.PubResult = domain.PublicationResult{
+			Committed:   false,
+			Changed:     false,
+			Path:        "",
+			Version:     domain.SnapshotVersion,
+			PublishedAt: now.UTC().Format(time.RFC3339),
+			Errors:      nil,
+		}
+		return result
+	}
+
+	// Publish (non-dry-run)
+	publisher := a.snapshotPublisher
+	if publisher == nil {
+		publisher = &domain.DefaultSnapshotPublisher{}
+	}
+
 	pubResult, err := publisher.Publish(ctx, snapshot)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("publish failed: %w", err))
@@ -74,6 +87,16 @@ func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotRe
 	result.PubResult = pubResult
 
 	return result
+}
+
+// RunSnapshot builds a versioned snapshot and publishes it.
+func (a *Application) RunSnapshot(ctx context.Context, now time.Time) SnapshotResult {
+	return a.runSnapshot(ctx, now, false)
+}
+
+// RunSnapshotPreview builds a versioned snapshot without writing it (preview mode).
+func (a *Application) RunSnapshotPreview(ctx context.Context, now time.Time) SnapshotResult {
+	return a.runSnapshot(ctx, now, true)
 }
 
 // buildSnapshot constructs the domain.Snapshot from stories and scoring.

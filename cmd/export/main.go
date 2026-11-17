@@ -78,6 +78,29 @@ func main() {
 	)
 
 	// Run snapshot export
+	if *dryRun {
+		result := app.RunSnapshotPreview(context.Background(), time.Now())
+		// Dry run: output result but skip write and heartbeat update
+		fmt.Printf("Snapshot preview complete\n")
+		fmt.Printf("  Committed: %v\n", result.PubResult.Committed)
+		fmt.Printf("  Changed: %v\n", result.PubResult.Changed)
+		fmt.Printf("  Path: %v\n", result.PubResult.Path)
+		fmt.Printf("  Version: %v\n", result.PubResult.Version)
+		fmt.Printf("  Stories built: %d\n", result.StoriesBuilt)
+
+		if len(result.PubResult.Errors) > 0 {
+			fmt.Printf("  Errors: %v\n", result.PubResult.Errors)
+		}
+
+		if len(result.Errors) > 0 {
+			fmt.Printf("Application errors: %v\n", result.Errors)
+			os.Exit(2)
+		}
+
+		fmt.Printf("Dry run preview complete\n")
+		os.Exit(0)
+	}
+
 	result := app.RunSnapshot(context.Background(), time.Now())
 
 	// Update heartbeat with publish result (best-effort)
@@ -125,12 +148,6 @@ func main() {
 	if !result.PubResult.Committed {
 		fmt.Printf("Snapshot was not committed\n")
 		os.Exit(2)
-	}
-
-	// Exit non-zero if dry-run enabled but nothing was done
-	if *dryRun && !result.PubResult.Changed {
-		fmt.Println("Dry run complete - no changes")
-		os.Exit(0)
 	}
 
 	fmt.Printf("Exported snapshot to %s\n", fullDataPath)

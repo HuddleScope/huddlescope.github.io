@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
@@ -111,12 +110,6 @@ func WithFeedFetchers(fetchers ...domain.FeedFetcher) Option {
 func WithRegistry(registry *domain.FeedRegistry) Option {
 	return func(a *Application) {
 		a.registry = registry
-	}
-}
-
-// WithFetcherResolver sets a function to resolve a FeedFetcher for a source ID.
-func WithFetcherResolver(resolver func(sourceID string) domain.FeedFetcher) Option {
-	return func(a *Application) {
 	}
 }
 
@@ -402,7 +395,7 @@ func (a *Application) resolveFetcher(sourceID string) (domain.FeedFetcher, error
 	if fetcher, ok := a.fetcherMap[sourceID]; ok {
 		return fetcher, nil
 	}
-	return rss.NewStaticFetcher([]domain.FeedEntry{}), nil
+	return nil, fmt.Errorf("no fetcher configured for source %s", sourceID)
 }
 
 // RunExport exports stories to the configured backend.

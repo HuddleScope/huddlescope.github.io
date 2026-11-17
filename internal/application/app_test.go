@@ -9,6 +9,7 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
+	"strings"
 )
 
 // TestExtractTeams tests the extractTeams helper function
@@ -525,7 +526,7 @@ func TestRunIngestWithMissingFetcherInMap(t *testing.T) {
 		t.Fatalf("Failed to create registry: %v", err)
 	}
 
-	// Empty fetcher map - missing-feed will get fallback fetcher
+	// Empty fetcher map - missing-feed has no fetcher
 	app := New(
 		WithRepository(repo),
 		WithRegistry(registry),
@@ -533,13 +534,24 @@ func TestRunIngestWithMissingFetcherInMap(t *testing.T) {
 	)
 	result := app.RunIngest(context.Background())
 
-	// Should NOT have errors since fallback fetcher is used
-	if len(result.Errors) != 0 {
-		t.Errorf("Expected no errors (fallback fetcher used), got %v", result.Errors)
+	// Should have error for missing fetcher
+	if len(result.Errors) == 0 {
+		t.Errorf("Expected error for missing fetcher, got none")
 	}
-	// Fallback fetcher returns empty entries
+	expectedErr := "no fetcher configured for source missing-feed"
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e.Error(), expectedErr) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected error containing '%s', got %v", expectedErr, result.Errors)
+	}
+	// No entries since no fetcher
 	if result.EntriesFetched != 0 {
-		t.Errorf("Expected 0 entries with fallback fetcher, got %d", result.EntriesFetched)
+		t.Errorf("Expected 0 entries with no fetcher, got %d", result.EntriesFetched)
 	}
 	if result.StoriesCreated != 0 {
 		t.Errorf("Expected 0 stories created, got %d", result.StoriesCreated)
@@ -717,20 +729,6 @@ func TestRunScoringWithClustererError(t *testing.T) {
 	}
 }
 
-func TestWithFetcherResolver(t *testing.T) {
-	resolver := func(sourceID string) domain.FeedFetcher {
-		return nil
-	}
-
-	app := New(WithFetcherResolver(resolver))
-
-	// Verify that the option was applied (no panic, and app is created)
-	if app == nil {
-		t.Fatal("Expected non-nil Application")
-	}
-}
-
-// TestRunPipelineSuccessWithOneSource tests RunPipeline with one successful source.
 func TestRunPipelineSuccessWithOneSource(t *testing.T) {
 	repo := storage.NewMemoryRepository()
 	registry, err := domain.NewFeedRegistry(domain.FeedSource{
