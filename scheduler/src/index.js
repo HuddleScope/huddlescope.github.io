@@ -8,13 +8,19 @@ const REPO_NAME = 'huddlescope.github.io';
 const WORKFLOW_NAME = 'refresh-news.yml';
 const DEFAULT_BRANCH = 'main';
 
+// Configuration
+const REQUEST_TIMEOUT_MS = 10_000; // 10 seconds as per AC3
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 2_000;
+const MAX_RETRY_DELAY_MS = 30_000; // Cap exponential backoff
+
 /**
  * Scheduled entry point — invoked by Cloudflare cron triggers
- * @param {Object} env - Cloudflare environment bindings
+ * @param {Object} controller - Cloudflare ScheduledEvent controller (first arg for module workers)
+ * @param {Object} env - Cloudflare environment bindings (GITHUB_TOKEN is here)
  * @param {Object} ctx - Cloudflare execution context
- * @param {string} env.GITHUB_TOKEN - Fine-grained GitHub token with Actions:write
  */
-export async function scheduled(env, ctx) {
+export async function scheduled(controller, env, ctx) {
   const startTime = Date.now();
   const logCtx = { event: 'scheduled_dispatch', repo: `${REPO_OWNER}/${REPO_NAME}`, workflow: WORKFLOW_NAME };
 
@@ -24,7 +30,7 @@ export async function scheduled(env, ctx) {
       const err = new Error('GITHUB_TOKEN secret is missing or empty');
       err.name = 'SecretError';
       console.error(JSON.stringify({ ...logCtx, level: 'error', error: err.message }));
-      throw err;
+      throw err; // Re-throw so cron is marked as FAILED
     }
 
     // Dispatch the workflow
@@ -34,7 +40,7 @@ export async function scheduled(env, ctx) {
     console.log(JSON.stringify({
       ...logCtx,
       level: 'info',
-      status: 'dispatched',
+      status: 'accepted', // 204 means accepted/queued, not completed
       durationMs: elapsed,
       dispatchResult
     }));
@@ -60,7 +66,8 @@ export async function scheduled(env, ctx) {
       // Re-throw to signal failure to Cloudflare (so triggers/logs show failure)
       throw err;
     }
-    // Non-retryable errors (e.g., auth) do not need to block other triggers
+    // Non-retryable errors (e.g., auth) must also throw so cron is marked FAILED
+    throw err;
   }
 }
 
@@ -68,8 +75,9 @@ export async function scheduled(env, ctx) {
  * HTTP entry point — optional health probe (curl -H "Authorization: Bearer <token>")
  * @param {Request} request
  * @param {Object} env
+ * @param {Object} ctx
  */
-export async function fetch(request, env) {
+export async function fetch(request, env, ctx) {
   // Only allow GET at /ping
   if (request.method !== 'GET' || !request.url.endsWith('/ping')) {
     return new Response('Not Found', { status: 404 });
@@ -92,18 +100,22 @@ export async function fetch(request, env) {
  * Dispatch the refresh-news workflow on the default branch
  * Implements explicit status checks, timeout, bounded retries, and structured logging
  * @param {string} token - GitHub token with_actions:write
+ * @param {Object} opts - Options for testing (injectable sleep)
+ * @param {function(number):Promise<void>} opts.sleep - Custom sleep for tests
  * @returns {Promise<Object>} Dispatch result metadata
  */
-async function dispatchWorkflow(token) {
+export async function dispatchWorkflow(token, opts = {}) {
   const url = `${GITHUB_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${encodeURIComponent(WORKFLOW_NAME)}/dispatches`;
-  const body = JSON.stringify({ ref: DEFAULT_BRANCH });
+  // Explicit body with inputs.publish as per issue scope
+  const body = JSON.stringify({
+    ref: DEFAULT_BRANCH,
+    inputs: { publish: 'true' }
+  });
 
-  // Configuration
-  const REQUEST_TIMEOUT_MS = 10_000; // 10 seconds as per AC3
-  const MAX_RETRIES = 3;
-  const BASE_RETRY_DELAY_MS = 2_000;
+  const { sleep: customSleep = sleep } = opts;
+  const MAX_RETRIES_LOCAL = 3;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= MAX_RETRIES_LOCAL; attempt++) {
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), REQUEST_TIMEOUT_MS);
 
@@ -140,12 +152,13 @@ async function dispatchWorkflow(token) {
         throw new Error(`GitHub API ${response.status} (unprocessable): ${bodyText}`);
       } else if (response.status === 429) {
         // Retryable: rate limited
-        const retryAfter = getRetryAfterSeconds(response);
-        throw new RetryableError(`GitHub API ${response.status} (rate-limited, retryAfter=${retryAfter}s)`, retryAfter);
+        const retryAfterSec = getRetryAfterSeconds(response);
+        const delayMs = Math.min(retryAfterSec * 1000, MAX_RETRY_DELAY_MS); // ensure seconds→ms
+        throw new RetryableError(`GitHub API ${response.status} (rate-limited, retryAfter=${retryAfterSec}s)`, delayMs);
       } else if (response.status >= 500) {
         // Retryable: server error
-        const bodyText = await safeReadResponse(response);
-        throw new RetryableError(`GitHub API ${response.status} (server error): ${bodyText}`);
+        const delayMs = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1), MAX_RETRY_DELAY_MS);
+        throw new RetryableError(`GitHub API ${response.status} (server error)`, delayMs);
       } else if (response.status >= 400) {
         // Other 4xx: treat as fatal
         const bodyText = await safeReadResponse(response);
@@ -159,22 +172,23 @@ async function dispatchWorkflow(token) {
       clearTimeout(timeoutId);
 
       if (err.name === 'AbortError') {
-        if (attempt < MAX_RETRIES) {
-          console.warn(JSON.stringify({ event: 'timeout', attempt, max: MAX_RETRIES }));
-          await sleepWithBackoff(attempt, BASE_RETRY_DELAY_MS);
+        if (attempt < MAX_RETRIES_LOCAL) {
+          console.warn(JSON.stringify({ event: 'timeout', attempt, max: MAX_RETRIES_LOCAL }));
+          const delayMs = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, attempt - 1), MAX_RETRY_DELAY_MS);
+          await customSleep(delayMs);
           continue;
         }
         throw new RetryableError('Request timeout', 0);
       }
 
-      if (err instanceof RetryableError && attempt < MAX_RETRIES) {
-        console.warn(JSON.stringify({ event: 'retryable_error', attempt, max: MAX_RETRIES, message: err.message, delayMs: err.retryDelayMs }));
-        await sleep(err.retryDelayMs);
+      if (err instanceof RetryableError && attempt < MAX_RETRIES_LOCAL) {
+        console.warn(JSON.stringify({ event: 'retryable_error', attempt, max: MAX_RETRIES_LOCAL, message: err.message, delayMs: err.retryDelayMs }));
+        await customSleep(err.retryDelayMs);
         continue;
       }
 
       if (err instanceof RetryableError) {
-        console.error(JSON.stringify({ event: 'retry_exhausted', attempt, max: MAX_RETRIES, message: err.message }));
+        console.error(JSON.stringify({ event: 'retry_exhausted', attempt, max: MAX_RETRIES_LOCAL, message: err.message }));
         throw err;
       }
 
@@ -191,7 +205,7 @@ async function dispatchWorkflow(token) {
  * @param {string} message
  * @param {number} retryDelayMs
  */
-class RetryableError extends Error {
+export class RetryableError extends Error {
   constructor(message, retryDelayMs) {
     super(message);
     this.name = 'RetryableError';
@@ -204,7 +218,7 @@ class RetryableError extends Error {
  * @param {Error} err
  * @returns {boolean}
  */
-function isRetryableError(err) {
+export function isRetryableError(err) {
   if (err.name === 'AbortError') return true;
   if (err instanceof RetryableError) return true;
   // Network errors often have 'TypeError: Failed to fetch' or 'FetchError'
@@ -219,7 +233,7 @@ function isRetryableError(err) {
  * @param {Response} response
  * @returns {Promise<string>}
  */
-async function safeReadResponse(response) {
+export async function safeReadResponse(response) {
   try {
     const text = await response.text();
     return text || '<empty body>';
@@ -233,7 +247,7 @@ async function safeReadResponse(response) {
  * @param {Response} response
  * @returns {number}
  */
-function getRetryAfterSeconds(response) {
+export function getRetryAfterSeconds(response) {
   const header = response.headers.get('Retry-After');
   if (!header) return 0;
   const seconds = parseInt(header, 10);
@@ -241,23 +255,23 @@ function getRetryAfterSeconds(response) {
 }
 
 /**
- * Utility: sleep with exponential backoff
+ * Utility: sleep with exponential backoff (seconds→ms conversion at call sites)
+ * @param {number} ms
+ */
+export async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Utility: sleep with exponential backoff (wrapper for tests; seconds→ms inside)
  * @param {number} attempt
  * @param {number} baseMs
  * @returns {Promise<void>}
  */
-async function sleepWithBackoff(attempt, baseMs) {
-  const delay = baseMs * Math.pow(2, attempt - 1); // exponential: 2s, 4s, 8s...
+export async function sleepWithBackoff(attempt, baseMs) {
+  const delay = Math.min(baseMs * Math.pow(2, attempt - 1), MAX_RETRY_DELAY_MS);
   await sleep(delay);
 }
 
-/**
- * Utility: sleep (used for Retry-After or capped backoff)
- * @param {number} ms
- */
-async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Export functions for testing
-export { dispatchWorkflow, RetryableError, getRetryAfterSeconds, isRetryableError, sleep, sleepWithBackoff, safeReadResponse };
+// Default export for Cloudflare Workers runtime entry
+export default { scheduled, fetch };
