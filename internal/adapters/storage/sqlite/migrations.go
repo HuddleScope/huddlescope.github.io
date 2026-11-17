@@ -31,9 +31,15 @@ func Migrate(dbPath string) ([]int, error) {
 	}
 	defer func() { _ = db.Close() }()
 
+	return MigrateDB(db)
+}
+
+// MigrateDB applies forward-only migrations to an open database handle.
+// This is useful when you already have a connection (e.g., Turso via libsql).
+// The caller is responsible for closing the database.
+func MigrateDB(db *sql.DB) ([]int, error) {
 	// Enable foreign keys per connection
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close() // best-effort close on error
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
