@@ -721,3 +721,52 @@ func TestHTTPFetcher_CancellationAbortsInFlightFetch(t *testing.T) {
 		t.Errorf("Expected context.Canceled or context.DeadlineExceeded, got: %v", err)
 	}
 }
+
+// TestHTTPFetcher_EmptyDescriptionAndContent (#122): an RSS item with neither
+// <description> nor content must ingest without error. The summary stays empty
+// at the adapter level; the deterministic title fallback is applied by
+// Story.Canonicalize downstream.
+func TestHTTPFetcher_EmptyDescriptionAndContent(t *testing.T) {
+	feed := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Test Feed</title>
+  <link>https://example.com</link>
+  <item>
+    <title>young players factor in vikings win at packers</title>
+    <link>https://www.vikings.com/news/young-players-factor-packers-win</link>
+    <guid>https://www.vikings.com/news/young-players-factor-packers-win</guid>
+    <pubDate>Mon, 16 Nov 2026 22:18:58 GMT</pubDate>
+  </item>
+</channel></rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.Write([]byte(feed)) //nolint:errcheck
+	}))
+	defer server.Close()
+
+	fetcher := NewHTTPFetcher(domain.FeedSource{ID: "official-min", URL: server.URL})
+
+	entries, err := fetcher.Fetch(context.Background(), "official-min")
+	if err != nil {
+		t.Fatalf("Fetch() must not fail for a description-less item: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("Expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Title != "young players factor in vikings win at packers" {
+		t.Errorf("Title = %q; want the item title", entries[0].Title)
+	}
+	if entries[0].Summary != "" {
+		t.Errorf("Summary = %q; want empty (fallback applied by Canonicalize)", entries[0].Summary)
+	}
+
+	// Canonicalize applies the deterministic title fallback
+	story := domain.Story{}.Canonicalize(entries[0])
+	if story.Summary == "" {
+		t.Error("Canonicalize should derive a non-empty summary from the title")
+	}
+	if story.Summary != domain.SanitizeHTML(entries[0].Title, 1024) {
+		t.Errorf("Canonicalize summary = %q; want sanitized title", story.Summary)
+	}
+}

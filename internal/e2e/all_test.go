@@ -1044,9 +1044,8 @@ func TestConcurrentSnapshot(t *testing.T) {
 
 	content, err := os.ReadFile(dataPath)
 	if err != nil {
-		t.Fatalf("failed to read snapshot: %v", err)
+		t.Fatalf("failed to read homepage.json: %v", err)
 	}
-
 	var snap domain.Snapshot
 	if err := json.Unmarshal(content, &snap); err != nil {
 		t.Fatalf("failed to unmarshal snapshot: %v", err)
@@ -1063,5 +1062,107 @@ func TestConcurrentSnapshot(t *testing.T) {
 	}
 	if snap.Teams == nil {
 		t.Errorf("teams should not be nil")
+	}
+}
+
+// TestDescriptionlessItemPipeline (#122): an RSS item with neither description
+// nor content must survive the full ingest -> snapshot -> publish pipeline with
+// a deterministic title-derived summary, and the exported snapshot must
+// validate and be written to the Hugo data directory.
+func TestDescriptionlessItemPipeline(t *testing.T) {
+	feed := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Vikings News</title>
+    <link>https://www.vikings.com/news/</link>
+    <item>
+      <title>young players factor in vikings win at packers; dallas turner's instant pressure</title>
+      <link>https://www.vikings.com/news/young-players-factor-packers-win-dallas-turner-week-10</link>
+      <guid isPermaLink="true">https://www.vikings.com/news/young-players-factor-packers-win-dallas-turner-week-10</guid>
+      <pubDate>Mon, 16 Nov 2026 22:18:58 GMT</pubDate>
+    </item>
+  </channel>
+</rss>`
+
+	feeds := []FixtureFeed{
+		{SourceID: "official-min", Version: "v1", Content: feed, MimeType: "application/rss+xml", IsEnabled: true},
+	}
+	loader := NewFixtureLoader(feeds...)
+	server := NewFixtureServer(feeds...)
+	ts := httptest.NewServer(server.Handler())
+	defer ts.Close()
+
+	registry := buildRegistry(ts, loader, true)
+	rateLimiter := rss.NewHostRateLimiter(1 * time.Second)
+	etagCache := rss.NewETagCache()
+	fetchers := buildFetchers(registry, rateLimiter, etagCache)
+	repo := storage.NewMemoryRepository()
+
+	app := NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		Build()
+
+	now := time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC)
+	result := app.RunPipeline(context.Background(), now)
+	if result.Status.IsCritical() {
+		t.Fatalf("pipeline failed: %v", result.Status)
+	}
+
+	// A description-less entry must be ingested with the title-derived summary
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("repo.List failed: %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("expected 1 ingested story, got %d", len(stories))
+	}
+	if strings.TrimSpace(stories[0].Summary) == "" {
+		t.Fatal("ingested description-less story must have a non-empty fallback summary")
+	}
+
+	tmpDir, cleanup := TempWebDir(t)
+	defer cleanup()
+	snapshotPub := hugo.NewDataPublisher(tmpDir+"/data", "homepage.json")
+	app = NewAppBuilder().
+		WithRepository(repo).
+		WithRegistry(registry).
+		WithFetcherMap(fetchers).
+		WithSnapshotPublisher(snapshotPub).
+		WithTeamRegistry(domain.NewTeamRegistryFromSlice(domain.GetTestTeams())).
+		Build()
+
+	snapResult := app.RunSnapshot(context.Background(), now)
+	if len(snapResult.Errors) > 0 {
+		t.Fatalf("RunSnapshot must not fail for a description-less item: %v", snapResult.Errors)
+	}
+	if len(snapResult.PubResult.Errors) > 0 {
+		t.Fatalf("publish must not fail: %v", snapResult.PubResult.Errors)
+	}
+	if !snapResult.PubResult.Committed {
+		t.Fatal("snapshot was not committed")
+	}
+
+	dataPath := filepath.Join(tmpDir, "data", "homepage.json")
+	content, err := os.ReadFile(dataPath)
+	if err != nil {
+		t.Fatalf("homepage.json was not written: %v", err)
+	}
+	var snap domain.Snapshot
+	if err := json.Unmarshal(content, &snap); err != nil {
+		t.Fatalf("failed to unmarshal homepage.json: %v", err)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("published snapshot must validate: %v", err)
+	}
+	if len(snap.Stories) != 1 {
+		t.Fatalf("expected 1 story in published snapshot, got %d", len(snap.Stories))
+	}
+	if snap.Stories[0].Summary == "" {
+		t.Error("published story must have a non-empty summary")
+	}
+	if !strings.Contains(snap.Stories[0].Summary, "young players") {
+		t.Errorf("summary should derive from the title, got %q", snap.Stories[0].Summary)
 	}
 }

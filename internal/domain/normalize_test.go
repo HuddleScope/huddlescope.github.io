@@ -260,3 +260,111 @@ func TestCanonicalizeIdempotent(t *testing.T) {
 		t.Errorf("Canonicalize URL mismatch: %q != %q", story1.URL, CanonicalURLEntry(fe.URL))
 	}
 }
+
+// TestCanonicalizeEmptySummary (#122): a feed item without description and
+// content must canonicalize with a deterministic title-derived summary so it
+// never fails snapshot validation downstream.
+func TestCanonicalizeEmptySummary(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name         string
+		entry        FeedEntry
+		wantSummary  string
+		wantNonEmpty bool
+	}{
+		{
+			"empty summary falls back to sanitized title",
+			FeedEntry{
+				Title:       "  Young players factor in Vikings win at Packers  ",
+				Source:      "official-min",
+				PublishedAt: now,
+				Summary:     "",
+				URL:         "https://www.vikings.com/news/young-players-factor-packers-win",
+			},
+			SanitizeHTML("  Young players factor in Vikings win at Packers  ", 1024),
+			true,
+		},
+		{
+			"whitespace-only summary falls back to title",
+			FeedEntry{
+				Title:       "Headline",
+				Source:      "official-min",
+				PublishedAt: now,
+				Summary:     "   ",
+				URL:         "https://www.vikings.com/news/headline",
+			},
+			"Headline",
+			true,
+		},
+		{
+			"non-empty summary is preserved as before",
+			FeedEntry{
+				Title:       "Headline",
+				Source:      "official-min",
+				PublishedAt: now,
+				Summary:     "<p>Real summary</p>",
+				URL:         "https://www.vikings.com/news/real",
+			},
+			SanitizeHTML("<p>Real summary</p>", 1024),
+			true,
+		},
+		{
+			"empty summary and empty title stays empty (title failure is a separate validation case)",
+			FeedEntry{
+				Title:       "",
+				Source:      "official-min",
+				PublishedAt: now,
+				Summary:     "",
+				URL:         "https://www.vikings.com/news/blank",
+			},
+			"",
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			story := Story{}.Canonicalize(tt.entry)
+
+			if story.Summary != tt.wantSummary {
+				t.Errorf("Summary: got %q, want %q", story.Summary, tt.wantSummary)
+			}
+			gotNonEmpty := strings.TrimSpace(story.Summary) != ""
+			if gotNonEmpty != tt.wantNonEmpty {
+				t.Errorf("Summary non-empty: got %v, want %v", gotNonEmpty, tt.wantNonEmpty)
+			}
+			// Fallback summary must fit the 1024-byte validation bound
+			if len(story.Summary) > 1024 {
+				t.Errorf("Summary exceeds 1024 bytes: %d", len(story.Summary))
+			}
+			// Identity fields must not be affected by the fallback
+			if story.ID != ComputeStoryID(tt.entry.Title, tt.entry.Source, tt.entry.PublishedAt) {
+				t.Errorf("ID changed by summary fallback: %q", story.ID)
+			}
+			if story.DedupeKey != DedupeKey(tt.entry.Source, tt.entry.GUID, tt.entry.URL) {
+				t.Errorf("DedupeKey changed by summary fallback: %q", story.DedupeKey)
+			}
+		})
+	}
+}
+
+// TestCanonicalizeEmptySummaryDeterministic (#122): the same description-less
+// entry must always canonicalize to the same summary.
+func TestCanonicalizeEmptySummaryDeterministic(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	entry := FeedEntry{
+		Title:       "Deterministic Headline",
+		Source:      "official-min",
+		PublishedAt: now,
+		Summary:     "",
+		URL:         "https://www.vikings.com/news/deterministic",
+	}
+
+	first := Story{}.Canonicalize(entry).Summary
+	for i := 0; i < 10; i++ {
+		if got := (Story{}).Canonicalize(entry).Summary; got != first {
+			t.Fatalf("summary not deterministic on pass %d: %q != %q", i, got, first)
+		}
+	}
+}
