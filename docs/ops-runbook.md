@@ -219,6 +219,8 @@ make check
 
 ## Cloudflare cron and GitHub Pages configuration
 
+See `docs/worker-deployment.md` for step-by-step first-time deployment (Cloudflare account, token creation, `wrangler login`, verification).
+
 ### Cloudflare Worker cron
 - Worker name: `huddlescope-dispatcher`
 - Cron schedule: `7,37 * * * *` UTC (every 30 minutes)
