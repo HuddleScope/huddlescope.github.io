@@ -28,6 +28,8 @@ This runbook walks you through provisioning the Cloudflare Worker (`huddlescope-
 
 > **Security note**: Never commit the token to Git, store it in workflow YAML files, or add it to `.env.example`. The worker stores it as a Cloudflare secret.
 
+> **Cloudflare secret vs GitHub Actions secrets**: The `GITHUB_TOKEN` you set here is stored ONLY in Cloudflare secret storage. GitHub Actions workflows in this repository (for example, `refresh-news.yml`) read their own repository secrets; in this repo the refresh-news workflow uses `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for the Turso database—a completely separate store. Do NOT add the GitHub PAT to GitHub repository secrets or embed it in workflow YAML. The worker is the only consumer of this token.
+
 ## Authentication and deployment
 
 1. Clone the repository and enter the scheduler directory:
