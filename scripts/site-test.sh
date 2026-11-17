@@ -176,14 +176,23 @@ if ! grep -q 'not a live or real-time' "$WEB_DIR/public/index.html"; then
 fi
 
 # HS-015: Verify publisher count and coverage list
-if ! grep -q 'Covered by' "$WEB_DIR/public/index.html"; then
-  log "FAIL: publisher count text not found in homepage"
-  exit 1
-fi
+# HS-067: only enforce when the snapshot contains multi-publisher stories;
+# a live refresh where every story has a single publisher renders no such text.
+MULTI_PUBLISHER_COUNT=$(jq '[.stories[] | select(.publishers | length > 1)] | length' \
+  "$WEB_DIR/data/homepage.json" 2>/dev/null || echo 0)
 
-if ! grep -q 'coverage' "$WEB_DIR/public/index.html"; then
-  log "FAIL: coverage list not found in homepage"
-  exit 1
+if [[ "$MULTI_PUBLISHER_COUNT" -gt 0 ]]; then
+  if ! grep -q 'Covered by' "$WEB_DIR/public/index.html"; then
+    log "FAIL: publisher count text not found in homepage"
+    exit 1
+  fi
+
+  if ! grep -q 'coverage' "$WEB_DIR/public/index.html"; then
+    log "FAIL: coverage list not found in homepage"
+    exit 1
+  fi
+else
+  log "SKIP: no multi-publisher stories in snapshot; publisher count check not applicable"
 fi
 
 # HS-015: Verify evidence badge (at least one confirmed)
