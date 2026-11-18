@@ -1,34 +1,31 @@
-<!-- HuddleScope homepage partial — render one story card from homepage data
-     HS-015: Generate homepage with grouped stories and source attribution -->
-
 {{- $story := .story }}
 {{- $publishers := $story.publishers }}
 {{- $primary := index $publishers 0 }}
+{{- $elCSS := $story.evidenceLevelCSS }}
+{{- if not $elCSS }}
+  {{- $elCSS = "unknown" }}
+  {{- if eq $story.evidenceLevel "confirmed" }}
+    {{- $elCSS = "confirmed" }}
+  {{- else if eq $story.evidenceLevel "unverified" }}
+    {{- $elCSS = "unverified" }}
+  {{- end }}
+{{- end }}
 <article class="story-card{{ if .featured }} story-card-featured{{ end }}">
-  <header class="story-header">
-    <h{{ if .featured }}1{{ else }}2{{ end }} class="story-title{{ if .featured }} story-title-featured{{ end }}">
-      <a href="{{ $primary.url }}" rel="noopener nofollow" aria-label="{{ $story.title }} — read original article">{{ $story.title }}</a>
-    </h{{ if .featured }}1{{ else }}2{{ end }}>
-    {{- $elCSS := $story.evidenceLevelCSS }}
-    {{- if not $elCSS }}
-      {{- $elCSS = "unknown" }}
-      {{- if eq $story.evidenceLevel "confirmed" }}
-        {{- $elCSS = "confirmed" }}
-      {{- else if eq $story.evidenceLevel "unverified" }}
-        {{- $elCSS = "unverified" }}
-      {{- end }}
+  <div class="story-overline">
+    <span class="story-overline-label">{{ if .featured }}Featured coverage{{ else }}Across the NFL{{ end }}</span>
+    {{- if eq $elCSS "unverified" }}
+      <span class="story-evidence story-evidence-unverified" aria-label="Evidence: unverified">Unverified</span>
+    {{- else if eq $elCSS "confirmed" }}
+      <span class="story-evidence story-evidence-confirmed" aria-label="Evidence: confirmed">Confirmed</span>
     {{- end }}
-    {{- if $elCSS }}
-      <span class="story-evidence story-evidence-{{ $elCSS }}" role="img" aria-label="Evidence: {{ $elCSS }}">
-        {{ if eq $elCSS "unverified" }}⚠️{{ end }}
-        {{ if eq $elCSS "confirmed" }}✅{{ end }}
-        {{ if eq $elCSS "unknown" }}ℹ️{{ end }}
-        {{ if eq $elCSS "unverified" }}unverified{{ end }}
-        {{ if eq $elCSS "confirmed" }}confirmed{{ end }}
-        {{ if eq $elCSS "unknown" }}unknown{{ end }}
-      </span>
-    {{ end }}
+  </div>
+  <header class="story-header">
+    <h3 class="story-title{{ if .featured }} story-title-featured{{ end }}">
+      <a href="{{ $primary.url }}" rel="noopener nofollow" aria-label="{{ $story.title }} — read original article">{{ $story.title }}</a>
+    </h3>
   </header>
+
+  {{ with $story.summary }}<p class="story-summary">{{ . }}</p>{{ end }}
 
   <div class="story-source">
     {{- $len := len $publishers }}
@@ -42,29 +39,18 @@
         {{- end }}
       </ul>
     {{- else if eq $len 1 }}
-      <span class="story-source-single">Source: <a href="{{ $primary.url }}" rel="noopener nofollow">{{ $primary.name }}</a></span>
+      <span class="story-source-single">From <a href="{{ $primary.url }}" rel="noopener nofollow">{{ $primary.name | replaceRE "-" " " | humanize }}</a></span>
     {{- end }}
   </div>
 
   <div class="story-meta">
+    <time class="story-date" datetime="{{ $story.lastPublishedAt }}">{{ time.Format "Jan 2, 2006 · 15:04 UTC" $story.lastPublishedAt }}</time>
     {{- if $story.score }}
-      <span class="story-score" title="HuddleScope score (0–100)">{{ printf "%.1f" $story.score }}</span>
+      <span class="story-score" title="HuddleScope relevance score (0–100)" aria-label="Relevance score {{ printf "%.1f" $story.score }}">{{ printf "%.1f" $story.score }}</span>
     {{- end }}
-    <time class="story-date" datetime='{{ $story.lastPublishedAt }}'>
-      {{- $date := $story.lastPublishedAt }}
-      {{- $date := replace $date "T" " " }}
-      {{- $date := replace $date "Z" "" }}
-      {{- print $date }}
-    </time>
-  </div>
-
-  <div class="story-summary">
-    {{- $story.summary }}
   </div>
 
   {{- if eq $elCSS "unverified" }}
-    <div class="story-disclaimer">
-      Rumor/speculation: This story contains unverified claims. Information should be treated with caution.
-    </div>
+    <p class="story-disclaimer">Rumor/speculation: This story contains unverified claims. Information should be treated with caution.</p>
   {{- end }}
 </article>

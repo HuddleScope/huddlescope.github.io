@@ -336,6 +336,29 @@ fi
 
 log "PASS: HS-015 homepage assertions (featured is top-scored)"
 
+# Editorial layout regression checks: keep the homepage readable and semantic.
+if ! grep -q '<main id="main-content" class="container"' "$WEB_DIR/public/index.html"; then
+  log "FAIL: main content must use the centered reading container"
+  exit 1
+fi
+
+if [[ "$(grep -o '<h1\b' "$WEB_DIR/public/index.html" | wc -l | tr -d ' ')" != "1" ]]; then
+  log "FAIL: homepage should have one primary H1 heading"
+  exit 1
+fi
+
+if ! grep -q 'class="home-news-layout"' "$WEB_DIR/public/index.html"; then
+  log "FAIL: editorial homepage layout not rendered"
+  exit 1
+fi
+
+if grep -q 'story-evidence-unknown' "$WEB_DIR/public/index.html"; then
+  log "FAIL: unknown evidence badge creates noise in the news feed"
+  exit 1
+fi
+
+log "PASS: editorial homepage layout regressions"
+
 # =============================================================================
 # HS-023: Launch verification — accessibility, SEO, sitemap, cache, data
 # =============================================================================
