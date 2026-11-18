@@ -234,14 +234,17 @@ See `docs/worker-deployment.md` for step-by-step first-time deployment (Cloudfla
 - Parameters:
   - `publish` (boolean, default true): Deploy to Pages after successful build
 - Jobs:
-  - `build`: checkout → setup Go → build → ingest → export → data guard → install Hugo → build site → upload artifacts
+  - `build`: checkout → setup Go → build → ingest → export → commit heartbeat → publish decision → commit homepage (gated) → commit feed health → install Hugo → site verification → build site → demo-marker gate → upload artifacts → Pages upload (gated)
   - `deploy`: configure Pages → upload artifact → deploy (only if `publish=true`)
 - Permissions: least privilege; deploy job requires `pages: write` and `id-token: write`
 
-### Data guard step
-Before deploying, the workflow checks story count in `web/data/homepage.json`:
-- If less than 1 story, the workflow restores `homepage.json` from the last-known-good committed version
-- This prevents publishing an empty site
+### Publish decision step (HS-056)
+After export, the workflow compares the freshly exported story count with the previously committed snapshot (`git show HEAD:`):
+- ≥ 1 stories → commit the snapshot and deploy to Pages
+- Zero stories, but the committed snapshot previously had ≥ 1 story → skip the homepage commit and the Pages deploy; the last successfully deployed (real) content is retained
+- Zero stories, and no prior real snapshot (never a successful export) → deploy the clearly-labelled "No stories published yet" empty state with a truthful `generatedAt`
+- A failed ingest or export fails the build job, so the deploy job is skipped and the last-good Pages deployment is preserved
+The build also greps `web/public/` for sample-data markers (`example.com`, `seed-run-`, demo story IDs) and hard-fails before any Pages upload, so sample content can never be presented as current NFL news (the old "data guard" restore of a committed demo file was removed).
 
 ### Pages configuration
 - Environment: `github-pages`

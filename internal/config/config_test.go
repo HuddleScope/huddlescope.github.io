@@ -53,6 +53,115 @@ func TestLoadEmptyConfigFile(t *testing.T) {
 	}
 }
 
+func TestLoadPathVarsDefaults(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(\"\") error = %v; want nil", err)
+	}
+	if cfg.HeartbeatFile != defaultHeartbeatFile {
+		t.Errorf("HeartbeatFile = %q; want default %q", cfg.HeartbeatFile, defaultHeartbeatFile)
+	}
+	if cfg.FeedsFile != defaultFeedsFile {
+		t.Errorf("FeedsFile = %q; want default %q", cfg.FeedsFile, defaultFeedsFile)
+	}
+	if cfg.DataDir != defaultDataDir {
+		t.Errorf("DataDir = %q; want default %q", cfg.DataDir, defaultDataDir)
+	}
+	if cfg.DataFile != defaultDataFile {
+		t.Errorf("DataFile = %q; want default %q", cfg.DataFile, defaultDataFile)
+	}
+}
+
+func TestLoadPathVarsFromEnv(t *testing.T) {
+	t.Setenv("HSC_HEARTBEAT_FILE", "tmp/heartbeat.json")
+	t.Setenv("HSC_FEEDS_FILE", "tmp/feeds.json")
+	t.Setenv("HSC_DATA_DIR", "tmp/data")
+	t.Setenv("HSC_DATA_FILE", "snap.json")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(\"\") error = %v; want nil", err)
+	}
+	if cfg.HeartbeatFile != "tmp/heartbeat.json" {
+		t.Errorf("HeartbeatFile = %q; want env override %q", cfg.HeartbeatFile, "tmp/heartbeat.json")
+	}
+	if cfg.FeedsFile != "tmp/feeds.json" {
+		t.Errorf("FeedsFile = %q; want env override %q", cfg.FeedsFile, "tmp/feeds.json")
+	}
+	if cfg.DataDir != "tmp/data" {
+		t.Errorf("DataDir = %q; want env override %q", cfg.DataDir, "tmp/data")
+	}
+	if cfg.DataFile != "snap.json" {
+		t.Errorf("DataFile = %q; want env override %q", cfg.DataFile, "snap.json")
+	}
+}
+
+func TestLoadPathVarsFromEnvFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+
+	content := `HSC_HEARTBEAT_FILE=file/heartbeat.json
+HSC_FEEDS_FILE=file/feeds.json
+HSC_DATA_DIR=file/data
+HSC_DATA_FILE=file-homepage.json
+`
+	if err := os.WriteFile(envFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(envFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HeartbeatFile != "file/heartbeat.json" {
+		t.Errorf("HeartbeatFile = %q; want file value %q", cfg.HeartbeatFile, "file/heartbeat.json")
+	}
+	if cfg.FeedsFile != "file/feeds.json" {
+		t.Errorf("FeedsFile = %q; want file value %q", cfg.FeedsFile, "file/feeds.json")
+	}
+	if cfg.DataDir != "file/data" {
+		t.Errorf("DataDir = %q; want file value %q", cfg.DataDir, "file/data")
+	}
+	if cfg.DataFile != "file-homepage.json" {
+		t.Errorf("DataFile = %q; want file value %q", cfg.DataFile, "file-homepage.json")
+	}
+}
+
+func TestLoadPathVarsEnvBeatsFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	envFile := filepath.Join(tmpDir, ".env")
+
+	content := `HSC_HEARTBEAT_FILE=file/heartbeat.json
+HSC_FEEDS_FILE=file/feeds.json
+HSC_DATA_DIR=file/data
+HSC_DATA_FILE=file-homepage.json
+`
+	if err := os.WriteFile(envFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Env vars must override the config file values
+	t.Setenv("HSC_HEARTBEAT_FILE", "env/heartbeat.json")
+	t.Setenv("HSC_DATA_DIR", "env/data")
+
+	cfg, err := Load(envFile)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HeartbeatFile != "env/heartbeat.json" {
+		t.Errorf("HeartbeatFile = %q; want env override %q", cfg.HeartbeatFile, "env/heartbeat.json")
+	}
+	if cfg.FeedsFile != "file/feeds.json" {
+		t.Errorf("FeedsFile = %q; want file value (not set in env) %q", cfg.FeedsFile, "file/feeds.json")
+	}
+	if cfg.DataDir != "env/data" {
+		t.Errorf("DataDir = %q; want env override %q", cfg.DataDir, "env/data")
+	}
+	if cfg.DataFile != "file-homepage.json" {
+		t.Errorf("DataFile = %q; want file value (not set in env) %q", cfg.DataFile, "file-homepage.json")
+	}
+}
+
 func TestLoadExplicitMissingFile(t *testing.T) {
 	// Explicit non-existent file should return error
 	_, err := Load("/nonexistent/.env")
@@ -394,10 +503,14 @@ func TestValidate(t *testing.T) {
 		valid    bool
 		errMatch string
 	}{
-		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json"}, true, ""},
-		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json"}, true, ""},
+		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json"}, true, ""},
+		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json"}, true, ""},
 		{"invalid-log-level", Config{LogLevel: "invalid"}, false, "invalid log level"},
 		{"empty-user-agent", Config{UserAgent: ""}, false, "UserAgent"},
+		{"empty-heartbeat-file", Config{HeartbeatFile: ""}, false, "HeartbeatFile"},
+		{"empty-feeds-file", Config{FeedsFile: ""}, false, "FeedsFile"},
+		{"empty-data-dir", Config{DataDir: ""}, false, "DataDir"},
+		{"empty-data-file", Config{DataFile: ""}, false, "DataFile"},
 		{"long-user-agent", Config{UserAgent: strings.Repeat("a", 513)}, false, "UserAgent too long"},
 		{"invalid-timeout-zero", Config{RequestTimeout: 0}, false, "RequestTimeout"},
 		{"invalid-timeout-negative", Config{RequestTimeout: -1 * time.Second}, false, "RequestTimeout"},
@@ -459,6 +572,9 @@ func TestMarshalJSON(t *testing.T) {
 	cfg := Config{
 		TursoAuthToken: "secret-token-123",
 		LogLevel:       "info",
+		FeedsFile:      "web/data/feeds.json",
+		DataDir:        "web/data",
+		DataFile:       "homepage.json",
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -479,6 +595,17 @@ func TestMarshalJSON(t *testing.T) {
 	// Other fields should be present
 	if result["LogLevel"] != "info" {
 		t.Errorf("json.Marshal() LogLevel = %v; want %q", result["LogLevel"], "info")
+	}
+
+	// Non-secret path fields should be exposed
+	if result["FeedsFile"] != "web/data/feeds.json" {
+		t.Errorf("json.Marshal() FeedsFile = %v; want %q", result["FeedsFile"], "web/data/feeds.json")
+	}
+	if result["DataDir"] != "web/data" {
+		t.Errorf("json.Marshal() DataDir = %v; want %q", result["DataDir"], "web/data")
+	}
+	if result["DataFile"] != "homepage.json" {
+		t.Errorf("json.Marshal() DataFile = %v; want %q", result["DataFile"], "homepage.json")
 	}
 }
 

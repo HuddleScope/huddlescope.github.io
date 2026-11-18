@@ -64,10 +64,11 @@ A heartbeat is considered stale when:
 - External monitoring (curl, webhooks)
 - Humans via `gh workflow run` + `cat web/data/heartbeat.json`
 
-### Guard/restore behavior
+### Commit behavior (HS-056)
 
-- `refresh-news.yml` data guard step: restores `web/data/homepage.json` AND `web/data/heartbeat.json` if export yields <1 story
-- Commit step: commits whatever state exists (or no-op if unchanged)
+- The legacy "data guard" step (restoring a committed `homepage.json` when an export yielded < 1 story) was removed
+- `refresh-news.yml` instead makes an explicit publish decision (see `web/README-data.md`): a zero-story export is not committed as current, and the Pages deploy is skipped when a prior real snapshot exists
+- Commit step: the heartbeat is always committed (best-effort); it is real refresh-run output, never sample data
 
 ### Error handling
 

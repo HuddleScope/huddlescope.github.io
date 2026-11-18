@@ -1,6 +1,10 @@
 #!/bin/bash
 # scripts/site-test.sh — HS-014: Bootstrap Hugo and responsive site design
 # Verify: success, failure, idempotency of site build
+#
+# HS-056: the build-under-test runs against the committed sample data in
+# web/fixtures (overlayed onto web/data + web/content/stories with an exact
+# backup/restore, so the repository tree returns to its prior state).
 
 set -euo pipefail
 
@@ -8,10 +12,85 @@ cd "$(dirname "$0")/.."
 
 WEB_DIR="web"
 BUILD_DIR="web/public"
-TEST_FIXTURES_DIR="web/fixtures"
+DATA_DIR="web/data"
+STORIES_DIR="web/content/stories"
+FIXTURES_DIR="web/fixtures"
+TEST_FIXTURES_DIR="web/.site-test-tmp"
 LOG_FILE="web/site-test.log"
 
+# apply_fixture_overlay backs up any pre-existing web/data/*.json and
+# web/content/stories/*.md into the transient test dir, then copies the
+# committed fixtures over them so every assertion below runs against the same
+# deterministic sample data regardless of the state of web/data (e.g. an
+# empty production data dir).
+apply_fixture_overlay() {
+  if ls "$DATA_DIR"/*.json >/dev/null 2>&1; then
+    mkdir -p "$TEST_FIXTURES_DIR/backup/data"
+    for f in "$DATA_DIR"/*.json; do
+      if [ -f "$f" ]; then
+        cp -p "$f" "$TEST_FIXTURES_DIR/backup/data/"
+      fi
+    done
+  fi
+  if ls "$STORIES_DIR"/*.md >/dev/null 2>&1; then
+    mkdir -p "$TEST_FIXTURES_DIR/backup/stories"
+    for f in "$STORIES_DIR"/*.md; do
+      if [ -f "$f" ]; then
+        cp -p "$f" "$TEST_FIXTURES_DIR/backup/stories/"
+      fi
+    done
+  fi
+  cp "$FIXTURES_DIR/homepage.json" "$DATA_DIR/homepage.json"
+  cp "$FIXTURES_DIR/feeds.json" "$DATA_DIR/feeds.json"
+  cp "$FIXTURES_DIR/content/stories/"*.md "$STORIES_DIR/"
+  touch "$TEST_FIXTURES_DIR/overlay-applied"
+  log "Fixture overlay applied: $(ls "$FIXTURES_DIR/content/stories/"*.md | wc -l | tr -d ' ') story pages + homepage/feeds JSON"
+}
+
+# restore_fixture_overlay undoes exactly what apply_fixture_overlay changed:
+# backed-up files are restored, and files the overlay added (absent before
+# the test) are removed.
+restore_fixture_overlay() {
+  local f base
+  # No marker means the overlay never ran: nothing to restore or remove.
+  [ -f "$TEST_FIXTURES_DIR/overlay-applied" ] || return 0
+  if [ -d "$TEST_FIXTURES_DIR/backup/data" ]; then
+    for f in "$TEST_FIXTURES_DIR/backup/data/"*; do
+      if [ -f "$f" ]; then
+        cp -p "$f" "$DATA_DIR/"
+      fi
+    done
+  fi
+  for f in "$DATA_DIR"/*.json; do
+    if [ -f "$f" ]; then
+      base=$(basename "$f")
+      if [ ! -f "$TEST_FIXTURES_DIR/backup/data/$base" ]; then
+        rm -f "$DATA_DIR/$base"
+      fi
+    fi
+  done
+  if [ -d "$TEST_FIXTURES_DIR/backup/stories" ]; then
+    for f in "$TEST_FIXTURES_DIR/backup/stories/"*; do
+      if [ -f "$f" ]; then
+        cp -p "$f" "$STORIES_DIR/"
+      fi
+    done
+  fi
+  for f in "$STORIES_DIR"/*.md; do
+    if [ -f "$f" ]; then
+      base=$(basename "$f")
+      if [ ! -f "$TEST_FIXTURES_DIR/backup/stories/$base" ]; then
+        rm -f "$STORIES_DIR/$base"
+      fi
+    fi
+  done
+}
+
 cleanup() {
+  restore_fixture_overlay || true
+  # The test builds web/public from fixtures; remove the build it produced
+  # so the repository tree (and any later production build) starts clean.
+  rm -rf "$BUILD_DIR" 2>/dev/null || true
   rm -rf "$TEST_FIXTURES_DIR" 2>/dev/null || true
   rm -f "$LOG_FILE" 2>/dev/null || true
 }
@@ -35,11 +114,14 @@ log "Hugo version: $(hugo version)"
 # =============================================================================
 log "TEST: success path"
 
-# Create fixtures dir for testing
+# Create transient test dir
 mkdir -p "$TEST_FIXTURES_DIR"
 
 # Simple fixture: minimal valid content
 echo "# Test story" > "$TEST_FIXTURES_DIR/test-story.md"
+
+# HS-056: build against the committed sample data (deterministic, AC-4)
+apply_fixture_overlay
 
 # Build normally
 # Hugo outputs to 'public/' relative to -s; web/public/ in our case

@@ -87,9 +87,15 @@ site-check-hugo:
 site-test: ## Run site build verification (success/failure/idempotency)
 	@bash scripts/site-test.sh
 
+site-seed: ## Copy committed sample fixtures into web/data + web/content/stories for local development
+	@mkdir -p web/data web/content/stories
+	cp web/fixtures/homepage.json web/fixtures/feeds.json web/data/
+	cp web/fixtures/content/stories/*.md web/content/stories/
+	@echo "Seeded web/data + web/content/stories with fixtures (untracked; rm to remove)"
+
 site-watch: ## Run Hugo in watch mode for local development
 	$(MAKE) site-check-hugo
 	hugo server -s web
 
 # Phony targets
-.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-watch
+.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch

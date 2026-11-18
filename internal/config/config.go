@@ -87,6 +87,10 @@ type Config struct {
 	LookbackWindow time.Duration
 	// New for HS-021: heartbeat file path
 	HeartbeatFile string
+	// New for HS-056: Hugo snapshot file paths
+	FeedsFile string // Path to feed health JSON output (production: web/data/feeds.json)
+	DataDir   string // Hugo data output directory (production: web/data)
+	DataFile  string // Homepage snapshot filename (production: homepage.json)
 }
 
 const (
@@ -100,6 +104,9 @@ const (
 	defaultEnv            = "dev"
 	defaultLookbackWindow = 24 * time.Hour
 	defaultHeartbeatFile  = "web/data/heartbeat.json"
+	defaultFeedsFile      = "web/data/feeds.json"
+	defaultDataDir        = "web/data"
+	defaultDataFile       = "homepage.json"
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -115,6 +122,9 @@ func Load(configFile string) (Config, error) {
 		Env:            defaultEnv,
 		LookbackWindow: defaultLookbackWindow,
 		HeartbeatFile:  defaultHeartbeatFile,
+		FeedsFile:      defaultFeedsFile,
+		DataDir:        defaultDataDir,
+		DataFile:       defaultDataFile,
 	}
 
 	// Override with config file if provided
@@ -182,6 +192,15 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_HEARTBEAT_FILE"); v != "" {
 		c.HeartbeatFile = v
+	}
+	if v := os.Getenv("HSC_FEEDS_FILE"); v != "" {
+		c.FeedsFile = v
+	}
+	if v := os.Getenv("HSC_DATA_DIR"); v != "" {
+		c.DataDir = v
+	}
+	if v := os.Getenv("HSC_DATA_FILE"); v != "" {
+		c.DataFile = v
 	}
 	if v := os.Getenv("HSC_SOURCES_FILE"); v != "" {
 		c.SourcesFile = v
@@ -598,6 +617,14 @@ func loadEnvFile(path string, cfg *Config) error {
 			}
 		case "HSC_ENV":
 			cfg.Env = value
+		case "HSC_HEARTBEAT_FILE":
+			cfg.HeartbeatFile = value
+		case "HSC_FEEDS_FILE":
+			cfg.FeedsFile = value
+		case "HSC_DATA_DIR":
+			cfg.DataDir = value
+		case "HSC_DATA_FILE":
+			cfg.DataFile = value
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -625,6 +652,21 @@ func (c Config) Validate() error {
 	// Validate HeartbeatFile
 	if c.HeartbeatFile == "" {
 		errs = append(errs, errors.New("HeartbeatFile must not be empty"))
+	}
+
+	// Validate FeedsFile
+	if c.FeedsFile == "" {
+		errs = append(errs, errors.New("FeedsFile must not be empty"))
+	}
+
+	// Validate DataDir
+	if c.DataDir == "" {
+		errs = append(errs, errors.New("DataDir must not be empty"))
+	}
+
+	// Validate DataFile
+	if c.DataFile == "" {
+		errs = append(errs, errors.New("DataFile must not be empty"))
 	}
 
 	// Validate LogLevel
@@ -765,6 +807,9 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Sources        []Source `json:"Sources"`
 		Teams          []Team   `json:"Teams"`
 		HeartbeatFile  string   `json:"HeartbeatFile"`
+		FeedsFile      string   `json:"FeedsFile"`
+		DataDir        string   `json:"DataDir"`
+		DataFile       string   `json:"DataFile"`
 	}
 	safe := SafeConfig{
 		ConfigFile:     c.ConfigFile,
@@ -777,6 +822,9 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Sources:        c.Sources,
 		Teams:          c.Teams,
 		HeartbeatFile:  c.HeartbeatFile,
+		FeedsFile:      c.FeedsFile,
+		DataDir:        c.DataDir,
+		DataFile:       c.DataFile,
 	}
 	return json.Marshal(safe)
 }
