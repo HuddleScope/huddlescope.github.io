@@ -12,7 +12,7 @@ TEST_FIXTURES_DIR="web/fixtures"
 LOG_FILE="web/site-test.log"
 
 cleanup() {
-  rm -rf "$BUILD_DIR" "$TEST_FIXTURES_DIR" 2>/dev/null || true
+  rm -rf "$TEST_FIXTURES_DIR" 2>/dev/null || true
   rm -f "$LOG_FILE" 2>/dev/null || true
 }
 trap cleanup EXIT

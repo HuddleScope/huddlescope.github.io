@@ -15,7 +15,10 @@ on:
         type: boolean
 
 # Cancel in-progress runs of this workflow on new dispatches
-# Ensures a fresh run only, avoiding race conditions on artifact upload/deploy
+# Safe-state: build job is cancelled if a new dispatch starts; deploy only runs
+# on a completed build, so no in-progress publish can be corrupted by a
+# subsequent run. The upload-pages-artifact step defaults to fail-if-empty
+# and artifacts have if-no-files-found: ignore only for diagnostics.
 concurrency:
   group: refresh-news-${{ github.ref }}
   cancel-in-progress: true
@@ -112,6 +115,16 @@ jobs:
           chmod +x scripts/site-test.sh
           bash scripts/site-test.sh
 
+      - name: Verify site artifacts exist
+        if: always()
+        run: |
+          if [ ! -d web/public/ ]; then
+            echo "::error::web/public/ directory not found"
+            exit 1
+          fi
+          file_count=$(find web/public/ -type f | wc -l)
+          echo "Verified: web/public/ contains $file_count files"
+
       - name: Upload site artifacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -122,11 +135,11 @@ jobs:
           if-no-files-found: ignore
 
       - name: Configure GitHub Pages
-        if: inputs.publish == 'true'
+        if: inputs.publish
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: inputs.publish == 'true'
+        if: inputs.publish
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
@@ -134,7 +147,7 @@ jobs:
   deploy:
     name: Deploy to Pages
     needs: build
-    if: inputs.publish == 'true'
+    if: inputs.publish
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -143,5 +156,14 @@ jobs:
     environment:
       name: github-pages
     steps:
+      - name: Verify artifact exists
+        run: |
+          if [ ! -d web/public/ ]; then
+            echo "::error::web/public/ not found for deployment"
+            exit 1
+          fi
+          file_count=$(find web/public/ -type f | wc -l)
+          echo "Deploying $file_count files from web/public/"
+
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v5
