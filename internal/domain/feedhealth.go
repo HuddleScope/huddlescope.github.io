@@ -48,6 +48,8 @@ type FeedHealthFeed struct {
 	URL           string        `json:"url"`
 	Category      string        `json:"category,omitempty"`
 	Status        FeedStatus    `json:"status"`
+	// StatusCSS is the string representation for Hugo template use
+	StatusCSS     string        `json:"statusCSS,omitempty"`
 	LastChecked   *time.Time    `json:"last_checked,omitempty"`
 	LastSucceeded *time.Time    `json:"last_succeeded,omitempty"`
 	EntriesTotal  int           `json:"entries_total"`

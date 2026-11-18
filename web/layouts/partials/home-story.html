@@ -9,23 +9,14 @@
     <h{{ if .featured }}1{{ else }}2{{ end }} class="story-title{{ if .featured }} story-title-featured{{ end }}">
       <a href="{{ $primary.url }}" rel="noopener nofollow" aria-label="{{ $story.title }} — read original article">{{ $story.title }}</a>
     </h{{ if .featured }}1{{ else }}2{{ end }}>
-    {{ if $story.evidenceLevel }}
-      {{- $el := $story.evidenceLevel -}}
-      {{- $elStr := "unknown" -}}
-      {{- if eq $el "confirmed" -}}
-        {{- $elStr = "confirmed" -}}
-      {{- else if eq $el "unverified" -}}
-        {{- $elStr = "unverified" -}}
-      {{- else if eq $el "unknown" -}}
-        {{- $elStr = "unknown" -}}
-      {{- end -}}
-      <span class="story-evidence story-evidence-{{ $elStr }}" role="img" aria-label="Evidence: {{ $elStr }}">
-        {{ if eq $elStr "unverified" }}⚠️{{ end }}
-        {{ if eq $elStr "confirmed" }}✅{{ end }}
-        {{ if eq $elStr "unknown" }}ℹ️{{ end }}
-        {{ if eq $elStr "unverified" }}unverified{{ end }}
-        {{ if eq $elStr "confirmed" }}confirmed{{ end }}
-        {{ if eq $elStr "unknown" }}unknown{{ end }}
+    {{ if $story.evidenceLevelCSS }}
+      <span class="story-evidence story-evidence-{{ $story.evidenceLevelCSS }}" role="img" aria-label="Evidence: {{ $story.evidenceLevelCSS }}">
+        {{ if eq $story.evidenceLevelCSS "unverified" }}⚠️{{ end }}
+        {{ if eq $story.evidenceLevelCSS "confirmed" }}✅{{ end }}
+        {{ if eq $story.evidenceLevelCSS "unknown" }}ℹ️{{ end }}
+        {{ if eq $story.evidenceLevelCSS "unverified" }}unverified{{ end }}
+        {{ if eq $story.evidenceLevelCSS "confirmed" }}confirmed{{ end }}
+        {{ if eq $story.evidenceLevelCSS "unknown" }}unknown{{ end }}
       </span>
     {{ end }}
   </header>
@@ -62,15 +53,7 @@
     {{- $story.summary }}
   </div>
 
-  {{- if $story.evidenceLevel }}
-    {{- $el := $story.evidenceLevel -}}
-    {{- $elStr := "unknown" -}}
-    {{- if eq $el "confirmed" -}}
-      {{- $elStr = "confirmed" -}}
-    {{- else if eq $el "unverified" -}}
-      {{- $elStr = "unverified" -}}
-    {{- end -}}
-    {{- if eq $elStr "unverified" }}
+  {{- if eq $story.evidenceLevelCSS "unverified" }}
       <div class="story-disclaimer">
         Rumor/speculation: This story contains unverified claims. Information should be treated with caution.
       </div>

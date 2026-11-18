@@ -38,6 +38,7 @@ func (a *Application) BuildFeedHealth(record domain.RunRecord, now time.Time) do
 			StoriesSkipped: srcStatus.StoriesSkipped,
 		}
 		feed.Status = domain.DeriveFeedStatus(input)
+		feed.StatusCSS = feed.Status.String()
 
 		// Update LastSucceeded based on status
 		if feed.Status == domain.FeedStatusHealthy || feed.Status == domain.FeedStatusNoUpdates {
