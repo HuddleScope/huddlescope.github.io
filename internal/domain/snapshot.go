@@ -24,17 +24,17 @@ type Snapshot struct {
 
 // SnapshotStory is a canonical representation of a story for the homepage.
 type SnapshotStory struct {
-	ID               string         `json:"id"`
-	Title            string         `json:"title"`
-	Summary          string         `json:"summary"`
-	FirstPublishedAt string         `json:"firstPublishedAt"`
-	LastPublishedAt  string         `json:"lastPublishedAt"`
-	Score            float64        `json:"score"`
-	EvidenceLevel    EvidenceLevel  `json:"evidenceLevel"`
+	ID               string        `json:"id"`
+	Title            string        `json:"title"`
+	Summary          string        `json:"summary"`
+	FirstPublishedAt string        `json:"firstPublishedAt"`
+	LastPublishedAt  string        `json:"lastPublishedAt"`
+	Score            float64       `json:"score"`
+	EvidenceLevel    EvidenceLevel `json:"evidenceLevel"`
 	// EvidenceLevelCSS is the string representation for Hugo template use
 	// (CSS classes, data attributes). Hugo unmarshals EvidenceLevel back to
 	// an int, so we provide a dedicated string field for template comparisons.
-	EvidenceLevelCSS string          `json:"evidenceLevelCSS,omitempty"`
+	EvidenceLevelCSS string         `json:"evidenceLevelCSS,omitempty"`
 	Publishers       []PublisherRef `json:"publishers"`
 }
 

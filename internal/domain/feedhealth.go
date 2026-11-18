@@ -43,11 +43,11 @@ type FeedHealthSummary struct {
 
 // FeedHealthFeed represents a single feed and its health status.
 type FeedHealthFeed struct {
-	SourceID      string        `json:"source_id"`
-	Name          string        `json:"name"`
-	URL           string        `json:"url"`
-	Category      string        `json:"category,omitempty"`
-	Status        FeedStatus    `json:"status"`
+	SourceID string     `json:"source_id"`
+	Name     string     `json:"name"`
+	URL      string     `json:"url"`
+	Category string     `json:"category,omitempty"`
+	Status   FeedStatus `json:"status"`
 	// StatusCSS is the string representation for Hugo template use
 	StatusCSS     string        `json:"statusCSS,omitempty"`
 	LastChecked   *time.Time    `json:"last_checked,omitempty"`
