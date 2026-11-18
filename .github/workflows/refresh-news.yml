@@ -98,6 +98,20 @@ jobs:
             echo "Snapshot contains $STORY_COUNT stories; proceeding"
           fi
 
+      - name: Commit homepage snapshot
+        id: commit-hp
+        if: always()
+        run: |
+          # Commit homepage.json so CI builds can read it
+          git add web/data/homepage.json
+          if [ -n "$(git status --porcelain web/data/homepage.json)" ]; then
+            git commit -m "Update homepage.json (Closes #107)"
+            echo "Homepage committed"
+          else
+            echo "Homepage unchanged, skipping commit"
+          fi
+        continue-on-error: true
+
       - name: Install Hugo extended
         run: |
           HUGO_VERSION="0.169.0"

@@ -60,14 +60,14 @@
       </thead>
       <tbody>
         {{- range $data.feeds }}
-        <tr class="feed-row feed-status-{{ .status }}{{ if .stale }} feed-stale{{ end }}" data-status="{{ .status }}" data-category="{{ .category | default "" }}">
+        <tr class="feed-row feed-status-{{ .statusCSS }}{{ if .stale }} feed-stale{{ end }}" data-status="{{ .statusCSS }}" data-category="{{ .category | default "" }}">
           <td class="feed-name">
             <a href="{{ .url }}" target="_blank" rel="noopener noreferrer">{{ .name }}</a>
             <br><span class="feed-source-id">ID: {{ .source_id }}</span>
           </td>
           <td class="feed-category">{{ .category | default "" }}</td>
           <td class="feed-status">
-            <span class="status-pill status-{{ .status }}">{{ .status }}</span>
+            <span class="status-pill status-{{ .statusCSS }}">{{ .statusCSS }}</span>
           </td>
           <td class="feed-last-checked">
             {{- if .last_checked }}

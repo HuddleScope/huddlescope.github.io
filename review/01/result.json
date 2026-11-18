@@ -1,0 +1,6 @@
+{
+  "approved": true,
+  "findings": [],
+  "comments": "Review of PR #127 — Implementation is correct and minimal. MarshalJSON delegates to existing String() on all three types. UnmarshalJSON maps all known string values back to const and falls back to a safe default (EvidenceUnknown/FeedStatusHealthy/RunStatusOK). Tests cover full round-trip for all values. Snapshot-level test verifies JSON output shape. No breaking changes. One remaining issue: time.Duration for duration_ms still serializes as nanoseconds (int) — not in scope for this PR but noted in plan for follow-up.",
+  "reviewed_at": "2026-11-18"
+}

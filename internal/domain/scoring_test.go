@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -346,6 +347,41 @@ func TestScorer_Rank(t *testing.T) {
 	ranked3 := s.Rank([]StoryGroup{tie2, tie1})
 	if ranked3[0].ID != "aaa" {
 		t.Errorf("ID tie-breaker first = %s, want aaa", ranked3[0].ID)
+	}
+}
+
+func TestEvidenceLevel_JSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		level    EvidenceLevel
+		expected string
+	}{
+		{EvidenceUnknown, "unknown"},
+		{EvidenceUnverified, "unverified"},
+		{EvidenceConfirmed, "confirmed"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.expected, func(t *testing.T) {
+			// Marshal to JSON
+			data, err := json.Marshal(tc.level)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			wantJSON := `"` + tc.expected + `"`
+			if string(data) != wantJSON {
+				t.Errorf("Marshal: got %s, want %s", data, wantJSON)
+			}
+
+			// Unmarshal back
+			var decoded EvidenceLevel
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if decoded != tc.level {
+				t.Errorf("Unmarshal: got %v (%s), want %v (%s)",
+					decoded, decoded.String(), tc.level, tc.level.String())
+			}
+		})
 	}
 }
 

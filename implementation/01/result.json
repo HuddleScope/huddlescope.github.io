@@ -1,0 +1,23 @@
+{
+  "files_changed": [
+    "internal/domain/scoring.go",
+    "internal/domain/scoring_test.go",
+    "internal/domain/feedhealth.go",
+    "internal/domain/feedhealth_test.go",
+    "internal/domain/run.go",
+    "internal/domain/run_test.go",
+    "internal/domain/snapshot_test.go"
+  ],
+  "tests_added": [
+    "TestEvidenceLevel_JSONRoundTrip",
+    "TestFeedStatus_JSONRoundTrip",
+    "TestRunStatus_JSONRoundTrip",
+    "TestSnapshot_JSONEvidenceLevelIsString"
+  ],
+  "tests_passing": true,
+  "git_sha": "24d775c",
+  "git_message": "Fix EvidenceLevel, FeedStatus, and RunStatus JSON serialization to use string values",
+  "pr_url": "https://github.com/HuddleScope/huddlescope.github.io/pull/127",
+  "pr_number": 127,
+  "branch_pushed": true
+}

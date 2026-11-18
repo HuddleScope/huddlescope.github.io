@@ -2,9 +2,45 @@ package domain
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+func TestRunStatus_JSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		status RunStatus
+		want   string
+	}{
+		{RunStatusOK, "ok"},
+		{RunStatusPartial, "partial"},
+		{RunStatusFailed, "failed"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			// Marshal to JSON
+			data, err := json.Marshal(tc.status)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			wantJSON := `"` + tc.want + `"`
+			if string(data) != wantJSON {
+				t.Errorf("Marshal: got %s, want %s", data, wantJSON)
+			}
+
+			// Unmarshal back
+			var decoded RunStatus
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if decoded != tc.status {
+				t.Errorf("Unmarshal: got %v (%s), want %v (%s)",
+					decoded, decoded.String(), tc.status, tc.status.String())
+			}
+		})
+	}
+}
 
 func TestRunStatus_String(t *testing.T) {
 	tests := []struct {

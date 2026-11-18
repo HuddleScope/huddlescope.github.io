@@ -43,11 +43,13 @@ type FeedHealthSummary struct {
 
 // FeedHealthFeed represents a single feed and its health status.
 type FeedHealthFeed struct {
-	SourceID      string        `json:"source_id"`
-	Name          string        `json:"name"`
-	URL           string        `json:"url"`
-	Category      string        `json:"category,omitempty"`
-	Status        FeedStatus    `json:"status"`
+	SourceID string     `json:"source_id"`
+	Name     string     `json:"name"`
+	URL      string     `json:"url"`
+	Category string     `json:"category,omitempty"`
+	Status   FeedStatus `json:"status"`
+	// StatusCSS is the string representation for Hugo template use
+	StatusCSS     string        `json:"statusCSS,omitempty"`
 	LastChecked   *time.Time    `json:"last_checked,omitempty"`
 	LastSucceeded *time.Time    `json:"last_succeeded,omitempty"`
 	EntriesTotal  int           `json:"entries_total"`
@@ -85,6 +87,38 @@ func (s FeedStatus) String() string {
 	default:
 		return fmt.Sprintf("unknown(%d)", s)
 	}
+}
+
+// MarshalJSON implements json.Marshaler for FeedStatus, outputting
+// a human-readable string instead of an integer. This ensures Hugo
+// templates receive "healthy"/"no_updates"/etc for CSS classes and
+// data attributes on the feed dashboard page.
+func (s FeedStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for FeedStatus,
+// parsing a JSON string back to the correct const value.
+func (s *FeedStatus) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	switch str {
+	case "healthy":
+		*s = FeedStatusHealthy
+	case "no_updates":
+		*s = FeedStatusNoUpdates
+	case "failed":
+		*s = FeedStatusFailed
+	case "disabled":
+		*s = FeedStatusDisabled
+	case "not_checked":
+		*s = FeedStatusNotChecked
+	default:
+		*s = FeedStatus(0) // default to healthy for unknown values
+	}
+	return nil
 }
 
 // DeriveFeedStatusInput holds the inputs needed to derive a feed's status.

@@ -1,12 +1,50 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestFeedStatus_JSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		status FeedStatus
+		want   string
+	}{
+		{FeedStatusHealthy, "healthy"},
+		{FeedStatusNoUpdates, "no_updates"},
+		{FeedStatusFailed, "failed"},
+		{FeedStatusDisabled, "disabled"},
+		{FeedStatusNotChecked, "not_checked"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			// Marshal to JSON
+			data, err := json.Marshal(tc.status)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			wantJSON := `"` + tc.want + `"`
+			if string(data) != wantJSON {
+				t.Errorf("Marshal: got %s, want %s", data, wantJSON)
+			}
+
+			// Unmarshal back
+			var decoded FeedStatus
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if decoded != tc.status {
+				t.Errorf("Unmarshal: got %v (%s), want %v (%s)",
+					decoded, decoded.String(), tc.status, tc.status.String())
+			}
+		})
+	}
+}
 
 func TestFeedStatus_String(t *testing.T) {
 	tests := []struct {

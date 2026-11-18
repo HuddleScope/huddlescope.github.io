@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -598,5 +599,95 @@ func TestBuildSnapshot_MixedSummaryGroup(t *testing.T) {
 	}
 	if got := snap.Stories[0].Summary; got != "Useful second summary." {
 		t.Errorf("mixed-group summary = %q; want first non-empty article summary", got)
+	}
+}
+
+func TestSnapshot_JSONEvidenceLevelIsString(t *testing.T) {
+	// This test ensures that the JSON output from Snapshot has
+	// evidenceLevel as a human-readable string ("confirmed"/"unverified"/"unknown")
+	// rather than an integer (0/1/2). Hugo templates depend on string values
+	// for CSS class generation (story-evidence-confirmed).
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	snap := Snapshot{
+		Version:     SnapshotVersion,
+		GeneratedAt: now.Format(time.RFC3339),
+		Stories: []SnapshotStory{
+			{
+				ID:               "story-confirmed",
+				Title:            "Officially confirmed trade",
+				Summary:          "The trade was confirmed",
+				FirstPublishedAt: now.Add(-2 * time.Hour).Format(time.RFC3339),
+				LastPublishedAt:  now.Add(-1 * time.Hour).Format(time.RFC3339),
+				Score:            80,
+				EvidenceLevel:    EvidenceConfirmed,
+				Publishers:       []PublisherRef{{ID: "src1", Name: "Source 1", URL: "http://example.com"}},
+			},
+			{
+				ID:               "story-unverified",
+				Title:            "Rumor of a trade",
+				Summary:          "Rumor says a trade is near",
+				FirstPublishedAt: now.Add(-24 * time.Hour).Format(time.RFC3339),
+				LastPublishedAt:  now.Add(-24 * time.Hour).Format(time.RFC3339),
+				Score:            60,
+				EvidenceLevel:    EvidenceUnverified,
+				Publishers:       []PublisherRef{{ID: "src1", Name: "Source 1", URL: "http://example.com"}},
+			},
+			{
+				ID:               "story-unknown",
+				Title:            "Team news",
+				Summary:          "The team plays today",
+				FirstPublishedAt: now.Add(-48 * time.Hour).Format(time.RFC3339),
+				LastPublishedAt:  now.Add(-48 * time.Hour).Format(time.RFC3339),
+				Score:            50,
+				EvidenceLevel:    EvidenceUnknown,
+				Publishers:       []PublisherRef{{ID: "src2", Name: "Source 2", URL: "http://example2.com"}},
+			},
+		},
+		Latest: []SnapshotArticle{},
+		Teams:  []SnapshotTeam{},
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatalf("Marshal snapshot failed: %v", err)
+	}
+
+	// Unmarshal as a generic map to check evidenceLevel is a string
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw failed: %v", err)
+	}
+
+	storiesRaw, ok := raw["stories"].([]interface{})
+	if !ok {
+		t.Fatal("stories field not found or not an array")
+	}
+
+	expectedLevels := []string{"confirmed", "unverified", "unknown"}
+	for i, storyI := range storiesRaw {
+		story, ok := storyI.(map[string]interface{})
+		if !ok {
+			t.Fatalf("story[%d] is not an object", i)
+		}
+		ev, ok := story["evidenceLevel"]
+		if !ok {
+			t.Fatalf("story[%d] missing evidenceLevel", i)
+		}
+		// evidenceLevel must be a string, not a number
+		if _, isNumber := ev.(float64); isNumber {
+			t.Errorf("story[%d] evidenceLevel = %v (float64); expected string", i, ev)
+		}
+		if str, isString := ev.(string); !isString {
+			t.Errorf("story[%d] evidenceLevel = %v (type %T); expected string", i, ev, ev)
+		} else {
+			// Verify the string matches the expected value
+			if i >= len(expectedLevels) {
+				t.Errorf("story[%d] evidenceLevel = %q; unexpected index", i, str)
+			} else if str != expectedLevels[i] {
+				t.Errorf("story[%d] evidenceLevel = %q; want %q", i, str, expectedLevels[i])
+			}
+		}
 	}
 }

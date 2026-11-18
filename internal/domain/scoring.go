@@ -2,6 +2,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,6 +27,32 @@ func (e EvidenceLevel) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+// MarshalJSON implements json.Marshaler for EvidenceLevel, outputting
+// a human-readable string instead of an integer. This ensures Hugo
+// templates receive "confirmed"/"unverified"/"unknown" for CSS classes
+// and data attributes.
+func (e EvidenceLevel) MarshalJSON() ([]byte, error) {
+	return json.Marshal(e.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for EvidenceLevel,
+// parsing a JSON string back to the correct const value.
+func (e *EvidenceLevel) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch s {
+	case "confirmed":
+		*e = EvidenceConfirmed
+	case "unverified":
+		*e = EvidenceUnverified
+	default:
+		*e = EvidenceUnknown
+	}
+	return nil
 }
 
 // ClassifyEvidence returns the evidence level based on text content.
