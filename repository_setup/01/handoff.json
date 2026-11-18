@@ -1,0 +1,9 @@
+{
+  "mergePolicy": "auto",
+  "squashMergeAllowed": true,
+  "issue": "107",
+  "working_branch": "107-switch-github-pages-to-actions",
+  "target_branch": "main",
+  "base_sha": "697f4bd",
+  "created_at": "2026-11-18"
+}
