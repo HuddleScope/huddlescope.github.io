@@ -87,6 +87,38 @@ func (s FeedStatus) String() string {
 	}
 }
 
+// MarshalJSON implements json.Marshaler for FeedStatus, outputting
+// a human-readable string instead of an integer. This ensures Hugo
+// templates receive "healthy"/"no_updates"/etc for CSS classes and
+// data attributes on the feed dashboard page.
+func (s FeedStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for FeedStatus,
+// parsing a JSON string back to the correct const value.
+func (s *FeedStatus) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	switch str {
+	case "healthy":
+		*s = FeedStatusHealthy
+	case "no_updates":
+		*s = FeedStatusNoUpdates
+	case "failed":
+		*s = FeedStatusFailed
+	case "disabled":
+		*s = FeedStatusDisabled
+	case "not_checked":
+		*s = FeedStatusNotChecked
+	default:
+		*s = FeedStatus(0) // default to healthy for unknown values
+	}
+	return nil
+}
+
 // DeriveFeedStatusInput holds the inputs needed to derive a feed's status.
 type DeriveFeedStatusInput struct {
 	Enabled        bool

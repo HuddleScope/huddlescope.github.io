@@ -4,6 +4,7 @@ package domain
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -28,6 +29,32 @@ func (s RunStatus) String() string {
 	default:
 		return fmt.Sprintf("unknown(%d)", s)
 	}
+}
+
+// MarshalJSON implements json.Marshaler for RunStatus, outputting
+// a human-readable string instead of an integer.
+func (s RunStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for RunStatus,
+// parsing a JSON string back to the correct const value.
+func (s *RunStatus) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	switch str {
+	case "ok":
+		*s = RunStatusOK
+	case "partial":
+		*s = RunStatusPartial
+	case "failed":
+		*s = RunStatusFailed
+	default:
+		*s = RunStatus(0)
+	}
+	return nil
 }
 
 // IsCritical returns true if the run should exit with a non-zero exit code.
