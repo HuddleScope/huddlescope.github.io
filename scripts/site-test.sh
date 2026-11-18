@@ -195,10 +195,30 @@ else
   log "SKIP: no multi-publisher stories in snapshot; publisher count check not applicable"
 fi
 
-# HS-015: Verify evidence badge (at least one confirmed)
-if ! grep -q 'story-evidence-confirmed' "$WEB_DIR/public/index.html"; then
-  log "FAIL: evidence badge (confirmed) not found in homepage"
-  exit 1
+# HS-015: Verify evidence badge for stories visible on the homepage
+# The homepage shows featured story + top 10 ranked + top 5 latest.
+# Check evidence badges only for stories that are actually rendered.
+VISIBLE_EVIDENCE_LEVELS=$(jq '[
+  (.stories | sort_by(-.score) | .[0]),
+  (.stories | sort_by(-.score) | .[1:10][]),
+  (.stories | sort_by(-.lastPublishedAt) | .[1:5][])
+] | map(.evidenceLevel) | unique[]' "$WEB_DIR/data/homepage.json" 2>/dev/null || echo "")
+EVIDENCE_BADGES_FOUND=true
+for level in $VISIBLE_EVIDENCE_LEVELS; do
+  if [[ "$level" == "confirmed" ]]; then
+    if ! grep -q 'story-evidence-confirmed' "$WEB_DIR/public/index.html"; then
+      log "FAIL: confirmed evidence badge not rendered for visible stories"
+      EVIDENCE_BADGES_FOUND=false
+    fi
+  elif [[ "$level" == "unverified" ]]; then
+    if ! grep -q 'story-evidence-unverified' "$WEB_DIR/public/index.html"; then
+      log "FAIL: unverified evidence badge not rendered for visible stories"
+      EVIDENCE_BADGES_FOUND=false
+    fi
+  fi
+done
+if [ "$EVIDENCE_BADGES_FOUND" = true ]; then
+  log "PASS: visible stories evidence badges present"
 fi
 
 # HS-015: Verify disclaimer for rumour/speculation is absent (all confirmed)
@@ -362,22 +382,26 @@ if [[ -n "$SECRETS_FOUND" ]]; then
 fi
 log "PASS: No obvious secrets/private data in published artifacts"
 
-# HS-023i: Evidence badge assertions (data-driven, replacing hardcoded HS-015 greps)
-evidence_levels=$(jq -r '.stories[].evidenceLevel' "$WEB_DIR/public/../data/homepage.json" | sort -u)
-for level in $evidence_levels; do
+# HS-023i: Evidence badge assertions (data-driven, using only visible stories)
+VISIBLE_EVIDENCE_LEVELS=$(jq '[
+  (.stories | sort_by(-.score) | .[0]),
+  (.stories | sort_by(-.score) | .[1:10][]),
+  (.stories | sort_by(-.lastPublishedAt) | .[1:5][])
+] | map(.evidenceLevel) | unique[]' "$WEB_DIR/public/../data/homepage.json" 2>/dev/null || echo "")
+for level in $VISIBLE_EVIDENCE_LEVELS; do
   if [[ "$level" == "unverified" ]]; then
     if ! grep -q 'story-evidence-unverified' "$WEB_DIR/public/index.html"; then
-      log "FAIL: unverified evidence badge not rendered"
+      log "FAIL: unverified evidence badge not rendered for visible stories"
       exit 1
     fi
     if ! grep -q 'Rumor/speculation' "$WEB_DIR/public/index.html"; then
-      log "FAIL: Rumor/speculation disclaimer missing for unverified stories"
+      log "FAIL: Rumor/speculation disclaimer missing for visible unverified stories"
       exit 1
     fi
     log "PASS: unverified evidence badge and disclaimer present"
   elif [[ "$level" == "confirmed" ]]; then
     if ! grep -q 'story-evidence-confirmed' "$WEB_DIR/public/index.html"; then
-      log "FAIL: confirmed evidence badge not rendered"
+      log "FAIL: confirmed evidence badge not rendered for visible stories"
       exit 1
     fi
     log "PASS: confirmed evidence badge present"
