@@ -84,7 +84,7 @@ func (v *Validator) Check(ctx context.Context, src domain.FeedSource) (SourceChe
 		result.Verdict = VerdictFailed
 		return result, nil
 	}
-	defer resp.Body.Close()
+	_ = resp.Body.Close()
 
 	result.HTTPStatus = resp.StatusCode
 

@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/google/uuid v1.6.0
 	github.com/mmcdole/gofeed v1.5.0
+	github.com/stretchr/testify v1.12.1
 	github.com/tursodatabase/libsql-client-go v0.0.0-20260528064733-9d5d30a29a60
 	golang.org/x/net v0.62.0
 	golang.org/x/text v0.44.0
@@ -20,6 +21,7 @@ require (
 	github.com/mmcdole/goxpp/v2 v2.0.0 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	modernc.org/libc v1.80.1 // indirect
