@@ -270,3 +270,11 @@ Heartbeat staleness is visually indicated in workflow run output:
 - The heartbeat file commits to the repo; the refresh workflow does not push any data back to the default branch
 - Backup/restore code implemented in sqlite package (HS-041), not yet wired into the pipeline
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline
+## Team registry
+
+Teams are now stored in the database as part of the ranking system. The teams table was previously used for article attribution but is now orphaned and will be removed in migration 005.
+
+To view or interact with teams data:
+1. Connect to the Turso database
+2. Query the teams table directly if needed (though it will be empty after migration)
+3. The ranking system now relies on team data from external sources
