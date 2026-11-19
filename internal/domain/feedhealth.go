@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -428,23 +429,30 @@ func (f FeedHealthFeed) equal(other FeedHealthFeed) bool {
 	return true
 }
 
-// isSecretPattern checks for common secret patterns (case-insensitive).
+// secretAssignRe matches a secret keyword in assignment style, e.g.
+// "token=abc...", "password: '...'", or a long opaque bearer token.
+// A bare word never matches: news prose mentions words like "secret",
+// "token" and "Secretary" constantly, and substring matching on them
+// rejects otherwise valid stories (it once killed the whole production
+// export because a summary contained a player quote).
+var secretAssignRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|aws[_-]?secret|database_url|db_password)\s*[:=]\s*("[^"]{16,}"|'[^']{16,}'|[A-Za-z0-9_\-]{16,})`)
+
+// secretConnRe matches a database connection URL assigned to a DB key
+// ("database_url=postgres://..." or "dsn=mysql://..."): secretAssignRe's
+// value character class does not cover the "://" in the URL scheme.
+var secretConnRe = regexp.MustCompile(`(?i)\b\w*(database_url|db_url|db_dsn|dsn|connection_string)\s*[:=]\s*\w+://`)
+
+// bearerRe matches "Bearer <long opaque value>" (Authorization header leaks).
+var bearerRe = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._\-]{16,}`)
+
+// isSecretPattern checks for secret-looking content (case-insensitive).
+// Defense in depth: flags credential values in assignment form, while
+// ordinary English use of the keywords stays clean.
 func isSecretPattern(s string) bool {
 	if s == "" {
 		return false
 	}
-	lower := strings.ToLower(s)
-	commonPatterns := []string{
-		"password", "secret", "token", "credential", "api_key", "apikey",
-		"private_key", "auth_token", "access_token", "refresh_token",
-		"aws_secret", "database_url", "db_password",
-	}
-	for _, pat := range commonPatterns {
-		if strings.Contains(lower, pat) {
-			return true
-		}
-	}
-	return false
+	return secretAssignRe.MatchString(s) || bearerRe.MatchString(s) || secretConnRe.MatchString(s)
 }
 
 // IngestionRecorder records ingestion run results for historical analysis.
