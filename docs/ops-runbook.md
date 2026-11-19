@@ -272,9 +272,11 @@ Heartbeat staleness is visually indicated in workflow run output:
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline
 ## Team registry
 
-Teams are now stored in the database as part of the ranking system. The teams table was previously used for article attribution but is now orphaned and will be removed in migration 005.
+The team registry is now stored in `conf/teams.yaml` and loaded via `config.TeamRegistry()`. The former database tables (`teams` and `article_teams`) were orphaned and removed in migration 005 (HS-063).
 
-To view or interact with teams data:
-1. Connect to the Turso database
-2. Query the teams table directly if needed (though it will be empty after migration)
-3. The ranking system now relies on team data from external sources
+The `ranking_snapshots` table retains a `team_id` column but it is now a plain business key, not a foreign key to the teams table. This allows retention archiving and backups to continue working without referencing the dropped tables.
+
+To view or interact with team data:
+1. Inspect `conf/teams.yaml` directly
+2. Use the application's team registry API via `config.TeamRegistry()` in code
+3. The ranking system uses team identity from the configuration, not the database
