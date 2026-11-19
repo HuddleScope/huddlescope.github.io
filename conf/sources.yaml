@@ -407,6 +407,13 @@ sources:
 
   - id: official-no
     name: New Orleans Saints (official)
+    enabled: true
+    verification: published_team_feed_directory
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-no
+    name: New Orleans Saints (official)
     publication: New Orleans Saints official
     url: https://www.neworleanssaints.com/rss/news
     category: team-official
@@ -414,3 +421,4 @@ sources:
     enabled: true
     verification: published_team_feed_directory
     priority: 100
+    acceptable_use: allowed
