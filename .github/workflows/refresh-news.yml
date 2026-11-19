@@ -58,6 +58,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "HuddleScope CI"
+          git config user.email "ci@huddlescope.github.io"
 
       - name: Set up Go
         uses: actions/setup-go@v7
