@@ -1,0 +1,8 @@
+{
+  "mergePolicy": "auto",
+  "issue": "109",
+  "branch": "109-validate-nfl-rss-sources",
+  "head": "b168f3bf7eb99debff2aad1482187076e994386e",
+  "created_at": "2026-11-19T11:31:00Z",
+  "completed_at": "2026-11-19T11:31:00Z"
+}
