@@ -563,8 +563,9 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 		fetcher, err := a.resolveFetcher(src.ID)
 		if err != nil {
 			status := domain.SourceRunStatus{
-				SourceID: src.ID,
-				Errors:   []error{fmt.Errorf("failed to resolve fetcher: %w", err)},
+				SourceID:    src.ID,
+				Errors:      []error{fmt.Errorf("failed to resolve fetcher: %w", err)},
+				HTTPStatus:  0,
 			}
 			record.AddSourceStatus(status)
 			continue
@@ -572,9 +573,15 @@ func (a *Application) runIngestPipeline(ctx context.Context, record domain.RunRe
 
 		entries, err := fetcher.Fetch(ctx, src.ID)
 		if err != nil {
+			// Capture HTTP status before fetching to include in error path
+			var httpStatus int
+			if hs, ok := fetcher.(domain.HTTPStatuser); ok {
+				httpStatus = hs.LastHTTPStatus()
+			}
 			status := domain.SourceRunStatus{
-				SourceID: src.ID,
-				Errors:   []error{fmt.Errorf("source %s: %w", src.ID, err)},
+				SourceID:    src.ID,
+				Errors:      []error{fmt.Errorf("source %s: %w", src.ID, err)},
+				HTTPStatus:  httpStatus,
 			}
 			record.AddSourceStatus(status)
 			record.AddError(fmt.Errorf("source %s: %w", src.ID, err))

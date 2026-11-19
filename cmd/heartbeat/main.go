@@ -23,8 +23,9 @@ func main() {
 		os.Exit(1)
 	}
 	if !found {
-		fmt.Fprintf(os.Stderr, "Heartbeat file not found: %s\n", *file)
-		os.Exit(1)
+		// First run or file deleted: exit cleanly without error
+		fmt.Fprintf(os.Stderr, "Warning: Heartbeat file not found: %s (first run or deleted)\n", *file)
+		os.Exit(0)
 	}
 
 	// Validate
