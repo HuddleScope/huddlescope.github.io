@@ -3,6 +3,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,6 +30,26 @@ func (s HeartbeatStatus) String() string {
 	default:
 		return fmt.Sprintf("unknown(%d)", s)
 	}
+}
+
+// UnmarshalJSON implements json.Unmarshaler for HeartbeatStatus,
+// parsing a JSON string back to the correct const value.
+func (s *HeartbeatStatus) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	switch str {
+	case "ok":
+		*s = HeartbeatStatusOK
+	case "partial":
+		*s = HeartbeatStatusPartial
+	case "failed":
+		*s = HeartbeatStatusFailed
+	default:
+		*s = HeartbeatStatusOK
+	}
+	return nil
 }
 
 // Heartbeat represents the state and freshness of a refresh run.
@@ -99,6 +120,36 @@ func (h *Heartbeat) IsStale(now time.Time, threshold time.Duration) bool {
 		return true
 	}
 	return now.Sub(published) > threshold
+}
+
+// MarshalJSON implements json.Marshaler for Heartbeat, ensuring the status
+// field is output as a string instead of an integer.
+func (h *Heartbeat) MarshalJSON() ([]byte, error) {
+	type Alias struct {
+		Version        string   `json:"version"`
+		Status         string   `json:"status"`
+		RunID          string   `json:"run_id"`
+		AttemptedAt    string   `json:"attempted_at"`
+		IngestedAt     *string  `json:"ingested_at,omitempty"`
+		PublishedAt    *string  `json:"published_at,omitempty"`
+		SourcesChecked int      `json:"sources_checked"`
+		SourcesFailed  int      `json:"sources_failed"`
+		Errors         []string `json:"errors,omitempty"`
+	}
+
+	alias := &Alias{
+		Version:        h.Version,
+		Status:         h.Status.String(),
+		RunID:          h.RunID,
+		AttemptedAt:    h.AttemptedAt,
+		IngestedAt:     h.IngestedAt,
+		PublishedAt:    h.PublishedAt,
+		SourcesChecked: h.SourcesChecked,
+		SourcesFailed:  h.SourcesFailed,
+		Errors:         h.Errors,
+	}
+
+	return json.Marshal(alias)
 }
 
 // FromRunRecord builds a heartbeat from a run record.

@@ -379,8 +379,11 @@ func (f *HTTPFetcher) FetchFeed(ctx context.Context) (*FeedResult, error) {
 				// For 4xx errors, only retry on 429 (rate limited)
 				if resp.StatusCode == http.StatusTooManyRequests {
 					// Continue to retry for 429
+				} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+					// 401/403 are authentication failures - log specifically and don't retry
+					return nil, fmt.Errorf("authentication failed: request to %s returned %s", f.source.URL, resp.Status)
 				} else if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-					// 4xx errors are not retryable (except 429)
+					// Other 4xx errors are not retryable (except 429)
 					return nil, fmt.Errorf("request failed with status %d", resp.StatusCode)
 				}
 				// For 5xx errors, continue to retry
