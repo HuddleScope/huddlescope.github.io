@@ -6,7 +6,7 @@
 <body>
   {{ partial "skip-link.html" . }}
   {{ partial "header.html" . }}
-  <main id="main-content" tabindex="-1">
+  <main id="main-content" class="container" tabindex="-1">
     {{ block "main" . }}{{ end }}
   </main>
   {{ partial "footer.html" . }}

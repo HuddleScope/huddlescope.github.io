@@ -1,54 +1,75 @@
 {{ define "main" }}
   <section class="content-home" aria-labelledby="home-heading">
-    <h1 class="content-title" id="home-heading">Welcome to HuddleScope</h1>
-    <p class="content-intro">
-      Independent NFL news discovery and story aggregation.
-    </p>
+    <div class="home-intro">
+      <div>
+        <p class="eyebrow">NFL NEWS · ONE DESTINATION</p>
+        <h1 class="content-title" id="home-heading">Around the league.<br><span>All in one place.</span></h1>
+        <p class="content-intro">The latest NFL headlines, gathered from across the league. One clear view of what matters.</p>
+      </div>
+      {{ with .Site.Data.homepage }}
+        <p class="update-note">
+          <span class="update-indicator" aria-hidden="true"></span>
+          <span>Data as of <time datetime="{{ .generatedAt }}">{{ time.Format "Jan 2, 2006 · 15:04 UTC" .generatedAt }}</time><br>
+          <small>This is not a live or real-time dashboard.</small></span>
+        </p>
+      {{ end }}
+    </div>
 
     {{ with .Site.Data.homepage }}
-      <p class="content-meta">
-        Data as of <time datetime="{{ .generatedAt }}">{{ .generatedAt }}</time>.
-        This is not a live or real-time dashboard.
-      </p>
-
       {{ $stories := .stories }}
       {{ $sorted := sort $stories "score" "desc" }}
       {{ $len := len $sorted }}
 
       {{ if gt $len 0 }}
         {{ $featured := index $sorted 0 }}
-        <section class="featured-story" aria-labelledby="featured-heading">
-          <h2 id="featured-heading">Featured story</h2>
-          {{ partial "home-story.html" (dict "featured" true "story" $featured) }}
-        </section>
+        <div class="home-news-layout">
+          <div class="home-primary">
+            <section class="featured-story" aria-labelledby="featured-heading">
+              <div class="section-heading"><h2 id="featured-heading">Featured story</h2><span class="section-line" aria-hidden="true"></span></div>
+              {{ partial "home-story.html" (dict "featured" true "story" $featured) }}
+            </section>
 
-        {{ $ranked := first 10 $sorted }}
-        {{ if gt (len $ranked) 1 }}
-          <section class="ranked-stories" aria-labelledby="ranked-heading">
-            <h2 id="ranked-heading">Top ranked stories</h2>
-            <div class="story-grid">
-              {{ range after 1 $ranked }}
-                {{ partial "home-story.html" (dict "featured" false "story" .) }}
+            {{ $ranked := first 9 $sorted }}
+            {{ if gt (len $ranked) 1 }}
+              <section class="ranked-stories" aria-labelledby="ranked-heading">
+                <div class="section-heading"><h2 id="ranked-heading">Top ranked stories</h2><span class="section-line" aria-hidden="true"></span></div>
+                <div class="story-grid">
+                  {{ range after 1 $ranked }}
+                    {{ partial "home-story.html" (dict "featured" false "story" .) }}
+                  {{ end }}
+                </div>
+              </section>
+            {{ end }}
+          </div>
+
+          <aside class="home-sidebar" aria-labelledby="latest-heading">
+            <div class="sidebar-panel">
+              <div class="section-heading"><h2 id="latest-heading">Latest updates</h2><span class="section-line" aria-hidden="true"></span></div>
+              {{ $latest := .latest }}
+              {{ if not $latest }}
+                {{ $latest = slice }}
+                {{ range first 5 (sort $stories "lastPublishedAt" "desc") }}
+                  {{ $primary := index .publishers 0 }}
+                  {{ $latest = append $latest (dict "title" .title "url" $primary.url "source_name" $primary.name "published_at" .lastPublishedAt) }}
+                {{ end }}
               {{ end }}
+              <ol class="latest-list">
+                {{ range first 5 $latest }}
+                  <li class="latest-item">
+                    <a href="{{ .url }}" rel="noopener nofollow">{{ .title }}</a>
+                    <p class="latest-meta"><span>{{ .source_name | replaceRE "-" " " | humanize }}</span><span aria-hidden="true">·</span><time datetime="{{ .published_at }}">{{ time.Format "Jan 2 · 15:04" .published_at }}</time></p>
+                  </li>
+                {{ end }}
+              </ol>
             </div>
-          </section>
-        {{ end }}
-
-        {{ $latest := sort $stories "lastPublishedAt" "desc" | first 5 }}
-        {{ if gt (len $latest) 1 }}
-          <section class="latest-updates" aria-labelledby="latest-heading">
-            <h2 id="latest-heading">Latest updates</h2>
-            <div class="story-grid">
-              {{ range after 1 $latest }}
-                {{ partial "home-story.html" (dict "featured" false "story" .) }}
-              {{ end }}
+            <div class="sidebar-about">
+              <span class="sidebar-about-label">Independent by design</span>
+              <p>Headlines link directly to their original publishers. Free to browse, with no tracking scripts.</p>
+              <a href="{{ "about/" | relURL }}">How HuddleScope works <span aria-hidden="true">↗</span></a>
             </div>
-          </section>
-        {{ end }}
-
-        <p class="content-meta">
-          Showing <strong>{{ $len }}</strong> story{{ if gt $len 1 }}s{{ end }} from {{ len .stories }} story{{ if gt $len 1 }}s{{ end }} total.
-        </p>
+          </aside>
+        </div>
+        <p class="home-count">Browsing the leading stories from <strong>{{ $len }}</strong> aggregated {{ if eq $len 1 }}story{{ else }}stories{{ end }}. <a href="{{ "stories/" | relURL }}">Explore all stories <span aria-hidden="true">→</span></a></p>
       {{ else }}
         <div class="no-content" aria-labelledby="empty-heading">
           <h2 id="empty-heading">No stories published yet</h2>
