@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -59,12 +60,16 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 
 // List implements domain.Repository.List.
 func (r *Repository) List() ([]domain.Story, error) {
-	return List(r.db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return ListWithCtx(ctx, r.db)
 }
 
 // Count implements domain.Repository.Count.
 func (r *Repository) Count() (int, error) {
-	return Count(r.db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	return CountWithCtx(ctx, r.db)
 }
 
 // Migrate applies schema migrations.
@@ -192,6 +197,16 @@ func Count(db *sql.DB) (int, error) {
 	return count, nil
 }
 
+// CountWithCtx is like Count but accepts a context for timeout control.
+func CountWithCtx(ctx context.Context, db *sql.DB) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM stories").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count: %w", err)
+	}
+	return count, nil
+}
+
 // timestampToString converts time.Time to ISO8601 string (20 chars).
 func timestampToString(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05Z")
@@ -201,4 +216,29 @@ func timestampToString(t time.Time) string {
 func parseTimestamp(s string) time.Time {
 	t, _ := time.Parse("2006-01-02T15:04:05Z", s)
 	return t
+}
+
+// ListWithCtx is like List but accepts a context for timeout control.
+func ListWithCtx(ctx context.Context, db *sql.DB) ([]domain.Story, error) {
+	rows, err := db.QueryContext(ctx, `SELECT story_data FROM stories ORDER BY published_at DESC, story_id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var stories []domain.Story
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		var s domain.Story
+		if err := s.UnmarshalJSON(data); err != nil {
+			return nil, fmt.Errorf("unmarshal: %w", err)
+		}
+		stories = append(stories, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return stories, nil
 }
