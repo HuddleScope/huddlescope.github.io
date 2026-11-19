@@ -1,10 +1,32 @@
-# Homepage data contract — HS-015, HS-017, HS-021
+# Homepage and feed data contract — HS-015, HS-017, HS-021, HS-056
 
-This directory contains data files consumed by Hugo for the homepage.
+This directory (`web/data/`, Hugo's `data/` directory) is the production data
+path between the Go engine and the Hugo rendering layer.
+
+## Path contract: production vs. fixtures
+
+| Path | Tracking | Contents |
+|------|----------|----------|
+| `web/data/heartbeat.json` | **tracked** | Real refresh-run heartbeat (written by `cmd/ingest`/`cmd/export`) |
+| `web/data/homepage.json` | untracked until first real export commits it | Homepage snapshot written by `cmd/export` |
+| `web/data/feeds.json` | untracked until first real refresh commits it | Feed-health snapshot written by `cmd/ingest` |
+| `web/fixtures/homepage.json`, `web/fixtures/feeds.json`, `web/fixtures/content/stories/*.md` | **tracked** | Deterministic 2024 **sample** data, test-only |
+| `web/fixtures/dev/` | gitignored | Local development output when you point ingest/export at it |
+
+After HS-056 the demo sample data no longer lives in the production path. The
+live site starts from the *missing-file* state; the first successful
+`refresh-news` run writes (and commits) real data. The committed demo sample
+only ever reaches a Hugo build via the test-only fixture overlay in
+`scripts/site-test.sh` — never via a production build.
+
+The engine's output locations are configurable (env > config file > default):
+`HSC_HEARTBEAT_FILE`, `HSC_FEEDS_FILE`, `HSC_DATA_DIR`, `HSC_DATA_FILE`
+(see `.env.example`). Production sets none of these, so the defaults
+(`web/data/*`) apply.
 
 ## `homepage.json`
 
-The `homepage.json` file is the renderable projection of the domain `StoryGroup` (internal/domain/clustering.go)
+The renderable projection of the domain `StoryGroup` (internal/domain/clustering.go)
 scored by HS-012 (`internal/domain/scoring.go`). It powers the homepage display.
 
 ### Schema (v1)
@@ -13,78 +35,6 @@ scored by HS-012 (`internal/domain/scoring.go`). It powers the homepage display.
 {
   "version": "1",
   "generatedAt": "2026-11-11T17:00:00Z",
-## `heartbeat.json`
-
-The `heartbeat.json` file tracks the status and freshness of each refresh run (ingestion, ranking, export).
-
-### Schema (v1)
-
-```json
-{
-  "version": "1",
-  "status": "ok",
-  "run_id": "e3b0c44298fc1c149afbf4c8996fb92427ae4194",
-  "attempted_at": "2026-11-12T17:00:00Z",
-  "ingested_at": "2026-11-12T17:00:05Z",
-  "published_at": "2026-11-12T17:00:10Z",
-  "sources_checked": 10,
-  "sources_failed": 1,
-  "errors": [
-    "[source:nfl.com] connection refused",
-    "repository not configured"
-  ]
-}
-```
-
-### Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `version` | string | yes | Schema version (currently `"1"`) |
-| `status` | string | yes | One of `ok`, `partial`, `failed` |
-| `run_id` | string | yes | Unique run identifier |
-| `attempted_at` | string | yes | RFC3339 timestamp of run start |
-| `ingested_at` | string (optional) | no | RFC3339 timestamp of ingestion completion |
-| `published_at` | string (optional) | no | RFC3339 timestamp of last successful publication |
-| `sources_checked` | integer | yes | Number of feed sources polled |
-| `sources_failed` | integer | yes | Number of sources that failed with errors |
-| `errors` | array of strings | no | Up to 20 errors (first 5 per source) |
-
-### Status values
-
-- `ok`: Run completed successfully (no ingestion or export errors)
-- `partial`: Run completed with warnings (some sources failed but homepage committed)
-- `failed`: Critical failure (run did not complete or homepage not committed)
-
-### Freshness check
-
-A heartbeat is considered stale when:
-- `published_at` is missing, OR
-- `published_at` is unparseable, OR
-- `published_at` is older than the configured threshold (default: 90 minutes)
-
-### Who writes it
-
-- `cmd/ingest`: writes heartbeat with `attempted_at`, `ingested_at`, status and per-source errors
-- `cmd/export`: reads existing heartbeat, merges publication result with `published_at`
-- Both binaries write to `web/data/heartbeat.json` (configurable via `HSC_HEARTBEAT_FILE`)
-
-### Who reads it
-
-- GitHub Actions workflows (refresh, heartbeat-check)
-- External monitoring (curl, webhooks)
-- Humans via `gh workflow run` + `cat web/data/heartbeat.json`
-
-### Guard/restore behavior
-
-- `refresh-news.yml` data guard step: restores `web/data/homepage.json` AND `web/data/heartbeat.json` if export yields <1 story
-- Commit step: commits whatever state exists (or no-op if unchanged)
-
-### Error handling
-
-- Heartbeat write failures are logged but do not affect run exit codes
-- Validation: version must be `"1"`; timestamps must be RFC3339; strings capped to 200 chars
-- Error count capped: 5 per source, 20 total; secret patterns (password, secret, token, etc.) blocked in errors
   "stories": [
     {
       "id": "top-free-agents-2024",
@@ -177,16 +127,60 @@ The export contract enforces:
 
 ### Implementation notes
 
-- The Go engine produces `homepage.json` via `cmd/export/main.go` when #17 runs.
+- The Go engine produces `web/data/homepage.json` via `cmd/export/main.go` when a refresh run executes.
 - This directory is the *only* contract between the engine and the rendering layer.
 - `internal/domain/scoring.go.ClassifyEvidence` maps to `evidenceLevel` one-to-one.
 - Score ordering (desc) is applied by the template; the JSON file itself can be unsorted.
 - `version` enables forward-compatible schema evolution.
 
-### Empty state
+## Empty states (HS-056)
 
-An empty array `{"version":"1","generatedAt":"…","stories":[],"latest":[],"teams":[]}` is valid and renders the "No stories published yet" message.
+The site renders a clearly-labelled empty state for every data-less condition.
+No placeholder files with fake timestamps are ever committed:
 
-### Fallback
+| Condition | Homepage (`/`) | Feed dashboard (`/status/feeds/`) |
+|-----------|----------------|-----------------------------------|
+| `homepage.json` **missing** | "Story data unavailable. Please check back soon." (no timestamp) | — |
+| `homepage.json` with **zero stories** | "No stories published yet" + truthful `Data as of <generatedAt>` | — |
+| `feeds.json` **missing** | — | "Dashboard Unavailable. Feed health data is not yet available." |
 
-If `homepage.json` is missing or fails to parse, Hugo renders the fallback empty state.
+### `generatedAt` honesty
+
+`generatedAt` is the real wall-clock time the engine built the artifact from
+the database records. The engine never backdates it, and when the content is
+unchanged the file (and its original `generatedAt`) is preserved rather than
+rewritten with a new timestamp. See `internal/adapters/hugo/data.go`.
+
+## Publish decision (refresh-news, HS-056)
+
+The `refresh-news` workflow makes an explicit publish decision after export
+(the old "data safety guard" that restored a committed demo file was removed):
+
+- exported snapshot has **≥ 1 story** → commit and deploy the snapshot;
+- **zero stories** but the previously *committed* snapshot had ≥ 1 story →
+  **skip** the homepage commit and the Pages deploy: the last successfully
+  deployed (real) content is retained, and the zero-story file is not
+  presented as current;
+- **zero stories** and the committed snapshot was absent or also zero-story
+  (never a real export) → commit and deploy the clearly-labelled "No stories
+  published yet" empty state.
+
+A failed ingest or export fails the build job, so the deploy job is skipped
+and the last-good Pages deployment is preserved unchanged. A hard
+"Verify no demo markers" step greps the built `web/public/` for the sample
+data signatures (`example.com`, `seed-run-`, and the demo story IDs) and
+blocks any Pages upload that would present the sample as real news.
+
+## Using the fixtures
+
+- **CI** — `scripts/site-test.sh` (the Site workflow's hard gate) overlays
+  `web/fixtures/` onto `web/data/` + `web/content/stories/` for the test
+  builds only, backed up and restored around the run, so every assertion has
+  deterministic sample input regardless of the production data state.
+- **Local development** — `make site-seed` copies the fixtures into
+  `web/data/` and `web/content/stories/` (untracked copies) so
+  `make site-watch` shows representative content. Remove them afterwards with
+  `rm web/data/homepage.json web/data/feeds.json web/content/stories/top-free-agents-2024.md ...`;
+  they are deliberately *not* gitignored so an accidental commit is loud.
+  Note: with seeded copies in place, `go test ./internal/adapters/hugo/`
+  intentionally fails (the production marker gate) until you remove them.

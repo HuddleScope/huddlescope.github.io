@@ -1,6 +1,17 @@
 # GitHub Actions workflow for HuddleScope refresh and Pages deployment
 # HS-018: Create GitHub Actions refresh and Pages deployment workflow
 # Triggered manually via workflow_dispatch (Cloudflare is the authoritative scheduler)
+#
+# HS-056: the legacy "data safety guard" (git checkout of the committed demo
+# homepage) is removed. Instead an explicit publish decision gates the
+# homepage commit, the Pages upload, and the deploy job:
+#   - exported snapshot has >= 1 story            -> deploy real data
+#   - zero stories, but the committed snapshot
+#     (git show HEAD:) previously had >= 1 story  -> retain last-good, skip deploy
+#   - zero stories, and never a real snapshot     -> deploy the clearly-labelled
+#     "No stories published yet" empty state (truthful generatedAt)
+# A failed ingest/export fails the build job, so the deploy job is skipped and
+# the last successfully deployed Pages content is preserved.
 
 name: Refresh news
 
@@ -34,6 +45,8 @@ jobs:
     timeout-minutes: 45
     environment:
       name: github-pages
+    outputs:
+      deploy: ${{ steps.publish-decision.outputs.deploy }}
     env:
       HSC_ENV: production
       HSC_STORAGE_BACKEND: turso
@@ -83,35 +96,66 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Data safety guard
-        id: data-guard
+      - name: Publish decision
+        id: publish-decision
+        if: always()
         run: |
-          # Prevent publishing an empty site by checking story count
-          DATA_FILE="web/data/homepage.json"
-          STORY_COUNT=$(jq -r '.stories | length' "$DATA_FILE" 2>/dev/null || echo "0")
-          echo "Stories in exported snapshot: $STORY_COUNT"
-          if [ "$STORY_COUNT" -lt 1 ]; then
-            echo "::warning::Exported snapshot has no stories; restoring last-known-good homepage.json"
-            git checkout -- "$DATA_FILE"
-            echo "Restored homepage.json from git"
+          # Decide whether to commit/deploy the freshly exported snapshot.
+          # STORY_COUNT reads the working tree (the new export); PREV_STORY_COUNT
+          # reads the pre-export committed state (git show HEAD:). After HS-056
+          # the homepage file is untracked until the first successful export
+          # commits it, so PREV < 1 means "never had a real snapshot".
+          STORY_COUNT=$(jq -r '.stories | length' web/data/homepage.json 2>/dev/null || echo 0)
+          PREV_STORY_COUNT=$(git show HEAD:web/data/homepage.json 2>/dev/null | jq -r '.stories | length' 2>/dev/null || echo 0)
+          echo "Stories in exported snapshot: $STORY_COUNT (committed: $PREV_STORY_COUNT)"
+          if [ "$STORY_COUNT" -ge 1 ]; then
+            DEPLOY=true
+          elif [ "$PREV_STORY_COUNT" -ge 1 ]; then
+            # Zero stories, but a prior real snapshot exists: retain the
+            # last-good deployed content and do not commit the zero-story file.
+            echo "::warning::Exported snapshot has no stories; retaining last-known-good homepage (no deploy)"
+            DEPLOY=false
           else
-            echo "Snapshot contains $STORY_COUNT stories; proceeding"
+            # Zero stories and never a real snapshot: publish the clearly-
+            # labelled empty state ("No stories published yet").
+            DEPLOY=true
           fi
+          echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
 
       - name: Commit homepage snapshot
         id: commit-hp
-        if: always()
+        if: always() && steps.publish-decision.outputs.deploy == 'true'
         run: |
-          # Commit homepage.json so CI builds can read it
+          # Commit homepage.json so CI builds can read it.
+          # Skipped when the publish decision is "no" so the committed file
+          # (and the next run's PREV detection) stays the last real snapshot.
           git add web/data/homepage.json
           if [ -n "$(git status --porcelain web/data/homepage.json)" ]; then
-            git commit -m "Update homepage.json (Closes #107)"
+            git commit -m "Update homepage.json (Closes #108)"
             echo "Homepage committed"
           else
             echo "Homepage unchanged, skipping commit"
           fi
         continue-on-error: true
 
+      - name: Commit feed health
+        id: commit-feeds
+        if: always()
+        run: |
+          # Always commit the feed health dashboard data (best-effort).
+          git add web/data/feeds.json
+          if [ -n "$(git status --porcelain web/data/feeds.json)" ]; then
+            git commit -m "Update feeds.json (Closes #108)"
+            echo "Feed health committed"
+          else
+            echo "Feed health unchanged, skipping commit"
+          fi
+        continue-on-error: true
+
+      # Site verification first (soft): site-test overlay(s) fixture data and
+      # rebuilds web/public/, so the real-data `make site` build below must
+      # happen afterwards to guarantee the deployed artifact is the production
+      # build, never the fixture build.
       - name: Install Hugo extended
         run: |
           HUGO_VERSION="0.169.0"
@@ -120,15 +164,32 @@ jobs:
           sudo mv hugo /usr/local/bin/
           echo "Hugo version: $(hugo version)"
 
-      - name: Build Hugo site
-        run: |
-          make site
-
       - name: Run site verification
         continue-on-error: true
         run: |
           chmod +x scripts/site-test.sh
           bash scripts/site-test.sh
+
+      - name: Build Hugo site
+        run: |
+          # The site-test step above rebuilt web/public from fixtures; Hugo
+          # does not delete stale outputs, so start from a clean public dir
+          # to guarantee the deployable artifact is the real-data build.
+          rm -rf web/public
+          make site
+
+      - name: Verify no demo markers
+        run: |
+          # HS-056: the production build must never contain the demo sample.
+          # Hard fail before any Pages upload.
+          MARKERS='example\.com|seed-run-|top-free-agents-2024|pro-bowl-2025-format|preseason-week-1-overview'
+          HITS=$(grep -RInE "$MARKERS" web/public/ 2>/dev/null || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Demo markers found in production build:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No demo markers in web/public/"
 
       - name: Verify Hugo build artifacts
         run: |
@@ -162,11 +223,11 @@ jobs:
           if-no-files-found: ignore
 
       - name: Configure GitHub Pages
-        if: inputs.publish
+        if: inputs.publish && steps.publish-decision.outputs.deploy == 'true'
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: inputs.publish
+        if: inputs.publish && steps.publish-decision.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
@@ -174,7 +235,7 @@ jobs:
   deploy:
     name: Deploy to Pages
     needs: build
-    if: inputs.publish
+    if: inputs.publish && needs.build.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

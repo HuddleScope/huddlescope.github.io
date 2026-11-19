@@ -376,6 +376,9 @@ func baseValidConfig() Config {
 		UserAgent:      "test/1",
 		RequestTimeout: 30 * time.Second,
 		HeartbeatFile:  "web/data/heartbeat.json",
+		FeedsFile:      "web/data/feeds.json",
+		DataDir:        "web/data",
+		DataFile:       "homepage.json",
 	}
 }
 
@@ -548,6 +551,9 @@ func TestValidateProductionSuccess(t *testing.T) {
 		TursoAuthToken:   "token",
 		Env:              "production",
 		HeartbeatFile:    "web/data/heartbeat.json",
+		FeedsFile:        "web/data/feeds.json",
+		DataDir:          "web/data",
+		DataFile:         "homepage.json",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() error = %v; want nil for valid production config", err)

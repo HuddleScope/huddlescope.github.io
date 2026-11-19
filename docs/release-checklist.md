@@ -74,6 +74,8 @@ If critical issues are discovered after release:
 - The `scripts/site-test.sh` section added by this PR (HS-023 launch verification)
   replaces the hardcoded unverified/evidence checks with data-driven assertions
   based on `homepage.json` contents.
-- The seed homepage data has been updated to match the three real story content
-  pages (`top-free-agents-2024`, `pro-bowl-2025-format-changes`,
-  `preseason-week-1-overview`).
+- Since HS-056, `web/data/` tracks only `heartbeat.json`. The 2024 sample
+  content lives in `web/fixtures/` (test-only), and the homepage renders a
+  clearly-labelled empty state until the first real refresh export commits
+  `web/data/homepage.json` (see `web/README-data.md`). For local development,
+  `make site-seed` copies the fixtures into the production paths (untracked).

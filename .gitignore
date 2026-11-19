@@ -10,6 +10,11 @@ web/public/
 web/resources/
 web/hugo_stats.json
 
+# Site test artifacts + local dev output (HS-056)
+web/.site-test-tmp/
+web/site-test.log
+web/fixtures/dev/
+
 # Local secrets
 .env
 

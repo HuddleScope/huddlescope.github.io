@@ -21,8 +21,8 @@ func main() {
 	configFile := flag.String("config", "", "Path to config file (.env format)")
 	check := flag.Bool("check", false, "Show config and exit")
 	dryRun := flag.Bool("dry-run", false, "Run export without processing")
-	dataDir := flag.String("data-dir", "web/data", "Output directory for snapshot JSON")
-	dataFile := flag.String("data-file", "homepage.json", "Output filename for snapshot JSON")
+	dataDir := flag.String("data-dir", "", "Output directory for snapshot JSON (empty: use config DataDir)")
+	dataFile := flag.String("data-file", "", "Output filename for snapshot JSON (empty: use config DataFile)")
 	flag.Parse()
 
 	cfg, err := config.Load(*configFile)
@@ -41,6 +41,16 @@ func main() {
 		data, _ := json.MarshalIndent(cfg.Redacted(), "", "  ")
 		fmt.Println(string(data))
 		os.Exit(0)
+	}
+
+	// Resolve snapshot output paths: explicit flag wins, otherwise config
+	resolvedDataDir := *dataDir
+	if resolvedDataDir == "" {
+		resolvedDataDir = cfg.DataDir
+	}
+	resolvedDataFile := *dataFile
+	if resolvedDataFile == "" {
+		resolvedDataFile = cfg.DataFile
 	}
 
 	// Build repository
@@ -67,8 +77,8 @@ func main() {
 	scorer := domain.NewScorer().WithTime(time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC))
 
 	// Build snapshot publisher (writes to Hugo data directory)
-	fullDataPath := filepath.Join(*dataDir, *dataFile)
-	snapshotPublisher := hugo.NewDataPublisher(*dataDir, *dataFile)
+	fullDataPath := filepath.Join(resolvedDataDir, resolvedDataFile)
+	snapshotPublisher := hugo.NewDataPublisher(resolvedDataDir, resolvedDataFile)
 
 	// Build application
 	app := application.New(
@@ -106,10 +116,7 @@ func main() {
 	result := app.RunSnapshot(context.Background(), time.Now())
 
 	// Update heartbeat with publish result (best-effort)
-	heartbeatPath := os.Getenv("HSC_HEARTBEAT_FILE")
-	if heartbeatPath == "" {
-		heartbeatPath = "web/data/heartbeat.json"
-	}
+	heartbeatPath := cfg.HeartbeatFile
 	hb, found, err := heartbeat.Load(heartbeatPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load heartbeat for update: %v\n", err)

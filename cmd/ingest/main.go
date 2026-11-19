@@ -126,10 +126,7 @@ func main() {
 	result := app.RunPipeline(ctx, now)
 
 	// Publish heartbeat (best-effort: failures don't affect run exit)
-	heartbeatPath := os.Getenv("HSC_HEARTBEAT_FILE")
-	if heartbeatPath == "" {
-		heartbeatPath = "web/data/heartbeat.json"
-	}
+	heartbeatPath := cfg.HeartbeatFile
 	if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
 		if hb := domain.NewHeartbeat(result.RunID.String()); hb != nil {
 			hb.FromRunRecord(result, *result.EndedAt)
@@ -140,10 +137,7 @@ func main() {
 	}
 
 	// Publish feed health (best-effort: failures don't affect run exit)
-	feedsPath := os.Getenv("HSC_FEEDS_FILE")
-	if feedsPath == "" {
-		feedsPath = "web/data/feeds.json"
-	}
+	feedsPath := cfg.FeedsFile
 	// Extract outDir and dataFile from full path
 	feedsDir := filepath.Dir(feedsPath)
 	feedsFile := filepath.Base(feedsPath)
