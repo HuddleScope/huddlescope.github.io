@@ -97,5 +97,8 @@ site-watch: ## Run Hugo in watch mode for local development
 	$(MAKE) site-check-hugo
 	hugo server -s web
 
+release-gate: ## Run the end-to-end release gate script
+	@bash scripts/release-gate.sh
+
 # Phony targets
-.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch
+.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch release-gate
