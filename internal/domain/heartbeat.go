@@ -126,15 +126,15 @@ func (h *Heartbeat) IsStale(now time.Time, threshold time.Duration) bool {
 // field is output as a string instead of an integer.
 func (h *Heartbeat) MarshalJSON() ([]byte, error) {
 	type Alias struct {
-		Version        string          `json:"version"`
-		Status         string          `json:"status"`
-		RunID          string          `json:"run_id"`
-		AttemptedAt    string          `json:"attempted_at"`
-		IngestedAt     *string         `json:"ingested_at,omitempty"`
-		PublishedAt    *string         `json:"published_at,omitempty"`
-		SourcesChecked int             `json:"sources_checked"`
-		SourcesFailed  int             `json:"sources_failed"`
-		Errors         []string        `json:"errors,omitempty"`
+		Version        string   `json:"version"`
+		Status         string   `json:"status"`
+		RunID          string   `json:"run_id"`
+		AttemptedAt    string   `json:"attempted_at"`
+		IngestedAt     *string  `json:"ingested_at,omitempty"`
+		PublishedAt    *string  `json:"published_at,omitempty"`
+		SourcesChecked int      `json:"sources_checked"`
+		SourcesFailed  int      `json:"sources_failed"`
+		Errors         []string `json:"errors,omitempty"`
 	}
 
 	alias := &Alias{
