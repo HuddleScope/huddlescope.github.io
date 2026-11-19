@@ -291,6 +291,33 @@ func TestSanitizeFeedError(t *testing.T) {
 	}
 }
 
+func TestIsSecretPattern(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty", "", false},
+		{"plain prose", "Quarterback throws two touchdowns", false},
+		{"prose quote with secret", `I've just got to continue to get better. That's not a secret`, false},
+		{"secretary in title", "U.S. Secretary of Education honors students for improved attendance", false},
+		{"token as role word", "Coaches use him as a token: receiver on third down", false},
+		{"oauth2 fetch error", "oauth2: cannot fetch token: 401 Unauthorized", false},
+		{"token assignment", "error: access_token=123456789012345678", true},
+		{"password quoted", `password: "hunter2hunter2hunter2"`, true},
+		{"bearer header", "Authorization: Bearer ghp_123456789012345678", true},
+		{"database url assignment", "database_url=postgres://user:pw@db:5432/feed", true},
+		{"redacted marker", "token=[REDACTED]", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSecretPattern(tt.input); got != tt.want {
+				t.Errorf("isSecretPattern(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSanitizeName(t *testing.T) {
 	got := SanitizeName("Test Name")
 	if len(got) != len("Test Name") {

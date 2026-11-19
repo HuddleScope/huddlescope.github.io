@@ -242,9 +242,12 @@ func TestSnapshot_Validate_SecretLeak(t *testing.T) {
 		wantErr bool
 	}{
 		{"no secret", "Standard summary text", false},
-		{"password found", "Summary with password123 in text", true},
-		{"token found", "Summary with secret_token here", true},
-		{"api_key found", "Summary with api_key: abc123", true},
+		{"prose quote", "I've just got to continue to get better. That's not a secret", false},
+		{"title prose", "U.S. Secretary of Education honors students for improved attendance", false},
+		{"token receiver", "Coaches use him as a token: receiver on third down", false},
+		{"password assignment", "Summary with password=abcd1234abcd1234 in text", true},
+		{"api_key assignment", "Summary with api_key: 123456789012345678 in text", true},
+		{"bearer leak", "Request sent Authorization Bearer ghp_123456789012345678", true},
 	}
 
 	for _, tt := range tests {
