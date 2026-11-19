@@ -1,28 +1,10 @@
 {
   "version": "1",
   "status": 0,
-  "run_id": "2mj-LMQfXqXcIxq_3rWe5g==",
-  "attempted_at": "2026-11-18T11:03:11Z",
-  "ingested_at": "2026-11-18T11:03:11Z",
-  "published_at": "2026-11-18T11:03:11Z",
-  "sources_checked": 32,
-  "sources_failed": 8,
-  "errors": [
-    "[source:cbs-nfl] source cbs-nfl: request failed with status 404",
-    "[source:nfl-com] source nfl-com: request failed with status 404",
-    "[source:espn-fantasy] source espn-fantasy: request failed with status 404",
-    "[source:fox-nfl] source fox-nfl: failed to parse feed: failed to detect feed type",
-    "[source:nfl-com-boxscore] source nfl-com-boxscore: request failed with status 404",
-    "[source:usa-today-nfl] source usa-today-nfl: request failed with status 402",
-    "[source:the-score] source the-score: request failed with status 404",
-    "[source:reddit-r-nfl] source reddit-r-nfl: request failed with status 404",
-    "source cbs-nfl: request failed with status 404",
-    "source nfl-com: request failed with status 404",
-    "source espn-fantasy: request failed with status 404",
-    "source fox-nfl: failed to parse feed: failed to detect feed type",
-    "source nfl-com-boxscore: request failed with status 404",
-    "source usa-today-nfl: request failed with status 402",
-    "source the-score: request failed with status 404",
-    "source reddit-r-nfl: request failed with status 404"
-  ]
+  "run_id": "XcPU-ZCZlWEpqkHhryxX-Q==",
+  "attempted_at": "2026-11-19T12:33:24Z",
+  "ingested_at": "2026-11-19T12:33:10Z",
+  "published_at": "2026-11-19T12:25:46Z",
+  "sources_checked": 24,
+  "sources_failed": 0
 }
