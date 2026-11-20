@@ -86,6 +86,11 @@ func (a *Application) runSnapshot(ctx context.Context, now time.Time, dryRun boo
 	}
 	result.PubResult = pubResult
 
+	// Run story pages (HS-061)
+	if a.storyPagePublisher != nil {
+		result.StoriesBuilt = a.RunStoryPages(ctx, now, a.storyPagePublisher).PagesPublished
+	}
+
 	return result
 }
 

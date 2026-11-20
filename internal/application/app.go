@@ -86,7 +86,9 @@ type Application struct {
 	publisher Publisher
 	// New for HS-017: snapshot publisher
 	snapshotPublisher domain.SnapshotPublisher
-	lookback          time.Duration
+	// New for HS-061: story page publisher
+	storyPagePublisher domain.StoryPagePublisher
+	lookback           time.Duration
 }
 
 // Option configures the Application.
@@ -145,6 +147,13 @@ func WithPublisher(publisher Publisher) Option {
 func WithSnapshotPublisher(publisher domain.SnapshotPublisher) Option {
 	return func(a *Application) {
 		a.snapshotPublisher = publisher
+	}
+}
+
+// WithStoryPagePublisher sets the story page publisher (HS-061).
+func WithStoryPagePublisher(publisher domain.StoryPagePublisher) Option {
+	return func(a *Application) {
+		a.storyPagePublisher = publisher
 	}
 }
 
