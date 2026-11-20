@@ -67,7 +67,7 @@ jobs:
           git config user.email "ci@huddlescope.github.io"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
