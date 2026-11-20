@@ -31,6 +31,29 @@ func TestMigrate005DropsOrphanedTablesPreservesRanking(t *testing.T) {
 	}
 	defer func() { _ = repo.Close() }()
 
+	for _, table := range []string{"teams", "article_teams"} {
+		var n int
+		if err := repo.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n); err != nil {
+			t.Fatalf("query sqlite_master for %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("table %s still exists after migration 005", table)
+		}
+	}
+
+	// ranking_snapshots survives the rebuild and accepts a conf/teams.yaml slug as team_id
+	if _, err := repo.db.Exec(`INSERT INTO ranking_snapshots (snapshot_id, rank_date, team_id, rank, metric, value) VALUES
+		('44444444-4444-4444-4444-444444444444', '2026-11-19', 'eagles', 1, 'coverage', 0.9)`); err != nil {
+		t.Fatalf("insert into rebuilt ranking_snapshots: %v", err)
+	}
+	var n int
+	if err := repo.db.QueryRow(`SELECT count(*) FROM ranking_snapshots WHERE team_id='eagles'`).Scan(&n); err != nil {
+		t.Fatalf("query ranking_snapshots: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("ranking_snapshots rows with team_id=eagles = %d; want 1", n)
+	}
+
 	// Check that ranking_snapshots table exists and has data
 	count, err := repo.Count()
 	if err != nil {
