@@ -95,6 +95,26 @@ type Config struct {
 	HugoContentDir string // Hugo content directory (production: web/content)
 }
 
+// StorageConfig carries the storage-backend options for repository
+// construction. New backend options are added here and to
+// storage.NewRepository only; call sites are unaffected.
+type StorageConfig struct {
+	Backend    string
+	Path       string
+	TursoURL   string
+	TursoToken string
+}
+
+// Storage returns the storage configuration for repository construction.
+func (c Config) Storage() StorageConfig {
+	return StorageConfig{
+		Backend:    c.StorageBackend,
+		Path:       c.StoragePath,
+		TursoURL:   c.TursoDatabaseURL,
+		TursoToken: c.TursoAuthToken,
+	}
+}
+
 const (
 	defaultLogLevel       = "info"
 	defaultUserAgent      = "huddlescope/0.1"

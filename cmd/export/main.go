@@ -61,12 +61,7 @@ func main() {
 	}
 
 	// Build repository
-	repo, err := storage.NewRepository(storage.RepositoryOptions{
-		Backend:    cfg.StorageBackend,
-		Path:       cfg.StoragePath,
-		TursoURL:   cfg.TursoDatabaseURL,
-		TursoToken: cfg.TursoAuthToken,
-	})
+	repo, err := storage.NewRepository(cfg.Storage())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating repository: %v\n", err)
 		os.Exit(1)

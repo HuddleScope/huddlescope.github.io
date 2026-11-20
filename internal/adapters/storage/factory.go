@@ -6,30 +6,23 @@ import (
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage/sqlite"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage/turso"
+	"github.com/HuddleScope/huddlescope.github.io/internal/config"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
-// RepositoryOptions configures repository creation.
-type RepositoryOptions struct {
-	Backend    string
-	Path       string
-	TursoURL   string
-	TursoToken string
-}
-
 // NewRepository returns a domain.Repository based on the backend option.
-func NewRepository(opts RepositoryOptions) (domain.Repository, error) {
-	switch opts.Backend {
+func NewRepository(cfg config.StorageConfig) (domain.Repository, error) {
+	switch cfg.Backend {
 	case "memory":
 		return NewMemoryRepository(), nil
 	case "sqlite-file":
-		if opts.Path == "" {
-			opts.Path = "data/huddlescope.db"
+		if cfg.Path == "" {
+			cfg.Path = "data/huddlescope.db"
 		}
-		return sqlite.NewRepository(opts.Path)
+		return sqlite.NewRepository(cfg.Path)
 	case "turso":
-		return turso.NewRepository(opts.TursoURL, opts.TursoToken)
+		return turso.NewRepository(cfg.TursoURL, cfg.TursoToken)
 	default:
-		return nil, fmt.Errorf("unknown backend %q; use memory, sqlite-file, or turso", opts.Backend)
+		return nil, fmt.Errorf("unknown backend %q; use memory, sqlite-file, or turso", cfg.Backend)
 	}
 }
