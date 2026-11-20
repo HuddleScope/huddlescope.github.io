@@ -91,6 +91,8 @@ type Config struct {
 	FeedsFile string // Path to feed health JSON output (production: web/data/feeds.json)
 	DataDir   string // Hugo data output directory (production: web/data)
 	DataFile  string // Homepage snapshot filename (production: homepage.json)
+	// New for HS-061: Hugo content directory for generated story pages
+	HugoContentDir string // Hugo content directory (production: web/content)
 }
 
 const (
@@ -107,6 +109,7 @@ const (
 	defaultFeedsFile      = "web/data/feeds.json"
 	defaultDataDir        = "web/data"
 	defaultDataFile       = "homepage.json"
+	defaultHugoContentDir = "web/content"
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -125,6 +128,7 @@ func Load(configFile string) (Config, error) {
 		FeedsFile:      defaultFeedsFile,
 		DataDir:        defaultDataDir,
 		DataFile:       defaultDataFile,
+		HugoContentDir: defaultHugoContentDir,
 	}
 
 	// Override with config file if provided
@@ -198,6 +202,9 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_DATA_DIR"); v != "" {
 		c.DataDir = v
+	}
+	if v := os.Getenv("HSC_HUGO_CONTENT_DIR"); v != "" {
+		c.HugoContentDir = v
 	}
 	if v := os.Getenv("HSC_DATA_FILE"); v != "" {
 		c.DataFile = v
@@ -623,6 +630,8 @@ func loadEnvFile(path string, cfg *Config) error {
 			cfg.FeedsFile = value
 		case "HSC_DATA_DIR":
 			cfg.DataDir = value
+		case "HSC_HUGO_CONTENT_DIR":
+			cfg.HugoContentDir = value
 		case "HSC_DATA_FILE":
 			cfg.DataFile = value
 		default:
@@ -662,6 +671,11 @@ func (c Config) Validate() error {
 	// Validate DataDir
 	if c.DataDir == "" {
 		errs = append(errs, errors.New("DataDir must not be empty"))
+	}
+
+	// Validate HugoContentDir
+	if c.HugoContentDir == "" {
+		errs = append(errs, errors.New("HugoContentDir must not be empty"))
 	}
 
 	// Validate DataFile
@@ -810,6 +824,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		FeedsFile      string   `json:"FeedsFile"`
 		DataDir        string   `json:"DataDir"`
 		DataFile       string   `json:"DataFile"`
+		HugoContentDir string   `json:"HugoContentDir"`
 	}
 	safe := SafeConfig{
 		ConfigFile:     c.ConfigFile,
@@ -825,6 +840,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		FeedsFile:      c.FeedsFile,
 		DataDir:        c.DataDir,
 		DataFile:       c.DataFile,
+		HugoContentDir: c.HugoContentDir,
 	}
 	return json.Marshal(safe)
 }

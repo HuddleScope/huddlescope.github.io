@@ -13,6 +13,15 @@ type StoryPagePublisher interface {
 	Publish(ctx context.Context, page domain.StoryDetailPage) error
 }
 
+// StoryPageStaleCleaner is an optional extension of StoryPagePublisher
+// implemented by publishers that manage files on disk. RunStoryPages calls it
+// after the publish loop with the pages just published so the publisher can
+// prune files that are no longer referenced. NoopPublisher and in-memory test
+// fakes do not implement it.
+type StoryPageStaleCleaner interface {
+	CleanupStale(ctx context.Context, pages []domain.StoryDetailPage) error
+}
+
 // DefaultStoryPagePublisher is a no-op publisher for offline/dev environments.
 type DefaultStoryPagePublisher struct{}
 
@@ -82,6 +91,7 @@ func (a *Application) RunStoryPages(ctx context.Context, now time.Time, publishe
 	result.PagesBuilt = len(groups)
 
 	// Build and publish each story page
+	published := make([]domain.StoryDetailPage, 0, len(groups))
 	for _, group := range groups {
 		// Build the story detail page
 		// Use a simple resolver (in production, this would come from config)
@@ -104,6 +114,15 @@ func (a *Application) RunStoryPages(ctx context.Context, now time.Time, publishe
 		}
 
 		result.PagesPublished++
+		published = append(published, page)
+	}
+
+	// Prune stale pages if the publisher supports it (HS-061/#113).
+	// Cleanup is non-fatal hygiene: failures are reported but never fail the export.
+	if cleaner, ok := publisher.(StoryPageStaleCleaner); ok {
+		if err := cleaner.CleanupStale(ctx, published); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("stale story page cleanup failed: %w", err))
+		}
 	}
 
 	return result

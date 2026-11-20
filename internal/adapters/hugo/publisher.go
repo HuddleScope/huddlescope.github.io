@@ -3,6 +3,7 @@ package hugo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,15 @@ import (
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
+
+// generatorValue is the front-matter field value identifying pages generated
+// by huddlescope.
+const generatorValue = "huddlescope"
+
+// generatorMarker is the full front-matter line identifying generated pages.
+// Stale cleanup only ever deletes files carrying this marker, so
+// hand-authored pages and test fixtures are never removed.
+const generatorMarker = "generator: " + generatorValue
 
 // Publisher implements domain.StoryPagePublisher by writing a story detail page as a Hugo content file.
 type Publisher struct {
@@ -34,9 +44,9 @@ func (p *Publisher) Publish(ctx context.Context, page domain.StoryDetailPage) er
 		return fmt.Errorf("render failed: %w", err)
 	}
 
-	// Compute output path
+	// Compute output path: OutDir is the Hugo content directory (e.g. web/content)
 	slug := string(page.Slug)
-	outPath := filepath.Join(p.OutDir, "_content", "stories", slug+".md")
+	outPath := filepath.Join(p.OutDir, "stories", slug+".md")
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o750); err != nil {
@@ -65,12 +75,13 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 
 	// YAML front-matter
 	fmt.Fprintf(&buf, "---\n")
-	fmt.Fprintf(&buf, "title: %s\n", escapeYamlString(page.Headline))
-	fmt.Fprintf(&buf, "slug: %s\n", page.Slug)
-	fmt.Fprintf(&buf, "storyID: %s\n", page.StoryID)
-	fmt.Fprintf(&buf, "description: %s\n", escapeYamlString(page.Headline))
+	fmt.Fprintf(&buf, "title: %s\n", yamlString(page.Headline))
+	fmt.Fprintf(&buf, "slug: %s\n", yamlString(string(page.Slug)))
+	fmt.Fprintf(&buf, "storyID: %s\n", yamlString(page.StoryID))
+	fmt.Fprintf(&buf, "description: %s\n", yamlString(page.Headline))
 	fmt.Fprintf(&buf, "source: multi\n")
-	fmt.Fprintf(&buf, "canonical: %s\n", page.Path)
+	fmt.Fprintf(&buf, "canonical: %s\n", yamlString(string(page.Path)))
+	fmt.Fprintf(&buf, "generator: %s\n", generatorValue)
 	fmt.Fprintf(&buf, "firstPublished: %s\n", formatTime(page.FirstPublishedAt))
 	fmt.Fprintf(&buf, "lastPublished: %s\n", formatTime(page.LastPublishedAt))
 	fmt.Fprintf(&buf, "firstSeen: %s\n", formatTime(page.FirstSeenAt))
@@ -78,9 +89,9 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 
 	// Article entries
 	for _, art := range page.Articles {
-		fmt.Fprintf(&buf, "  - source: %s\n", escapeYamlString(art.SourceName))
-		fmt.Fprintf(&buf, "    sourceURL: %s\n", escapeYamlString(art.URL))
-		fmt.Fprintf(&buf, "    title: %s\n", escapeYamlString(art.Title))
+		fmt.Fprintf(&buf, "  - source: %s\n", yamlString(art.SourceName))
+		fmt.Fprintf(&buf, "    sourceURL: %s\n", yamlString(art.URL))
+		fmt.Fprintf(&buf, "    title: %s\n", yamlString(art.Title))
 		fmt.Fprintf(&buf, "    published: %s\n", formatTime(art.PublishedAt))
 	}
 
@@ -114,16 +125,98 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// escapeYamlString escapes a string for YAML double-quoted strings.
+// escapeYamlString escapes a string for use inside YAML double-quoted strings.
 func escapeYamlString(s string) string {
-	if s == "" {
-		return ""
-	}
 	// Simple escaping: replace backslash, double-quote, newline
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "\"", "\\\"")
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	return s
+}
+
+// yamlString renders a string as a YAML double-quoted scalar so values with
+// colons, leading indicators, quotes or empty strings round-trip unchanged.
+func yamlString(s string) string {
+	return "\"" + escapeYamlString(s) + "\""
+}
+
+// CleanupStale removes generated story pages whose slugs are no longer part of
+// the published set. Only files carrying the generator marker are deleted;
+// _index.md, hand-authored pages and unparseable files are always kept.
+// It returns an error describing per-file failures so callers can report them
+// without failing the export.
+func (p *Publisher) CleanupStale(ctx context.Context, pages []domain.StoryDetailPage) error {
+	if p.OutDir == "" {
+		return fmt.Errorf("OutDir must not be empty")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	storiesDir := filepath.Join(p.OutDir, "stories")
+	entries, err := os.ReadDir(storiesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // directory does not exist yet; nothing to clean
+		}
+		return fmt.Errorf("read stories dir failed: %w", err)
+	}
+
+	current := make(map[string]bool, len(pages))
+	for _, page := range pages {
+		current[string(page.Slug)] = true
+	}
+
+	var errs []error
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") || name == "_index.md" {
+			continue // collection index and non-markdown files are never touched
+		}
+		slug := strings.TrimSuffix(name, ".md")
+		if current[slug] {
+			continue // still part of the published set
+		}
+
+		// #nosec G304: path is OutDir + entry name from os.ReadDir of that same directory, both operator-controlled
+		data, err := os.ReadFile(filepath.Join(storiesDir, name))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("stale cleanup: read %s failed: %w", name, err))
+			continue
+		}
+		if !hasGeneratorMarker(data) {
+			continue // hand-authored or fixture page; keep
+		}
+		if err := os.Remove(filepath.Join(storiesDir, name)); err != nil {
+			errs = append(errs, fmt.Errorf("stale cleanup: remove %s failed: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// hasGeneratorMarker reports whether the YAML front-matter block of a Markdown
+// document contains the generator marker line. Files without a front-matter
+// block or without the marker are considered non-generated.
+func hasGeneratorMarker(data []byte) bool {
+	text := string(data)
+	if !strings.HasPrefix(text, "---\n") {
+		return false
+	}
+	rest := text[4:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return false
+	}
+	block := rest[:end]
+	for _, line := range strings.Split(block, "\n") {
+		if strings.TrimSpace(line) == generatorMarker {
+			return true
+		}
+	}
+	return false
 }
 
 // NoopPublisher is a no-op publisher for testing or offline scenarios.

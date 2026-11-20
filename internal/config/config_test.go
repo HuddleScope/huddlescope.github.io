@@ -67,6 +67,9 @@ func TestLoadPathVarsDefaults(t *testing.T) {
 	if cfg.DataDir != defaultDataDir {
 		t.Errorf("DataDir = %q; want default %q", cfg.DataDir, defaultDataDir)
 	}
+	if cfg.HugoContentDir != defaultHugoContentDir {
+		t.Errorf("HugoContentDir = %q; want default %q", cfg.HugoContentDir, defaultHugoContentDir)
+	}
 	if cfg.DataFile != defaultDataFile {
 		t.Errorf("DataFile = %q; want default %q", cfg.DataFile, defaultDataFile)
 	}
@@ -76,6 +79,7 @@ func TestLoadPathVarsFromEnv(t *testing.T) {
 	t.Setenv("HSC_HEARTBEAT_FILE", "tmp/heartbeat.json")
 	t.Setenv("HSC_FEEDS_FILE", "tmp/feeds.json")
 	t.Setenv("HSC_DATA_DIR", "tmp/data")
+	t.Setenv("HSC_HUGO_CONTENT_DIR", "tmp/content")
 	t.Setenv("HSC_DATA_FILE", "snap.json")
 
 	cfg, err := Load("")
@@ -91,6 +95,9 @@ func TestLoadPathVarsFromEnv(t *testing.T) {
 	if cfg.DataDir != "tmp/data" {
 		t.Errorf("DataDir = %q; want env override %q", cfg.DataDir, "tmp/data")
 	}
+	if cfg.HugoContentDir != "tmp/content" {
+		t.Errorf("HugoContentDir = %q; want env override %q", cfg.HugoContentDir, "tmp/content")
+	}
 	if cfg.DataFile != "snap.json" {
 		t.Errorf("DataFile = %q; want env override %q", cfg.DataFile, "snap.json")
 	}
@@ -103,6 +110,7 @@ func TestLoadPathVarsFromEnvFile(t *testing.T) {
 	content := `HSC_HEARTBEAT_FILE=file/heartbeat.json
 HSC_FEEDS_FILE=file/feeds.json
 HSC_DATA_DIR=file/data
+HSC_HUGO_CONTENT_DIR=file/content
 HSC_DATA_FILE=file-homepage.json
 `
 	if err := os.WriteFile(envFile, []byte(content), 0o644); err != nil {
@@ -122,6 +130,9 @@ HSC_DATA_FILE=file-homepage.json
 	if cfg.DataDir != "file/data" {
 		t.Errorf("DataDir = %q; want file value %q", cfg.DataDir, "file/data")
 	}
+	if cfg.HugoContentDir != "file/content" {
+		t.Errorf("HugoContentDir = %q; want file value %q", cfg.HugoContentDir, "file/content")
+	}
 	if cfg.DataFile != "file-homepage.json" {
 		t.Errorf("DataFile = %q; want file value %q", cfg.DataFile, "file-homepage.json")
 	}
@@ -134,6 +145,7 @@ func TestLoadPathVarsEnvBeatsFile(t *testing.T) {
 	content := `HSC_HEARTBEAT_FILE=file/heartbeat.json
 HSC_FEEDS_FILE=file/feeds.json
 HSC_DATA_DIR=file/data
+HSC_HUGO_CONTENT_DIR=file/content
 HSC_DATA_FILE=file-homepage.json
 `
 	if err := os.WriteFile(envFile, []byte(content), 0o644); err != nil {
@@ -143,6 +155,7 @@ HSC_DATA_FILE=file-homepage.json
 	// Env vars must override the config file values
 	t.Setenv("HSC_HEARTBEAT_FILE", "env/heartbeat.json")
 	t.Setenv("HSC_DATA_DIR", "env/data")
+	t.Setenv("HSC_HUGO_CONTENT_DIR", "env/content")
 
 	cfg, err := Load(envFile)
 	if err != nil {
@@ -156,6 +169,9 @@ HSC_DATA_FILE=file-homepage.json
 	}
 	if cfg.DataDir != "env/data" {
 		t.Errorf("DataDir = %q; want env override %q", cfg.DataDir, "env/data")
+	}
+	if cfg.HugoContentDir != "env/content" {
+		t.Errorf("HugoContentDir = %q; want env override %q", cfg.HugoContentDir, "env/content")
 	}
 	if cfg.DataFile != "file-homepage.json" {
 		t.Errorf("DataFile = %q; want file value (not set in env) %q", cfg.DataFile, "file-homepage.json")
@@ -503,13 +519,14 @@ func TestValidate(t *testing.T) {
 		valid    bool
 		errMatch string
 	}{
-		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json"}, true, ""},
-		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json"}, true, ""},
+		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content"}, true, ""},
+		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content"}, true, ""},
 		{"invalid-log-level", Config{LogLevel: "invalid"}, false, "invalid log level"},
 		{"empty-user-agent", Config{UserAgent: ""}, false, "UserAgent"},
 		{"empty-heartbeat-file", Config{HeartbeatFile: ""}, false, "HeartbeatFile"},
 		{"empty-feeds-file", Config{FeedsFile: ""}, false, "FeedsFile"},
 		{"empty-data-dir", Config{DataDir: ""}, false, "DataDir"},
+		{"empty-content-dir", Config{HugoContentDir: ""}, false, "HugoContentDir"},
 		{"empty-data-file", Config{DataFile: ""}, false, "DataFile"},
 		{"long-user-agent", Config{UserAgent: strings.Repeat("a", 513)}, false, "UserAgent too long"},
 		{"invalid-timeout-zero", Config{RequestTimeout: 0}, false, "RequestTimeout"},
@@ -575,6 +592,7 @@ func TestMarshalJSON(t *testing.T) {
 		FeedsFile:      "web/data/feeds.json",
 		DataDir:        "web/data",
 		DataFile:       "homepage.json",
+		HugoContentDir: "web/content",
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -606,6 +624,9 @@ func TestMarshalJSON(t *testing.T) {
 	}
 	if result["DataFile"] != "homepage.json" {
 		t.Errorf("json.Marshal() DataFile = %v; want %q", result["DataFile"], "homepage.json")
+	}
+	if result["HugoContentDir"] != "web/content" {
+		t.Errorf("json.Marshal() HugoContentDir = %v; want %q", result["HugoContentDir"], "web/content")
 	}
 }
 
