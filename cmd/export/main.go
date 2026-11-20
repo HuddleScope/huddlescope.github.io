@@ -76,6 +76,9 @@ func main() {
 	clustering := domain.NewClusterer()
 	scorer := domain.NewScorer().WithTime(time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC))
 
+	// Build story page publisher (HS-061)
+	storyPagePublisher := hugo.NewPublisher(resolvedDataDir, cfg.HugoBaseURL)
+
 	// Build snapshot publisher (writes to Hugo data directory)
 	fullDataPath := filepath.Join(resolvedDataDir, resolvedDataFile)
 	snapshotPublisher := hugo.NewDataPublisher(resolvedDataDir, resolvedDataFile)
@@ -87,6 +90,7 @@ func main() {
 		application.WithClusterer(clustering),
 		application.WithScorer(scorer),
 		application.WithSnapshotPublisher(snapshotPublisher),
+		application.WithStoryPagePublisher(storyPagePublisher),
 	)
 
 	// Run snapshot export
