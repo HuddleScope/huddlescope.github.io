@@ -1154,3 +1154,27 @@ func TestConfig_LookbackWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestStorage(t *testing.T) {
+	cfg := Config{
+		StorageBackend:   "turso",
+		StoragePath:      "/data/huddlescope.db",
+		TursoDatabaseURL: "libsql://example.turso.io",
+		TursoAuthToken:   "token-123",
+	}
+	got := cfg.Storage()
+	want := StorageConfig{
+		Backend:    "turso",
+		Path:       "/data/huddlescope.db",
+		TursoURL:   "libsql://example.turso.io",
+		TursoToken: "token-123",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Config.Storage() = %+v; want %+v", got, want)
+	}
+
+	// Empty config maps to a zero-value StorageConfig (factory applies its own defaults).
+	if got := (Config{}).Storage(); got != (StorageConfig{}) {
+		t.Errorf("zero Config.Storage() = %+v; want %+v", got, StorageConfig{})
+	}
+}
