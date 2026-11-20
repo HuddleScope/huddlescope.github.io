@@ -23,6 +23,7 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "Run export without processing")
 	dataDir := flag.String("data-dir", "", "Output directory for snapshot JSON (empty: use config DataDir)")
 	dataFile := flag.String("data-file", "", "Output filename for snapshot JSON (empty: use config DataFile)")
+	contentDir := flag.String("content-dir", "", "Output directory for story pages (empty: use config HugoContentDir)")
 	flag.Parse()
 
 	cfg, err := config.Load(*configFile)
@@ -53,6 +54,12 @@ func main() {
 		resolvedDataFile = cfg.DataFile
 	}
 
+	// Resolve story page output path: explicit flag wins, otherwise config
+	resolvedContentDir := *contentDir
+	if resolvedContentDir == "" {
+		resolvedContentDir = cfg.HugoContentDir
+	}
+
 	// Build repository
 	repo, err := storage.NewRepository(storage.RepositoryOptions{
 		Backend:    cfg.StorageBackend,
@@ -76,8 +83,8 @@ func main() {
 	clustering := domain.NewClusterer()
 	scorer := domain.NewScorer().WithTime(time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC))
 
-	// Build story page publisher (HS-061)
-	storyPagePublisher := hugo.NewPublisher(resolvedDataDir, cfg.HugoBaseURL)
+	// Build story page publisher (HS-061): writes into the Hugo content directory
+	storyPagePublisher := hugo.NewPublisher(resolvedContentDir, cfg.HugoBaseURL)
 
 	// Build snapshot publisher (writes to Hugo data directory)
 	fullDataPath := filepath.Join(resolvedDataDir, resolvedDataFile)
