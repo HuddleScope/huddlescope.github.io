@@ -181,6 +181,7 @@ func (p *Publisher) CleanupStale(ctx context.Context, pages []domain.StoryDetail
 			continue // still part of the published set
 		}
 
+		// #nosec G304: path is OutDir + entry name from os.ReadDir of that same directory, both operator-controlled
 		data, err := os.ReadFile(filepath.Join(storiesDir, name))
 		if err != nil {
 			errs = append(errs, fmt.Errorf("stale cleanup: read %s failed: %w", name, err))
