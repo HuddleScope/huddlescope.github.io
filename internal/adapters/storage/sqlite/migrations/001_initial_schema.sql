@@ -1,5 +1,7 @@
--- HS-005: Initial schema with normalized tables for sources, articles, stories, teams, and ranking history
+-- HS-005: Initial schema with normalized tables for sources, articles, stories, and ranking history
 -- Forward-only migrations; SQLite compatible.
+
+-- Note: teams and article_teams tables are orphaned and will be dropped in migration 005.
 
 -- Enable foreign keys (must be set per connection)
 PRAGMA foreign_keys = ON;

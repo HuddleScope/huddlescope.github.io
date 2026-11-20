@@ -287,8 +287,8 @@ func TestMigrateDB_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first MigrateDB failed: %v", err)
 	}
-	if len(versions) != 4 {
-		t.Errorf("first MigrateDB returned %d migrations, want 4", len(versions))
+	if len(versions) != 5 {
+		t.Errorf("first MigrateDB returned %d migrations, want 5", len(versions))
 	}
 
 	versions2, err := sqlite.MigrateDB(db)

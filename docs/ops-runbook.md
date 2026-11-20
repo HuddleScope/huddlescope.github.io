@@ -270,3 +270,13 @@ Heartbeat staleness is visually indicated in workflow run output:
 - The heartbeat file commits to the repo; the refresh workflow does not push any data back to the default branch
 - Backup/restore code implemented in sqlite package (HS-041), not yet wired into the pipeline
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline
+## Team registry
+
+The team registry is now stored in `conf/teams.yaml` and loaded via `config.TeamRegistry()`. The former database tables (`teams` and `article_teams`) were orphaned and removed in migration 005 (HS-063).
+
+The `ranking_snapshots` table retains a `team_id` column but it is now a plain business key, not a foreign key to the teams table. This allows retention archiving and backups to continue working without referencing the dropped tables.
+
+To view or interact with team data:
+1. Inspect `conf/teams.yaml` directly
+2. Use the application's team registry API via `config.TeamRegistry()` in code
+3. The ranking system uses team identity from the configuration, not the database
