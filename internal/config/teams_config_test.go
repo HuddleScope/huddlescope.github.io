@@ -379,6 +379,7 @@ func baseValidConfig() Config {
 		FeedsFile:      "web/data/feeds.json",
 		DataDir:        "web/data",
 		DataFile:       "homepage.json",
+		HugoContentDir: "web/content",
 	}
 }
 
@@ -554,6 +555,7 @@ func TestValidateProductionSuccess(t *testing.T) {
 		FeedsFile:        "web/data/feeds.json",
 		DataDir:          "web/data",
 		DataFile:         "homepage.json",
+		HugoContentDir:   "web/content",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() error = %v; want nil for valid production config", err)
