@@ -1,9 +1,11 @@
 name: Validate RSS Sources
+
 on:
   pull_request:
     branches:
       - main
   workflow_dispatch:
+
 jobs:
   validate:
     name: Validate RSS sources
@@ -13,22 +15,31 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 2
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version: stable
-      - name: Run make build
-        run: make build
-      - name: Validate RSS sources
+
+      - name: Validate configuration
         run: |
           set -euo pipefail
-          ./dist/feedcheck -json > /tmp/feedcheck-report.json || true
-          cat /tmp/feedcheck-report.json
+          echo "Validating RSS sources configuration..."
+          
+          # Run ingest in check mode to validate configuration
+          ./dist/ingest --check || {
+            echo "::error::Configuration validation failed. See ingest --check output above."
+            exit 1
+          }
+          
+          echo "✅ Configuration valid. All RSS source entries parse correctly."
+
       - name: Upload validation report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: feedcheck-report
-          path: /tmp/feedcheck-report.json
+          name: validation-report
+          path: |
+            /tmp/*.log
+            ${{ github.workspace }}/web/data/feeds.json
           retention-days: 7
-        continue-on-error: true
