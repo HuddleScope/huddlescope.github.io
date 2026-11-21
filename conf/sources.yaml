@@ -506,3 +506,104 @@ sources:
     verification: confirmed_xml
     priority: 20
     acceptable_use: allowed
+
+  - id: official-nyg
+    name: New York Giants (official)
+    publication: New York Giants official
+    url: https://www.giants.com/rss/news
+    category: team-official
+    team: NYG
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-nyj
+    name: New York Jets (official)
+    publication: New York Jets official
+    url: https://www.newyorkjets.com/rss/news
+    category: team-official
+    team: NYJ
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-phi
+    name: Philadelphia Eagles (official)
+    publication: Philadelphia Eagles official
+    url: https://www.philadelphiaeagles.com/rss/news
+    category: team-official
+    team: PHI
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-pit
+    name: Pittsburgh Steelers (official)
+    publication: Pittsburgh Steelers official
+    url: https://www.steelers.com/rss/news
+    category: team-official
+    team: PIT
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-sf
+    name: San Francisco 49ers (official)
+    publication: San Francisco 49ers official
+    url: https://www.49ers.com/rss/news
+    category: team-official
+    team: SF
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-sea
+    name: Seattle Seahawks (official)
+    publication: Seattle Seahawks official
+    url: https://www.seahawks.com/rss/news
+    category: team-official
+    team: SEA
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-tb
+    name: Tampa Bay Buccaneers (official)
+    publication: Tampa Bay Buccaneers official
+    url: https://www.buccaneers.com/rss/news
+    category: team-official
+    team: TB
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  - id: official-ten
+    name: Tennessee Titans (official)
+    publication: Tennessee Titans official
+    url: https://www.tennesseetitans.com/rss/news
+    category: team-official
+    team: TEN
+    enabled: true
+    verification: confirmed_xml
+    priority: 100
+    acceptable_use: allowed
+
+  # Washington Commanders feed is stale (last update: Nov 5, 2026)
+  # Keeping disabled until feed resumes with recent content
+  # - id: official-was
+  #   name: Washington Commanders (official)
+  #   publication: Washington Commanders official
+  #   url: https://www.commanders.com/rss/news
+  #   category: team-official
+  #   team: WAS
+  #   enabled: false
+  #   verification: stale_feed
+  #   priority: 100
+  #   acceptable_use: allowed
