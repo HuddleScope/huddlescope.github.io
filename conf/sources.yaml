@@ -728,3 +728,183 @@ sources:
     verification: confirmed_atom
     priority: 110
     acceptable_use: allowed
+
+  # === PFF Team Feeds (Evaluation Phase) ===
+  # 
+  # These feeds have been partially validated in #174. 
+  # See conf/sources.yaml for list of tested feeds (15 out of 32).
+  # Remaining 17 feeds not yet tested.
+  #
+  # To enable after full validation:
+  # 1. Complete validation of all 32 feeds
+  # 2. Check for overlap with national PFF feed (clustering handles deduplication)
+  # 3. Change enabled: true when validated
+  # 4. Update verification to confirmed_xml
+  #
+  # Team ID mapping (PFF uses internal IDs, not team abbreviations)
+  # Source: https://www.pff.com/pff-rss
+
+  - id: pff-mia-team
+    name: PFF Miami Dolphins Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/17
+    category: national
+    team: MIA
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-kc-team
+    name: PFF Kansas City Chiefs Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/11
+    category: national
+    team: KC
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-gb-team
+    name: PFF Green Bay Packers Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/21
+    category: national
+    team: GB
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-dal-team
+    name: PFF Dallas Cowboys Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/25
+    category: national
+    team: DAL
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-det-team
+    name: PFF Detroit Lions Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/9
+    category: national
+    team: DET
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-chi-team
+    name: PFF Chicago Bears Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/5
+    category: national
+    team: CHI
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-cle-team
+    name: PFF Cleveland Browns Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/6
+    category: national
+    team: CLE
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-cin-team
+    name: PFF Cincinnati Bengals Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/24
+    category: national
+    team: CIN
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-lac-team
+    name: PFF Los Angeles Chargers Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/4
+    category: national
+    team: LAC
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-lar-team
+    name: PFF Los Angeles Rams Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/3
+    category: national
+    team: LAR
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-no-team
+    name: PFF New Orleans Saints Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/18
+    category: national
+    team: NO
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-nyg-team
+    name: PFF New York Giants Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/22
+    category: national
+    team: NYG
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-nyj-team
+    name: PFF New York Jets Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/23
+    category: national
+    team: NYJ
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-pit-team
+    name: PFF Pittsburgh Steelers Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/30
+    category: national
+    team: PIT
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
+
+  - id: pff-sf-team
+    name: PFF San Francisco 49ers Team Feed
+    publication: PFF
+    url: https://www.pff.com/feed/teams/26
+    category: national
+    team: SF
+    enabled: false
+    verification: partial
+    priority: 150
+    acceptable_use: allowed
