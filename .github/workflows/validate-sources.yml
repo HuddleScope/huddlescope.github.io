@@ -21,6 +21,11 @@ jobs:
         with:
           go-version: stable
 
+      - name: Build binaries
+        run: |
+          echo "Building ingest, export, and heartbeat binaries..."
+          make build
+
       - name: Validate configuration
         run: |
           set -euo pipefail
