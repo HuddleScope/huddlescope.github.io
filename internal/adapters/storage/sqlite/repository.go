@@ -113,11 +113,11 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 
 		// Extract entities and article IDs from existing story_data if present
 		var legacyEntities []string
-		if len(storyData) > 0 {
-			var legacyStory domain.Story
-			if err := legacyStory.UnmarshalJSON(storyData); err == nil {
-				legacyEntities = legacyStory.Entities
-			}
+		var legacyEntitiesJSON string
+		err = db.QueryRow(`SELECT COALESCE(json_extract(story_data, '$.entities'), '[]') FROM stories WHERE story_key = ?`, story.ID).Scan(&legacyEntitiesJSON)
+		if err == nil && legacyEntitiesJSON != "" {
+			legacyEntities = []string{}
+			_ = json.Unmarshal([]byte(legacyEntitiesJSON), &legacyEntities)
 		}
 
 		// Merge entities from legacy and current
@@ -184,14 +184,14 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 		// Dedupe hit: update existing
 		// Get existing entities for comparison
 		var existingEntities string
-		err = db.QueryRow(`SELECT json_extract(story_data, '$.entities') FROM stories WHERE dedupe_key = ?`, story.DedupeKey).Scan(&existingEntities)
-		if err != nil && err != sql.ErrNoRows {
+		err = db.QueryRow(`SELECT COALESCE(json_extract(story_data, '$.entities'), '[]') FROM stories WHERE dedupe_key = ?`, story.DedupeKey).Scan(&existingEntities)
+		if err != nil {
 			return domain.UpsertUnchanged, fmt.Errorf("read existing entities: %w", err)
 		}
 
 		var legacyEntities []string
 		if existingEntities != "" {
-			json.Unmarshal([]byte(existingEntities), &legacyEntities)
+			_ = json.Unmarshal([]byte(existingEntities), &legacyEntities)
 		}
 
 		result, err := db.Exec(`UPDATE stories 
