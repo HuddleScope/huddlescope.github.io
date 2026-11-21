@@ -466,3 +466,43 @@ sources:
     verification: published_team_feed_directory
     priority: 100
     acceptable_use: allowed
+
+  - id: pff
+    name: Pro Football Focus
+    publication: Pro Football Focus
+    url: https://www.pff.com/feed
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 20
+    acceptable_use: allowed
+
+  - id: theguardian-nfl
+    name: The Guardian NFL
+    publication: The Guardian NFL
+    url: https://www.theguardian.com/sport/nfl/rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 20
+    acceptable_use: allowed
+
+  - id: skysports-nfl
+    name: Sky Sports NFL
+    publication: Sky Sports NFL
+    url: https://www.skysports.com/rss/12118
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 20
+    acceptable_use: allowed
+
+  - id: bbc-american-football
+    name: BBC American Football
+    publication: BBC American Football
+    url: https://feeds.bbci.co.uk/sport/american-football/rss.xml
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 20
+    acceptable_use: allowed
