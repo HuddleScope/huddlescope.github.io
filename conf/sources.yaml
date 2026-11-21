@@ -55,10 +55,10 @@ sources:
   - id: cbs-nfl
     name: CBS Sports NFL
     publication: CBS Sports NFL
-    url: https://www.cbssports.com/nfl/rss
+    url: https://www.cbssports.com/rss/headlines/nfl/
     category: national
-    enabled: false
-    verification: broken_feed
+    enabled: true
+    verification: confirmed_xml
     priority: 1
     acceptable_use: allowed
 
@@ -153,6 +153,36 @@ sources:
     acceptable_use: allowed
 
   # === Aggregators ===
+  - id: pft-nbc
+    name: ProFootballTalk / NBC Sports
+    publication: ProFootballTalk NBC Sports
+    url: https://www.nbcsports.com/profootballtalk.rss
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 1
+    acceptable_use: allowed
+
+  - id: yahoo-sports-nfl
+    name: Yahoo Sports NFL
+    publication: Yahoo Sports NFL
+    url: https://sports.yahoo.com/nfl/rss/
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 1
+    acceptable_use: allowed
+
+  - id: pfn
+    name: Pro Football Network
+    publication: Pro Football Network
+    url: https://www.profootballnetwork.com/feed/
+    category: national
+    enabled: true
+    verification: confirmed_xml
+    priority: 1
+    acceptable_use: allowed
+
   - id: yardbarker-nfl
     name: Yardbarker — NFL
     publication: Yardbarker  NFL
