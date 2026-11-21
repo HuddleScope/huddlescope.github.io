@@ -670,6 +670,10 @@ func (r *mockRepository) Upsert(story domain.Story) (domain.UpsertStatus, error)
 	return domain.UpsertCreated, nil
 }
 
+func (r *mockRepository) UpsertArticle(article domain.Article) error {
+	return nil
+}
+
 func (r *mockRepository) List() ([]domain.Story, error) {
 	if r.failList {
 		return nil, fmt.Errorf("mock: List failed")
