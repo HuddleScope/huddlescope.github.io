@@ -607,3 +607,124 @@ sources:
   #   verification: stale_feed
   #   priority: 100
   #   acceptable_use: allowed
+
+  - id: thephinsider
+    name: The Phinsider
+    publication: The Phinsider
+    url: https://www.thephinsider.com/rss/index.xml
+    category: team-official
+    team: MIA
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: arrowheadpride
+    name: Arrowhead Pride
+    publication: Arrowhead Pride
+    url: https://www.arrowheadpride.com/rss/index.xml
+    category: team-official
+    team: KC
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: acmepackingcompany
+    name: Acme Packing Company
+    publication: Acme Packing Company
+    url: https://www.acmepackingcompany.com/rss/index.xml
+    category: team-official
+    team: GB
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: bloggingtheboys
+    name: Blogging The Boys
+    publication: Blogging The Boys
+    url: https://www.bloggingtheboys.com/rss/index.xml
+    category: team-official
+    team: DAL
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: prideofdetroit
+    name: Pride of Detroit
+    publication: Pride of Detroit
+    url: https://www.prideofdetroit.com/rss/index.xml
+    category: team-official
+    team: DET
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: ninersnation
+    name: Niners Nation
+    publication: Niners Nation
+    url: https://www.ninersnation.com/rss/index.xml
+    category: team-official
+    team: SF
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: bigblueview
+    name: Big Blue View
+    publication: Big Blue View
+    url: https://www.bigblueview.com/rss/index.xml
+    category: team-official
+    team: NYG
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: baltimorebeatdown
+    name: Baltimore Beatdown
+    publication: Baltimore Beatdown
+    url: https://www.baltimorebeatdown.com/rss/index.xml
+    category: team-official
+    team: BAL
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: ganggreennation
+    name: Gang Green Nation
+    publication: Gang Green Nation
+    url: https://www.ganggreennation.com/rss/index.xml
+    category: team-official
+    team: NYJ
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: buffalorumblings
+    name: Buffalo Rumblings
+    publication: Buffalo Rumblings
+    url: https://www.buffalorumblings.com/rss/index.xml
+    category: team-official
+    team: BUF
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
+
+  - id: hogshaven
+    name: Hogs Haven
+    publication: Hogs Haven
+    url: https://www.hogshaven.com/rss/index.xml
+    category: team-official
+    team: WAS
+    enabled: true
+    verification: confirmed_atom
+    priority: 110
+    acceptable_use: allowed
