@@ -371,7 +371,16 @@ func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
 
 	groups := a.clusteringEngine.Cluster(articles)
 
-	// Persist grouping results back to database
+	// Persist Article objects to the articles table before clustering
+	// This ensures articles are stored before stories reference them
+	for _, article := range articles {
+		err := a.repo.UpsertArticle(article)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("failed to upsert article %s: %w", article.ID, err))
+		}
+	}
+
+	// Persist grouped story results back to database
 	newStories := make([]domain.Story, 0, len(groups))
 	for _, g := range groups {
 		newStory := domain.NewStoryFromGroup(g)
