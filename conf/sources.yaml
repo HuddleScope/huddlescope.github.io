@@ -183,14 +183,35 @@ sources:
     priority: 1
     acceptable_use: allowed
 
+  - id: pfrumors
+    name: Pro Football Rumors
+    publication: Pro Football Rumors
+    url: https://www.profootballrumors.com/feed
+    category: aggregator
+    enabled: true
+    verification: confirmed_xml
+    priority: 10
+    acceptable_use: allowed
+
+  - id: nfltraderrumors
+    name: NFL Trade Rumors
+    publication: NFL Trade Rumors
+    url: https://nfltraderumors.co/feed/
+    category: aggregator
+    enabled: true
+    verification: confirmed_xml
+    priority: 10
+    acceptable_use: allowed
+
   - id: yardbarker-nfl
     name: Yardbarker — NFL
-    publication: Yardbarker  NFL
+    publication: Yardbarker NFL
     url: https://www.yardbarker.com/rss/sport/2
     category: aggregator
-    enabled: false
-    verification: directory_listed
-    priority: 15
+    enabled: true
+    verification: confirmed_xml
+    priority: 10
+    acceptable_use: allowed
 
   # === Team Official Feeds ===
   - id: official-ari
