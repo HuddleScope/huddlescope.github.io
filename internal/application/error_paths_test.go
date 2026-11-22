@@ -25,6 +25,10 @@ func (r *errRepository) Upsert(story domain.Story) (domain.UpsertStatus, error) 
 	return domain.UpsertCreated, nil
 }
 
+func (r *errRepository) UpsertArticle(article domain.Article) error {
+	return nil
+}
+
 func (r *errRepository) List() ([]domain.Story, error) {
 	if r.failList {
 		return nil, fmt.Errorf("list boom")

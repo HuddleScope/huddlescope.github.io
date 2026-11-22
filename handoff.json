@@ -1,0 +1,13 @@
+{
+  "issueNumber": 119,
+  "issueTitle": "[HS-064] Persist articles in the articles table; remove the duplicated story_data JSON",
+  "prNumber": 188,
+  "prUrl": "https://github.com/HuddleScope/huddlescope.github.io/pull/188",
+  "branch": "119-persist-articles-table",
+  "mergePolicy": "auto",
+  "squashMerge": true,
+  "status": "PR_UPDATED",
+  "lastCommit": "4b84019",
+  "createdAt": "2026-11-21",
+  "updatedAt": "2026-11-21"
+}

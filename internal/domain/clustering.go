@@ -110,8 +110,10 @@ type Article struct {
 	Title       string
 	Summary     string
 	URL         string
+	GUID        string // optional feed GUID
 	PublishedAt string
 	FirstSeenAt string
+	Author      string // optional author name
 	Entities    []string
 }
 
@@ -123,8 +125,10 @@ func NewArticle(feedEntry FeedEntry, id string, firstSeenAt string) Article {
 		Title:       NormalizeTitle(feedEntry.Title),
 		Summary:     SanitizeHTML(feedEntry.Summary, 1024),
 		URL:         CanonicalURLEntry(feedEntry.URL),
+		GUID:        feedEntry.GUID,
 		PublishedAt: feedEntry.PublishedAt.UTC().Format(time.RFC3339),
 		FirstSeenAt: firstSeenAt,
+		Author:      "",
 		Entities:    feedEntry.Entities,
 	}
 }
@@ -321,17 +325,26 @@ func NewGroupingResult() GroupingResult {
 
 // NewStoryFromGroup creates a Story from a StoryGroup.
 func NewStoryFromGroup(group StoryGroup) Story {
-	var earliest Article
-	for i, a := range group.Articles {
-		if i == 0 {
+	// Track earliest and latest for metadata
+	var earliest, latest Article
+	var earliestIsSet, latestIsSet bool
+
+	for _, a := range group.Articles {
+		publishedAt := a.ParsePublishedAtOrZero()
+		if !earliestIsSet || publishedAt.Before(earliest.ParsePublishedAtOrZero()) {
 			earliest = a
-		} else if a.ParsePublishedAtOrZero().Before(earliest.ParsePublishedAtOrZero()) {
-			earliest = a
+			earliestIsSet = true
+		}
+		if !latestIsSet || publishedAt.After(latest.ParsePublishedAtOrZero()) {
+			latest = a
+			latestIsSet = true
 		}
 	}
 
+	articleData := make([]Article, len(group.Articles))
 	articleIDs := make([]string, len(group.Articles))
 	for i, a := range group.Articles {
+		articleData[i] = a
 		articleIDs[i] = a.ID
 	}
 	sort.Strings(articleIDs)
@@ -343,6 +356,7 @@ func NewStoryFromGroup(group StoryGroup) Story {
 		PublishedAt:  earliest.ParsePublishedAtOrZero(),
 		Summary:      earliest.Summary,
 		URL:          earliest.URL,
+		ArticleData:  articleData,
 		ArticleIDs:   articleIDs,
 		Headline:     group.Headline,
 		GUID:         earliest.URL,

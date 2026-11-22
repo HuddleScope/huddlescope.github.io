@@ -11,6 +11,7 @@ import (
 // Repository interface for story storage.
 type Repository interface {
 	Upsert(story domain.Story) (domain.UpsertStatus, error)
+	UpsertArticle(article domain.Article) error
 	List() ([]domain.Story, error)
 	Count() (int, error)
 }
@@ -95,4 +96,12 @@ func (r *MemoryRepository) Count() (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.stories), nil
+}
+
+// UpsertArticle adds or updates an Article in the memory repository.
+// This is a no-op for pure memory storage - articles are not persisted.
+func (r *MemoryRepository) UpsertArticle(article domain.Article) error {
+	// No-op: Memory repository doesn't persist articles
+	// This exists to satisfy the domain.Repository interface
+	return nil
 }

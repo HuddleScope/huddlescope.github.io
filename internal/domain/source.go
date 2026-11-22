@@ -27,6 +27,7 @@ type ExportResult struct {
 // Repository interface for story storage.
 type Repository interface {
 	Upsert(story Story) (UpsertStatus, error)
+	UpsertArticle(article Article) error
 	List() ([]Story, error)
 	Count() (int, error)
 }

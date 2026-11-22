@@ -52,6 +52,11 @@ func (r *Repository) Upsert(story domain.Story) (domain.UpsertStatus, error) {
 	return sqlite.Upsert(r.db, story)
 }
 
+// UpsertArticle implements domain.Repository.UpsertArticle.
+func (r *Repository) UpsertArticle(article domain.Article) error {
+	return sqlite.UpsertArticle(r.db, article)
+}
+
 // List implements domain.Repository.List.
 func (r *Repository) List() ([]domain.Story, error) {
 	return sqlite.List(r.db)
