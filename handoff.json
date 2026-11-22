@@ -6,6 +6,8 @@
   "branch": "119-persist-articles-table",
   "mergePolicy": "auto",
   "squashMerge": true,
-  "status": "PR_CREATED",
-  "createdAt": "2026-11-21"
+  "status": "PR_UPDATED",
+  "lastCommit": "4b84019",
+  "createdAt": "2026-11-21",
+  "updatedAt": "2026-11-21"
 }

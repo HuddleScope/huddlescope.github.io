@@ -37,8 +37,8 @@ type Story struct {
 	Summary      string
 	URL          string
 	ArticleData  []Article // full article data for articles in this story (HS-064)
-	ArticleIDs   []string // IDs of articles in this story group (HS-010)
-	Headline     string   // normalized headline for the story (HS-010)
+	ArticleIDs   []string  // IDs of articles in this story group (HS-010)
+	Headline     string    // normalized headline for the story (HS-010)
 	GUID         string
 	CanonicalURL string
 	DedupeKey    string
@@ -51,20 +51,20 @@ type Story struct {
 // Note: articleData is deprecated for persistence; populated by storage layer
 func (s Story) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ID           string     `json:"id"`
-		Title        string     `json:"title"`
-		Source       string     `json:"source"`
-		PublishedAt  string     `json:"publishedAt"`
-		Summary      string     `json:"summary"`
-		URL          string     `json:"url"`
-		ArticleIDs   []string   `json:"articleIDs"`
-		Headline     string     `json:"headline"`
-		GUID         string     `json:"guid"`
-		CanonicalURL string     `json:"canonicalURL"`
-		DedupeKey    string     `json:"dedupeKey"`
-		Entities     []string   `json:"entities"`
-		FirstSeenAt  string     `json:"firstSeenAt"`
-		UpdatedAt    string     `json:"updatedAt"`
+		ID           string   `json:"id"`
+		Title        string   `json:"title"`
+		Source       string   `json:"source"`
+		PublishedAt  string   `json:"publishedAt"`
+		Summary      string   `json:"summary"`
+		URL          string   `json:"url"`
+		ArticleIDs   []string `json:"articleIDs"`
+		Headline     string   `json:"headline"`
+		GUID         string   `json:"guid"`
+		CanonicalURL string   `json:"canonicalURL"`
+		DedupeKey    string   `json:"dedupeKey"`
+		Entities     []string `json:"entities"`
+		FirstSeenAt  string   `json:"firstSeenAt"`
+		UpdatedAt    string   `json:"updatedAt"`
 	}{
 		ID:           s.ID,
 		Title:        s.Title,
@@ -87,21 +87,21 @@ func (s Story) MarshalJSON() ([]byte, error) {
 // Supports both old format (articleIDs) and new format (articleData) for backward compatibility.
 func (s *Story) UnmarshalJSON(data []byte) error {
 	var tmp struct {
-		ID           string     `json:"id"`
-		Title        string     `json:"title"`
-		Source       string     `json:"source"`
-		PublishedAt  string     `json:"publishedAt"`
-		Summary      string     `json:"summary"`
-		URL          string     `json:"url"`
-		ArticleData  []Article  `json:"articleData"`
-		ArticleIDs   []string   `json:"articleIDs"`
-		Headline     string     `json:"headline"`
-		GUID         string     `json:"guid"`
-		CanonicalURL string     `json:"canonicalURL"`
-		DedupeKey    string     `json:"dedupeKey"`
-		Entities     []string   `json:"entities"`
-		FirstSeenAt  string     `json:"firstSeenAt"`
-		UpdatedAt    string     `json:"updatedAt"`
+		ID           string    `json:"id"`
+		Title        string    `json:"title"`
+		Source       string    `json:"source"`
+		PublishedAt  string    `json:"publishedAt"`
+		Summary      string    `json:"summary"`
+		URL          string    `json:"url"`
+		ArticleData  []Article `json:"articleData"`
+		ArticleIDs   []string  `json:"articleIDs"`
+		Headline     string    `json:"headline"`
+		GUID         string    `json:"guid"`
+		CanonicalURL string    `json:"canonicalURL"`
+		DedupeKey    string    `json:"dedupeKey"`
+		Entities     []string  `json:"entities"`
+		FirstSeenAt  string    `json:"firstSeenAt"`
+		UpdatedAt    string    `json:"updatedAt"`
 	}
 	if err := json.Unmarshal(data, &tmp); err != nil {
 		return err

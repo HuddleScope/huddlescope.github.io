@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -100,11 +101,11 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 		var storyData []byte
 
 		err = db.QueryRow(`
-			SELECT title, summary, canonical_url, published_at, story_data, headline,
+			SELECT title, summary, canonical_url, published_at, story_data, headline, guid,
 			      first_seen_at, updated_at
 			FROM stories
 			WHERE story_key = ?
-		`, story.ID).Scan(&title, &summary, &canonicalURL, &publishedAt, &storyData, &headline,
+		`, story.ID).Scan(&title, &summary, &canonicalURL, &publishedAt, &storyData, &headline, &guid,
 			&firstSeenAt, &updatedAt)
 
 		if err != nil {
@@ -125,14 +126,15 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 
 		// Determine if there are meaningful changes
 		otherStory := domain.Story{
-			Title:       title,
-			Summary:     summary,
+			Title:        title,
+			Summary:      summary,
 			CanonicalURL: canonicalURL,
-			PublishedAt: parseTimestamp(publishedAt),
-			GUID:        guid,
-			Headline:    headline,
-			FirstSeenAt: parseTimestamp(firstSeenAt),
-			UpdatedAt:   parseTimestamp(updatedAt),
+			PublishedAt:  parseTimestamp(publishedAt),
+			GUID:         guid,
+			Headline:     headline,
+			Entities:     legacyEntities,
+			FirstSeenAt:  parseTimestamp(firstSeenAt),
+			UpdatedAt:    parseTimestamp(updatedAt),
 		}
 
 		// Check if merged entities differ from existing (normalized comparison)
@@ -169,7 +171,7 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 			WHERE story_key = ?`,
 			title, summary, canonicalURL,
 			timestampToString(story.PublishedAt), string(data), headline,
-			firstSeenAt, updatedAt, story.ID)
+			firstSeenAt, story.ID)
 		if err != nil {
 			return domain.UpsertUnchanged, fmt.Errorf("update story: %w", err)
 		}
@@ -182,9 +184,10 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 	err = db.QueryRow("SELECT 1 FROM stories WHERE dedupe_key = ? LIMIT 1", story.DedupeKey).Scan(&dedupeFound)
 	if err == nil && dedupeFound {
 		// Dedupe hit: update existing
-		// Get existing entities for comparison
+		// Get existing story_id and entities for the deduped row
 		var existingEntities string
-		err = db.QueryRow(`SELECT COALESCE(json_extract(story_data, '$.entities'), '[]') FROM stories WHERE dedupe_key = ?`, story.DedupeKey).Scan(&existingEntities)
+		q := db.QueryRow(`SELECT story_id, COALESCE(json_extract(story_data, '$.entities'), '[]') FROM stories WHERE dedupe_key = ?`, story.DedupeKey)
+		err = q.Scan(&existingID, &existingEntities)
 		if err != nil {
 			return domain.UpsertUnchanged, fmt.Errorf("read existing entities: %w", err)
 		}
@@ -274,7 +277,7 @@ func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 
 // upsertArticles inserts or updates articles in the articles table.
 func upsertArticles(db *sql.DB, articles []domain.Article) error {
-	if articles == nil || len(articles) == 0 {
+	if len(articles) == 0 {
 		return nil
 	}
 
@@ -285,10 +288,10 @@ func upsertArticles(db *sql.DB, articles []domain.Article) error {
 	}
 
 	for _, article := range articles {
-		// Check if article exists
+		// Check if article exists; a missing row means a fresh insert
 		var exists bool
 		err := tx.QueryRow("SELECT 1 FROM articles WHERE article_id = ? LIMIT 1", article.ID).Scan(&exists)
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			_ = tx.Rollback()
 			return fmt.Errorf("check article: %w", err)
 		}
@@ -333,8 +336,11 @@ func upsertArticles(db *sql.DB, articles []domain.Article) error {
 }
 
 // upsertStoryArticles inserts or updates story_articles links.
+// Article IDs without a matching articles row are skipped: legacy story_data
+// IDs may predate the articles table, and linking them would violate the
+// foreign key.
 func upsertStoryArticles(db *sql.DB, storyID string, articleIDs []string) error {
-	if articleIDs == nil || len(articleIDs) == 0 {
+	if len(articleIDs) == 0 {
 		return nil
 	}
 
@@ -344,9 +350,32 @@ func upsertStoryArticles(db *sql.DB, storyID string, articleIDs []string) error 
 		return fmt.Errorf("delete existing story_articles: %w", err)
 	}
 
+	// Keep only article IDs that exist in the articles table
+	placeholders := make([]string, len(articleIDs))
+	args := make([]interface{}, len(articleIDs))
+	for i, id := range articleIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	// #nosec G202: only static "?" placeholders are concatenated; IDs are bound as arguments
+	rows, err := db.Query(`SELECT article_id FROM articles WHERE article_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("check story_articles: %w", err)
+	}
+	existing := make(map[string]bool, len(articleIDs))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan story_articles: %w", err)
+		}
+		existing[id] = true
+	}
+	_ = rows.Close()
+
 	// Insert new links
 	for _, articleID := range articleIDs {
-		if articleID == "" {
+		if articleID == "" || !existing[articleID] {
 			continue
 		}
 		_, err := db.Exec(`INSERT OR IGNORE INTO story_articles (story_id, article_id) VALUES (?, ?)`,
@@ -439,6 +468,7 @@ func ListWithCtx(ctx context.Context, db *sql.DB) ([]domain.Story, error) {
 				placeholders[j] = "?"
 				args[j] = id
 			}
+			// #nosec G202: only static "?" placeholders are concatenated; IDs are bound as arguments
 			query := `SELECT sa.story_id, a.article_id, a.source_id, a.url, a.guid, a.title,
 				a.summary, a.author, a.published_at, a.first_seen_at, a.entities
 			FROM story_articles sa
@@ -453,20 +483,20 @@ func ListWithCtx(ctx context.Context, db *sql.DB) ([]domain.Story, error) {
 
 			for batchRows.Next() {
 				var sa struct {
-					storyID   string
-					articleID string
-					sourceID  string
-					url       string
-					guid      string
-					title     string
-					summary   string
-					author    string
+					storyID     string
+					articleID   string
+					sourceID    string
+					url         string
+					guid        string
+					title       string
+					summary     string
+					author      string
 					publishedAt string
 					firstSeenAt string
-					enities   string
+					entities    string
 				}
 				if err := batchRows.Scan(&sa.storyID, &sa.articleID, &sa.sourceID, &sa.url, &sa.guid, &sa.title,
-					&sa.summary, &sa.author, &sa.publishedAt, &sa.firstSeenAt, &sa.enities); err != nil {
+					&sa.summary, &sa.author, &sa.publishedAt, &sa.firstSeenAt, &sa.entities); err != nil {
 					_ = batchRows.Close()
 					return nil, fmt.Errorf("scan article: %w", err)
 				}
@@ -484,9 +514,9 @@ func ListWithCtx(ctx context.Context, db *sql.DB) ([]domain.Story, error) {
 				}
 
 				// Parse entities JSON
-				if sa.enities != "" {
+				if sa.entities != "" {
 					var entities []string
-					err := json.Unmarshal([]byte(sa.enities), &entities)
+					err := json.Unmarshal([]byte(sa.entities), &entities)
 					if err == nil {
 						article.Entities = entities
 					}
@@ -613,29 +643,6 @@ func equalStringArrays(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// mergeArticleIDs merges two article ID arrays, deduplicating and sorting.
-func mergeArticleIDs(existing []string, new []string) []string {
-	seen := make(map[string]bool)
-	result := []string{}
-
-	for _, id := range existing {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			result = append(result, id)
-		}
-	}
-
-	for _, id := range new {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			result = append(result, id)
-		}
-	}
-
-	sort.Strings(result)
-	return result
 }
 
 // timestampToString converts time.Time to ISO8601 string (20 chars).

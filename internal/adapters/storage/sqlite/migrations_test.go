@@ -19,7 +19,7 @@ func TestMigrate005DropsOrphanedTablesPreservesRanking(t *testing.T) {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 
-	// Check that we have 5 migrations now
+	// Check that we have 6 migrations now (001-006)
 	if len(versions) != 6 {
 		t.Errorf("expected 6 migrations, got %d: %v", len(versions), versions)
 	}
