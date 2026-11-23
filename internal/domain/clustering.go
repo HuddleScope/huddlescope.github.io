@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -237,12 +238,26 @@ type Clusterer struct {
 	TemporalWindow      time.Duration
 }
 
+// TitleWeight and SummaryWeight are the weights for combining title and summary
+// similarity scores in the clustering algorithm. Title weight should be higher
+// as titles are typically more discriminative than summaries.
+const (
+	TitleWeight   = 0.70
+	SummaryWeight = 0.30
+)
+
 // NewClusterer creates a new Clusterer with default settings.
 func NewClusterer() *Clusterer {
 	return &Clusterer{
 		SimilarityThreshold: 0.50,
 		TemporalWindow:      48 * time.Hour,
 	}
+}
+
+// FingerprintSummary tokenizes a summary/lead text for matching.
+// Uses the same normalization as Title (stopwords removal, lowercase, etc.).
+func FingerprintSummary(text string) []string {
+	return TokenizeTitle(text)
 }
 
 // Cluster groups the input articles into story groups.
@@ -282,14 +297,53 @@ func (c *Clusterer) Cluster(articles []Article) []StoryGroup {
 				}
 			}
 
-			score := JaccardSimilarity(
-				TokenizeTitle(article.Title),
-				TokenizeTitle(group.Headline),
-			)
+			// Check for exact URL match (fast path for canonicalized URLs)
+			urlMatch := false
+			if article.URL != "" {
+				// Only match if same source ID OR shared entity (or no entities on either)
+				sourceIDMatch := article.SourceID == group.Articles[0].SourceID
+				entityOverlap := article.HasOverlappingEntity(&group.Articles[0])
 
-			if score > bestScore && score >= c.SimilarityThreshold {
-				bestScore = score
+				// Check if any article in group has matching canonical URL
+				for _, ga := range group.Articles {
+					if CanonicalURL(article.URL) == CanonicalURL(ga.URL) {
+						if sourceIDMatch || entityOverlap || (!article.HasEntities() && !ga.HasEntities()) {
+							urlMatch = true
+							break
+						}
+					}
+				}
+			}
+
+			// If URL match found, this is a syndicated article - merge immediately
+			if urlMatch {
 				bestGroup = i
+				bestScore = 1.0
+			} else {
+				// Calculate combined score: weighted combination of title and summary
+				articleTokens := TokenizeTitle(article.Title)
+				groupTokens := TokenizeTitle(group.Headline)
+				titleScore := JaccardSimilarity(articleTokens, groupTokens)
+
+				// Also check summary similarity if both have summaries
+				summaryScore := 0.0
+				if article.Summary != "" && group.Articles[0].Summary != "" {
+					articleSummaryTokens := FingerprintSummary(article.Summary)
+					groupSummaryTokens := FingerprintSummary(group.Articles[0].Summary)
+					summaryScore = JaccardSimilarity(articleSummaryTokens, groupSummaryTokens)
+				}
+
+				// Combined score: weighted average
+				combinedScore := TitleWeight*titleScore + SummaryWeight*summaryScore
+
+				// For AC-3: if summary score is high enough, use it instead of combined
+				// This allows merging when summaries are identical but titles differ
+				score := math.Max(combinedScore, summaryScore)
+
+				if score > bestScore && score >= c.SimilarityThreshold {
+					bestScore = score
+					bestGroup = i
+				}
 			}
 		}
 

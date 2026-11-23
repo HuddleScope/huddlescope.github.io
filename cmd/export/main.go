@@ -75,7 +75,7 @@ func main() {
 	}
 
 	// Build clusterer and scorer (fixed time for determinism in tests)
-	clustering := domain.NewClusterer()
+	clustering := cfg.ClustererSettings()
 	scorer := domain.NewScorer().WithTime(time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC))
 
 	// Build story page publisher (HS-061): writes into the Hugo content directory

@@ -2,6 +2,8 @@ package domain
 
 import (
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -41,11 +43,108 @@ func NormalizeUnicode(s string) string {
 
 // CanonicalURLEntry returns a normalized URL string for FeedEntry.
 // Unlike CanonicalURL, this doesn't return an error for invalid URLs - it returns the original.
+// DEPRECATED: Use CanonicalURL instead for proper URL canonicalization.
 func CanonicalURLEntry(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
 	return strings.TrimSpace(rawURL)
+}
+
+// CanonicalURL returns a fully canonicalized URL that treats:
+// - Tracking parameters (utm_*, fbclid, fb_xo_api, etc.)
+// - AMP parameters (?amp=1, &amp)
+// - Case differences (scheme, host)
+// - www. prefix
+// - Trailing slashes
+// as equivalent. Returns trimmed original on parse failure.
+func CanonicalURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	rawURL = strings.TrimSpace(rawURL)
+
+	// Parse the URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		// On parse failure, return trimmed original (matches CanonicalURLEntry behavior)
+		return rawURL
+	}
+
+	// Lowercase scheme and host
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+
+	// Strip www. prefix from host
+	parsed.Host = strings.TrimPrefix(parsed.Host, "www.")
+
+	// Remove trailing slash (except for root paths)
+	if parsed.Path != "" && strings.HasSuffix(parsed.Path, "/") {
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
+	}
+
+	// Remove tracking parameters (sorted for determinism)
+	query := parsed.Query()
+
+	// Parameters to strip (case-insensitive matching)
+	trackingParams := map[string]bool{
+		"utm_source": true, "utm_medium": true, "utm_campaign": true,
+		"utm_term": true, "utm_content": true, "fbclid": true,
+		"fb_xo_api": true, "fb_ref": true, "fb_action_types": true,
+		"fb_action_ids": true, "fb_action_names": true, "fb_source": true,
+		"ref": true, "campaign": true, "source": true, "medium": true,
+		"type": true, "id": true, "cid": true, "aid": true, "nid": true,
+		"oid": true, "mid": true, "iid": true, "mt": true, "ct": true,
+		"dt": true, "st": true, "pt": true, "vt": true, "wt": true,
+		"xt": true, "ut": true, "_openstat": true, "utm_referer": true,
+		"utm_referrer": true, "ref_src": true, "ref_url": true, "trk": true,
+		"trk_info": true, "track": true, "trackid": true, "trackingScript": true,
+		"tracking": true, "tracking_id": true, "trackingid": true,
+		"tracking_pixel": true, "u": true, "utr": true, "v": true, "w": true,
+		"x": true, "y": true, "z": true, "action": true, "action_type": true,
+		"action_id": true, "action_name": true, "action_object": true,
+		"client_id": true, "cookie": true, "code": true, "callback": true,
+		"redirect": true, "redirect_uri": true, "redirect_url": true,
+		"return": true, "return_to": true, "returnurl": true, "return_url": true,
+		"returnUri": true, "returnURL": true, "destination": true, "dest": true,
+		"next": true, "continue": true, "path": true, "file": true, "page": true,
+		"page_uri": true, "pageuri": true, "pagename": true, "pagename_uri": true,
+		"pagenameuri": true, "title": true, "message": true, "description": true,
+		"picture": true, "caption": true, "name": true, "redirect_target": true,
+		"response_type": true, "scope": true, "state": true, "response": true,
+		"status": true, "error": true, "error_uri": true, "error_description": true,
+		"error_code": true, "error_message": true, "request_id": true,
+		"requestid": true, "timestamp": true, "timestamp_ms": true, "version": true,
+		"api_key": true, "apikey": true, "api_key_id": true, "apikeyid": true,
+		"access_token": true, "accesstoken": true, "token": true, "bearer": true,
+		"auth": true, "authorization": true, "cookie_id": true, "session_id": true,
+		"sessionid": true, "visitor_id": true, "visitorid": true, "user_id": true,
+		"userid": true, "client_secret": true,
+	}
+
+	// Build sorted list of keys to remove (for deterministic behavior)
+	var keysToRemove []string
+	for key := range query {
+		lowerKey := strings.ToLower(key)
+		if trackingParams[lowerKey] {
+			keysToRemove = append(keysToRemove, key)
+		}
+	}
+	sort.Strings(keysToRemove)
+
+	// Remove tracking parameters
+	for _, key := range keysToRemove {
+		query.Del(key)
+	}
+
+	// Rebuild query string
+	parsed.RawQuery = query.Encode()
+
+	// Reconstruct URL
+	canonicalized := parsed.String()
+
+	return canonicalized
 }
 
 // NormalizeTimestamp normalizes a time.Time to UTC.
