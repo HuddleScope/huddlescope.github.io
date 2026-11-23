@@ -32,6 +32,15 @@ type Repository interface {
 	Count() (int, error)
 }
 
+// CorrectionRuleRepository is the storage contract for persisted correction
+// rules (AC-3b). It is implemented by the storage adapters and injected into
+// the application layer; when not injected the application simply skips rule
+// application (engine independence, AC-4).
+type CorrectionRuleRepository interface {
+	SaveRule(rule CorrectionRule) error
+	ListRules() ([]CorrectionRule, error)
+}
+
 // FeedFetcher interface for fetching entries from feeds.
 type FeedFetcher interface {
 	Fetch(ctx context.Context, sourceID string) ([]FeedEntry, error)

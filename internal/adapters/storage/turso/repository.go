@@ -77,3 +77,9 @@ func (r *Repository) Migrate() error {
 func (r *Repository) Close() error {
 	return r.db.Close()
 }
+
+// DB returns the underlying *sql.DB handle so companion repositories (e.g. the
+// correction-rule repository) can share the connection.
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}

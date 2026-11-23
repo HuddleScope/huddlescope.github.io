@@ -1,0 +1,48 @@
+{
+  "description": "Ground-truth clustering benchmark for issue #25 (AC-2). Synthetic content only; no copyrighted text or real URLs. Each case lists articles with a ground-truth cluster assignment (expectedCluster). A false positive is a pair the algorithm merged that ground truth has in different clusters; a false negative is a pair ground truth has in the same cluster that the algorithm split.",
+  "cases": [
+    {
+      "name": "same-team-different-events-no-merge",
+      "articles": [
+        { "id": "b1", "source": "espn", "title": "Chiefs Sign Cornerback", "summary": "Kansas City added a cornerback on a one-year deal.", "url": "https://espn.example/article?id=42", "publishedAt": "2024-01-01T10:00:00Z", "entities": ["chiefs", "cornerback"], "expectedCluster": 1 },
+        { "id": "b2", "source": "fox-sports", "title": "Chiefs Trade Quarterback", "summary": "Kansas City sent a quarterback to another club.", "url": "https://foxsports.example/article?id=42", "publishedAt": "2024-01-01T11:00:00Z", "entities": ["chiefs", "quarterback"], "expectedCluster": 2 }
+      ]
+    },
+    {
+      "name": "duplicate-coverage-same-event-merge",
+      "articles": [
+        { "id": "d1", "source": "espn", "title": "Steelers Draft Linebacker Marcus Lee", "summary": "Pittsburgh selected linebacker Marcus Lee in the third round.", "url": "https://espn.example/draft-1", "publishedAt": "2024-01-02T10:00:00Z", "entities": ["steelers", "marcus-lee"], "expectedCluster": 1 },
+        { "id": "d2", "source": "fox-sports", "title": "Steelers Select Linebacker Marcus Lee", "summary": "Pittsburgh selected linebacker Marcus Lee in the third round.", "url": "https://foxsports.example/draft-2", "publishedAt": "2024-01-02T11:00:00Z", "entities": ["steelers", "marcus-lee"], "expectedCluster": 1 },
+        { "id": "d3", "source": "cbs-sports", "title": "Steelers Take Linebacker Marcus Lee", "summary": "Pittsburgh selected linebacker Marcus Lee in the third round.", "url": "https://cbssports.example/draft-3", "publishedAt": "2024-01-02T12:00:00Z", "entities": ["steelers", "marcus-lee"], "expectedCluster": 1 }
+      ]
+    },
+    {
+      "name": "disjoint-entities-no-merge",
+      "articles": [
+        { "id": "e1", "source": "det-news", "title": "Lions Win Sunday Game", "summary": "Detroit took the win on the road.", "url": "https://det.example/1", "publishedAt": "2024-01-03T10:00:00Z", "entities": ["lions"], "expectedCluster": 1 },
+        { "id": "e2", "source": "philly-news", "title": "Eagles Win Sunday Game", "summary": "Philadelphia took the win at home.", "url": "https://philly.example/1", "publishedAt": "2024-01-03T11:00:00Z", "entities": ["eagles"], "expectedCluster": 2 }
+      ]
+    },
+    {
+      "name": "boilerplate-summary-disjoint-no-merge",
+      "articles": [
+        { "id": "f1", "source": "espn", "title": "Bears Trade Running Back", "summary": "The league continued its offseason shuffle on Tuesday.", "url": "https://espn.example/trade-1", "publishedAt": "2024-01-04T10:00:00Z", "entities": ["bears", "runningback"], "expectedCluster": 1 },
+        { "id": "f2", "source": "fox-sports", "title": "Cowboys Sign Offensive Guard", "summary": "The league continued its offseason shuffle on Tuesday.", "url": "https://foxsports.example/sign-1", "publishedAt": "2024-01-04T11:00:00Z", "entities": ["cowboys", "guard"], "expectedCluster": 2 }
+      ]
+    },
+    {
+      "name": "url-fast-path-same-source-merge",
+      "articles": [
+        { "id": "u1", "source": "espn", "title": "Chiefs Sign WR", "summary": "report", "url": "https://espn.example/article?id=123&utm_source=x", "publishedAt": "2024-01-05T10:00:00Z", "entities": ["chiefs"], "expectedCluster": 1 },
+        { "id": "u2", "source": "espn", "title": "Chiefs Add WR John Doe", "summary": "report", "url": "https://espn.example/article?id=123", "publishedAt": "2024-01-05T11:00:00Z", "entities": ["chiefs"], "expectedCluster": 1 }
+      ]
+    },
+    {
+      "name": "no-entity-fast-path-merge",
+      "articles": [
+        { "id": "n1", "source": "news-com", "title": "Breaking News", "summary": "s", "url": "https://news.example/article?id=1", "publishedAt": "2024-01-06T10:00:00Z", "entities": [], "expectedCluster": 1 },
+        { "id": "n2", "source": "news-org", "title": "Breaking News Updated", "summary": "s", "url": "https://news.example/article?id=1", "publishedAt": "2024-01-06T11:00:00Z", "entities": [], "expectedCluster": 1 }
+      ]
+    }
+  ]
+}

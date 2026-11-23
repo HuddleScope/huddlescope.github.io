@@ -23,6 +23,7 @@ type Runner struct {
 	err           io.Writer
 	loadConfig    types.LoadConfigFunc
 	newRepository types.NewRepoFunc
+	newRuleRepo   types.NewRuleRepoFunc
 	newApp        types.NewAppFunc
 	newPublisher  types.NewPublisherFunc
 	newFetcher    types.NewFetcherFunc
@@ -53,6 +54,7 @@ func NewRunner(opts ...Option) *Runner {
 		err:           os.Stderr,
 		loadConfig:    types.DefaultLoadConfig,
 		newRepository: types.DefaultNewRepository,
+		newRuleRepo:   types.DefaultNewRuleRepository,
 		newApp:        types.DefaultNewApp,
 		newPublisher:  types.DefaultNewPublisher,
 		newFetcher:    types.DefaultNewFetcher,
@@ -91,6 +93,13 @@ func WithLoadConfig(fn types.LoadConfigFunc) Option {
 func WithNewRepository(fn types.NewRepoFunc) Option {
 	return func(r *Runner) {
 		r.newRepository = fn
+	}
+}
+
+// WithNewRuleRepo sets the correction-rule repository constructor (issue #25).
+func WithNewRuleRepo(fn types.NewRuleRepoFunc) Option {
+	return func(r *Runner) {
+		r.newRuleRepo = fn
 	}
 }
 
@@ -205,6 +214,15 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	// Add clusterer and scorer (required for pipeline)
 	appOpts = append(appOpts, application.WithClusterer(cfg.ClustererSettings()))
 	appOpts = append(appOpts, application.WithScorer(domain.NewScorer()))
+
+	// Wire the correction-rule repository (issue #25, AC-3b). A construction
+	// failure is non-fatal: rules are simply skipped and the engine stays
+	// independent of storage.
+	if r.newRuleRepo != nil {
+		if ruleRepo, rerr := r.newRuleRepo(cfg.Storage()); rerr == nil && ruleRepo != nil {
+			appOpts = append(appOpts, application.WithRuleRepository(ruleRepo))
+		}
+	}
 
 	// Add team registry for entity extraction
 	appOpts = append(appOpts, application.WithTeamRegistry(teamRegistry))

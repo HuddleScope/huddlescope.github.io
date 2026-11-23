@@ -71,6 +71,16 @@ func DefaultNewRepository(cfg config.StorageConfig) (domain.Repository, error) {
 	return storage.NewRepository(cfg)
 }
 
+// NewRuleRepoFunc is a function type for creating a correction-rule repository
+// (issue #25). A nil function or an error result means no rule repository is
+// available; the application then skips rule application (engine independence).
+type NewRuleRepoFunc func(cfg config.StorageConfig) (domain.CorrectionRuleRepository, error)
+
+// DefaultNewRuleRepository is the default correction-rule repository constructor.
+func DefaultNewRuleRepository(cfg config.StorageConfig) (domain.CorrectionRuleRepository, error) {
+	return storage.NewRuleRepository(cfg)
+}
+
 // NewAppFunc is a function type for creating an application.
 type NewAppFunc func(opts []application.Option) *application.Application
 
@@ -129,6 +139,7 @@ type Deps struct {
 	ErrorOutput   io.Writer
 	LoadConfig    LoadConfigFunc
 	NewRepository NewRepoFunc
+	NewRuleRepo   NewRuleRepoFunc
 	NewApp        NewAppFunc
 	NewPublisher  NewPublisherFunc
 	NewFetcher    NewFetcherFunc
@@ -143,6 +154,7 @@ func NewDeps(opts ...Option) *Deps {
 		ErrorOutput:   os.Stderr,
 		LoadConfig:    DefaultLoadConfig,
 		NewRepository: DefaultNewRepository,
+		NewRuleRepo:   DefaultNewRuleRepository,
 		NewApp:        DefaultNewApp,
 		NewPublisher:  DefaultNewPublisher,
 		NewFetcher:    DefaultNewFetcher,
@@ -188,6 +200,13 @@ func WithLoadConfig(fn LoadConfigFunc) Option {
 func WithNewRepository(fn NewRepoFunc) Option {
 	return func(d *Deps) {
 		d.NewRepository = fn
+	}
+}
+
+// WithNewRuleRepo sets the correction-rule repository constructor.
+func WithNewRuleRepo(fn NewRuleRepoFunc) Option {
+	return func(d *Deps) {
+		d.NewRuleRepo = fn
 	}
 }
 

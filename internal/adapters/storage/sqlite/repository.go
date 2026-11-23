@@ -87,6 +87,13 @@ func (r *Repository) Close() error {
 	return r.db.Close()
 }
 
+// DB returns the underlying *sql.DB handle. It is exposed so that companion
+// repositories (e.g. the correction-rule repository) can share the same
+// connection without re-opening the database.
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}
+
 // Upsert is a database/sql compatible Upsert implementation.
 func Upsert(db *sql.DB, story domain.Story) (domain.UpsertStatus, error) {
 	var upsertStatus domain.UpsertStatus
@@ -666,4 +673,71 @@ func marshalEntities(entities []string) string {
 		return "[]"
 	}
 	return string(b)
+}
+
+// RuleRepository implements domain.CorrectionRuleRepository using a shared
+// *sql.DB handle. It works against the same connection as the story repository
+// (sqlite-file or turso via libsql) and reuses the 007_correction_rules table.
+type RuleRepository struct {
+	db *sql.DB
+}
+
+// NewRuleRepository wraps an existing *sql.DB handle. Migrations are NOT run
+// here; call MigrateDB or NewRepository first so the 007 migration is applied.
+func NewRuleRepository(db *sql.DB) *RuleRepository {
+	return &RuleRepository{db: db}
+}
+
+// SaveRule implements domain.CorrectionRuleRepository.SaveRule.
+func (r *RuleRepository) SaveRule(rule domain.CorrectionRule) error {
+	if err := rule.Validate(); err != nil {
+		return err
+	}
+	nowStr := timestampToString(time.Now().UTC())
+	if rule.CreatedAt == "" {
+		rule.CreatedAt = nowStr
+	}
+	articleIDsJSON := marshalEntities(rule.ArticleIDs)
+	_, err := r.db.Exec(`INSERT INTO correction_rules 
+		(id, kind, story_id, into_story_id, article_ids, created_at, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			kind = excluded.kind,
+			story_id = excluded.story_id,
+			into_story_id = excluded.into_story_id,
+			article_ids = excluded.article_ids,
+			created_at = excluded.created_at,
+			created_by = excluded.created_by`,
+		rule.ID, string(rule.Kind), rule.StoryID, rule.IntoStoryID,
+		articleIDsJSON, rule.CreatedAt, rule.CreatedBy)
+	if err != nil {
+		return fmt.Errorf("save rule: %w", err)
+	}
+	return nil
+}
+
+// ListRules implements domain.CorrectionRuleRepository.ListRules in
+// deterministic (ID-sorted) order.
+func (r *RuleRepository) ListRules() ([]domain.CorrectionRule, error) {
+	rows, err := r.db.Query(`SELECT id, kind, story_id, into_story_id, article_ids, created_at, created_by
+		FROM correction_rules ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list rules: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var rules []domain.CorrectionRule
+	for rows.Next() {
+		var rule domain.CorrectionRule
+		var kind, articleIDsJSON string
+		if err := rows.Scan(&rule.ID, &kind, &rule.StoryID, &rule.IntoStoryID, &articleIDsJSON, &rule.CreatedAt, &rule.CreatedBy); err != nil {
+			return nil, fmt.Errorf("scan rule: %w", err)
+		}
+		rule.Kind = domain.CorrectionKind(kind)
+		if articleIDsJSON != "" {
+			_ = json.Unmarshal([]byte(articleIDsJSON), &rule.ArticleIDs)
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
 }

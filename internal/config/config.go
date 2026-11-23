@@ -97,6 +97,8 @@ type Config struct {
 	// New for HS-024: clustering threshold and window
 	SimilarityThreshold float64
 	TemporalWindow      time.Duration
+	// New for issue #25: minimum entity-set affinity for a scored merge.
+	EntityAffinityMin float64
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -137,6 +139,8 @@ const (
 	// New for HS-024: clustering defaults
 	defaultSimilarityThreshold = 0.50
 	defaultTemporalWindow      = 48 * time.Hour
+	// New for issue #25: default minimum entity-set affinity.
+	defaultEntityAffinityMin = domain.DefaultEntityAffinityMin
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -159,6 +163,7 @@ func Load(configFile string) (Config, error) {
 		// New for HS-024
 		SimilarityThreshold: defaultSimilarityThreshold,
 		TemporalWindow:      defaultTemporalWindow,
+		EntityAffinityMin:   defaultEntityAffinityMin,
 	}
 
 	// Override with config file if provided
@@ -259,6 +264,12 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("HSC_CLUSTER_WINDOW"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.TemporalWindow = d
+		}
+	}
+	// New for issue #25
+	if v := os.Getenv("HSC_CLUSTER_ENTITY_AFFINITY"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.EntityAffinityMin = f
 		}
 	}
 }
@@ -687,6 +698,12 @@ func loadEnvFile(path string, cfg *Config) error {
 			} else {
 				return fmt.Errorf("line %d: invalid cluster window duration %q: %v", i+1, value, err)
 			}
+		case "HSC_CLUSTER_ENTITY_AFFINITY":
+			if f, err := strconv.ParseFloat(value, 64); err == nil {
+				cfg.EntityAffinityMin = f
+			} else {
+				return fmt.Errorf("line %d: invalid entity affinity %q: %v", i+1, value, err)
+			}
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -719,6 +736,13 @@ func (c Config) Validate() error {
 	// Validate TemporalWindow (AC-2: window > 0)
 	if c.TemporalWindow <= 0 {
 		errs = append(errs, errors.New("TemporalWindow must be positive"))
+	}
+
+	// Validate EntityAffinityMin (issue #25: when explicitly set, 0 < affinity <= 1).
+	// A zero value means "unset" and is accepted; the domain falls back to
+	// DefaultEntityAffinityMin. This keeps Config literals that omit the field valid.
+	if c.EntityAffinityMin != 0 && (c.EntityAffinityMin < 0 || c.EntityAffinityMin > 1) {
+		errs = append(errs, fmt.Errorf("EntityAffinityMin must be in (0, 1]; got %v", c.EntityAffinityMin))
 	}
 
 	// Validate HeartbeatFile
@@ -985,8 +1009,13 @@ func (c Config) ClustererSettings() *domain.Clusterer {
 	if err := c.Validate(); err != nil {
 		return domain.NewClusterer()
 	}
+	affinityMin := c.EntityAffinityMin
+	if affinityMin <= 0 {
+		affinityMin = domain.DefaultEntityAffinityMin
+	}
 	return &domain.Clusterer{
 		SimilarityThreshold: c.SimilarityThreshold,
 		TemporalWindow:      c.TemporalWindow,
+		EntityAffinityMin:   affinityMin,
 	}
 }
