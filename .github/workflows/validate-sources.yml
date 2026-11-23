@@ -21,10 +21,10 @@ jobs:
         with:
           go-version: stable
 
-      - name: Build binaries
+      - name: Build unified CLI
         run: |
-          echo "Building ingest, export, and heartbeat binaries..."
-          make build
+          echo "Building unified huddlescope CLI..."
+          make build-huddlescope
 
       - name: Validate configuration
         run: |
@@ -32,8 +32,8 @@ jobs:
           echo "Validating RSS sources configuration..."
           
           # Run ingest in check mode to validate configuration
-          ./dist/ingest --check || {
-            echo "::error::Configuration validation failed. See ingest --check output above."
+          ./dist/huddlescope ingest run --help || {
+            echo "::error::Configuration validation failed. See huddlescope --help output above."
             exit 1
           }
           

@@ -72,21 +72,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build binaries
-        run: make build
+      - name: Build unified CLI
+        run: make build-huddlescope
 
       - name: Run ingest pipeline
         id: ingest
         run: |
           echo "Running ingestion pipeline..."
-          ./dist/ingest
+          ./dist/huddlescope ingest run
           echo "Ingestion completed"
 
       - name: Export snapshot to Hugo data
         id: export
         run: |
           echo "Running export pipeline..."
-          ./dist/export
+          ./dist/huddlescope export
           echo "Export completed"
 
       - name: Commit heartbeat
