@@ -45,26 +45,31 @@ type Story struct {
 	Entities     []string // normalized team slugs, player names (HS-010)
 	FirstSeenAt  time.Time
 	UpdatedAt    time.Time
+	// JoinReasons records per-article join decisions (AC-3a). Persisted as
+	// "joinReasons" in the story JSON; old payloads without the key unmarshal
+	// to an empty slice (backward compatible).
+	JoinReasons []JoinDecision
 }
 
 // MarshalJSON implements json.Marshaler for Story.
 // Note: articleData is deprecated for persistence; populated by storage layer
 func (s Story) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ID           string   `json:"id"`
-		Title        string   `json:"title"`
-		Source       string   `json:"source"`
-		PublishedAt  string   `json:"publishedAt"`
-		Summary      string   `json:"summary"`
-		URL          string   `json:"url"`
-		ArticleIDs   []string `json:"articleIDs"`
-		Headline     string   `json:"headline"`
-		GUID         string   `json:"guid"`
-		CanonicalURL string   `json:"canonicalURL"`
-		DedupeKey    string   `json:"dedupeKey"`
-		Entities     []string `json:"entities"`
-		FirstSeenAt  string   `json:"firstSeenAt"`
-		UpdatedAt    string   `json:"updatedAt"`
+		ID           string         `json:"id"`
+		Title        string         `json:"title"`
+		Source       string         `json:"source"`
+		PublishedAt  string         `json:"publishedAt"`
+		Summary      string         `json:"summary"`
+		URL          string         `json:"url"`
+		ArticleIDs   []string       `json:"articleIDs"`
+		Headline     string         `json:"headline"`
+		GUID         string         `json:"guid"`
+		CanonicalURL string         `json:"canonicalURL"`
+		DedupeKey    string         `json:"dedupeKey"`
+		Entities     []string       `json:"entities"`
+		FirstSeenAt  string         `json:"firstSeenAt"`
+		UpdatedAt    string         `json:"updatedAt"`
+		JoinReasons  []JoinDecision `json:"joinReasons"`
 	}{
 		ID:           s.ID,
 		Title:        s.Title,
@@ -80,6 +85,7 @@ func (s Story) MarshalJSON() ([]byte, error) {
 		Entities:     s.Entities,
 		FirstSeenAt:  s.FirstSeenAt.Format(time.RFC3339),
 		UpdatedAt:    s.UpdatedAt.Format(time.RFC3339),
+		JoinReasons:  s.JoinReasons,
 	})
 }
 
@@ -87,21 +93,22 @@ func (s Story) MarshalJSON() ([]byte, error) {
 // Supports both old format (articleIDs) and new format (articleData) for backward compatibility.
 func (s *Story) UnmarshalJSON(data []byte) error {
 	var tmp struct {
-		ID           string    `json:"id"`
-		Title        string    `json:"title"`
-		Source       string    `json:"source"`
-		PublishedAt  string    `json:"publishedAt"`
-		Summary      string    `json:"summary"`
-		URL          string    `json:"url"`
-		ArticleData  []Article `json:"articleData"`
-		ArticleIDs   []string  `json:"articleIDs"`
-		Headline     string    `json:"headline"`
-		GUID         string    `json:"guid"`
-		CanonicalURL string    `json:"canonicalURL"`
-		DedupeKey    string    `json:"dedupeKey"`
-		Entities     []string  `json:"entities"`
-		FirstSeenAt  string    `json:"firstSeenAt"`
-		UpdatedAt    string    `json:"updatedAt"`
+		ID           string         `json:"id"`
+		Title        string         `json:"title"`
+		Source       string         `json:"source"`
+		PublishedAt  string         `json:"publishedAt"`
+		Summary      string         `json:"summary"`
+		URL          string         `json:"url"`
+		ArticleData  []Article      `json:"articleData"`
+		ArticleIDs   []string       `json:"articleIDs"`
+		Headline     string         `json:"headline"`
+		GUID         string         `json:"guid"`
+		CanonicalURL string         `json:"canonicalURL"`
+		DedupeKey    string         `json:"dedupeKey"`
+		Entities     []string       `json:"entities"`
+		FirstSeenAt  string         `json:"firstSeenAt"`
+		UpdatedAt    string         `json:"updatedAt"`
+		JoinReasons  []JoinDecision `json:"joinReasons"`
 	}
 	if err := json.Unmarshal(data, &tmp); err != nil {
 		return err
@@ -133,5 +140,7 @@ func (s *Story) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	s.UpdatedAt = t3
+	// JoinReasons is optional; old payloads omit the key and unmarshal to nil.
+	s.JoinReasons = tmp.JoinReasons
 	return nil
 }

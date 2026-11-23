@@ -88,7 +88,10 @@ type Application struct {
 	snapshotPublisher domain.SnapshotPublisher
 	// New for HS-061: story page publisher
 	storyPagePublisher domain.StoryPagePublisher
-	lookback           time.Duration
+	// New for issue #25: correction-rule repository (optional; when nil, rules
+	// are not loaded/applied and the engine stays independent of storage).
+	ruleRepository domain.CorrectionRuleRepository
+	lookback       time.Duration
 }
 
 // Option configures the Application.
@@ -126,6 +129,15 @@ func WithFetcherMap(fetcherMap map[string]domain.FeedFetcher) Option {
 func WithClusterer(engine *domain.Clusterer) Option {
 	return func(a *Application) {
 		a.clusteringEngine = engine
+	}
+}
+
+// WithRuleRepository sets the correction-rule repository (issue #25). When not
+// set, the application skips rule loading/application entirely, preserving
+// engine independence (AC-4).
+func WithRuleRepository(repo domain.CorrectionRuleRepository) Option {
+	return func(a *Application) {
+		a.ruleRepository = repo
 	}
 }
 
@@ -371,6 +383,15 @@ func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
 
 	groups := a.clusteringEngine.Cluster(articles)
 
+	// Apply stored correction rules (issue #25, AC-3b) when a rule repository
+	// is injected. Rules are deterministic and idempotent; re-partitioning
+	// recomputes group IDs.
+	groups, err = a.applyCorrections(groups)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("failed to apply correction rules: %w", err))
+		return result
+	}
+
 	// Persist Article objects to the articles table before clustering
 	// This ensures articles are stored before stories reference them
 	for _, article := range articles {
@@ -406,6 +427,29 @@ func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
 	result.GroupsCreated = groupCount
 
 	return result
+}
+
+// applyCorrections loads stored correction rules (when a rule repository is
+// injected) and applies them to the clustered partition. It returns the
+// corrected groups. When no rule repository is configured it returns the input
+// unchanged (engine independence, AC-4). On error the input groups are left
+// unmodified and the error is returned.
+func (a *Application) applyCorrections(groups []domain.StoryGroup) ([]domain.StoryGroup, error) {
+	if a.ruleRepository == nil {
+		return groups, nil
+	}
+	rules, err := a.ruleRepository.ListRules()
+	if err != nil {
+		return nil, fmt.Errorf("list correction rules: %w", err)
+	}
+	if len(rules) == 0 {
+		return groups, nil
+	}
+	corrected, err := domain.ApplyCorrections(groups, rules)
+	if err != nil {
+		return groups, err
+	}
+	return corrected, nil
 }
 
 // resolveFetcher returns a FeedFetcher for the given source ID.
@@ -726,6 +770,13 @@ func (a *Application) runGroupAndScorePipeline(ctx context.Context, record domai
 
 	// Cluster
 	groups := a.clusteringEngine.Cluster(articles)
+	// Apply stored correction rules (issue #25, AC-3b) when a rule repository
+	// is injected; failures are recorded but do not halt the pipeline.
+	if corrected, err := a.applyCorrections(groups); err != nil {
+		record.AddError(fmt.Errorf("failed to apply correction rules: %w", err))
+	} else {
+		groups = corrected
+	}
 	record.GroupsCreated = len(groups)
 
 	// Count grouped vs solo
@@ -807,6 +858,14 @@ func (a *Application) RebuildRanking(ctx context.Context, now time.Time) domain.
 
 	// Re-cluster and score
 	groups := a.clusteringEngine.Cluster(articles)
+	// Apply stored correction rules (issue #25, AC-3b) when a rule repository
+	// is injected. A failure here is non-fatal for ranking: we log the error
+	// but continue scoring the uncorrected partition.
+	if corrected, err := a.applyCorrections(groups); err != nil {
+		result.AddError(fmt.Errorf("failed to apply correction rules: %w", err))
+	} else {
+		groups = corrected
+	}
 	result.GroupsCreated = len(groups)
 
 	articlesGrouped := 0

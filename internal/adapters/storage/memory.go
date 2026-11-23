@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -104,4 +105,43 @@ func (r *MemoryRepository) UpsertArticle(article domain.Article) error {
 	// No-op: Memory repository doesn't persist articles
 	// This exists to satisfy the domain.Repository interface
 	return nil
+}
+
+// MemoryRuleRepository is an in-memory implementation of
+// domain.CorrectionRuleRepository for testing and the memory backend.
+type MemoryRuleRepository struct {
+	mu    sync.RWMutex
+	rules map[string]domain.CorrectionRule
+}
+
+// NewMemoryRuleRepository returns an empty in-memory rule repository.
+func NewMemoryRuleRepository() *MemoryRuleRepository {
+	return &MemoryRuleRepository{
+		rules: make(map[string]domain.CorrectionRule),
+	}
+}
+
+// SaveRule implements domain.CorrectionRuleRepository.SaveRule.
+func (r *MemoryRuleRepository) SaveRule(rule domain.CorrectionRule) error {
+	if err := rule.Validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rules[rule.ID] = rule
+	return nil
+}
+
+// ListRules implements domain.CorrectionRuleRepository.ListRules. It returns
+// rules in deterministic (ID-sorted) order.
+func (r *MemoryRuleRepository) ListRules() ([]domain.CorrectionRule, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]domain.CorrectionRule, 0, len(r.rules))
+	for _, rule := range r.rules {
+		result = append(result, rule)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
 }

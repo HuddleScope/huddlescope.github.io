@@ -168,6 +168,65 @@ func (a Article) HasOverlappingEntity(other *Article) bool {
 	return false
 }
 
+// NormalizedEntitySet returns the set of NFC-normalized, non-empty entity
+// slugs for an article. Whitespace-only entities are ignored.
+func (a Article) NormalizedEntitySet() map[string]bool {
+	set := make(map[string]bool, len(a.Entities))
+	for _, e := range a.Entities {
+		key := NormalizeSourceID(e)
+		if key == "" {
+			continue
+		}
+		set[key] = true
+	}
+	return set
+}
+
+// EntityAffinity computes the Jaccard affinity between two articles' entity
+// sets. The semantics encode the issue #25 constraint that entity overlap is a
+// *constraint*, never a merge signal on its own:
+//   - both entity-less            -> 1.0 (neutral; feeds without entities stay lenient)
+//   - one side entity-less        -> 1.0 (neutral; no evidence against merging)
+//   - both have entities          -> Jaccard over normalized sets (0.0 disjoint .. 1.0 identical)
+func EntityAffinity(a, b Article) float64 {
+	aHas, bHas := a.HasEntities(), b.HasEntities()
+	if !aHas || !bHas {
+		return 1.0
+	}
+	aSet := a.NormalizedEntitySet()
+	bSet := b.NormalizedEntitySet()
+	if len(aSet) == 0 || len(bSet) == 0 {
+		return 1.0
+	}
+	intersection := 0
+	for k := range aSet {
+		if bSet[k] {
+			intersection++
+		}
+	}
+	union := len(aSet) + len(bSet) - intersection
+	if union == 0 {
+		return 0.0
+	}
+	return float64(intersection) / float64(union)
+}
+
+// JoinDecision records why an article joined a story group (AC-3a).
+// Reason is one of: "url" (canonical-URL fast path), "title" (title Jaccard alone
+// met the threshold), "summary" (summary fast path with identical/compatible entities),
+// or "title+summary" (weighted combination met the threshold).
+type JoinDecision struct {
+	GroupID        string  `json:"groupId"`
+	ArticleID      string  `json:"articleId"`
+	SourceID       string  `json:"sourceId"`
+	Reason         string  `json:"reason"`
+	TitleScore     float64 `json:"titleScore"`
+	SummaryScore   float64 `json:"summaryScore"`
+	EntityAffinity float64 `json:"entityAffinity"`
+	Threshold      float64 `json:"threshold"`
+	At             string  `json:"at"`
+}
+
 // StoryGroup represents a group of articles that belong to the same story.
 type StoryGroup struct {
 	ID               string
@@ -176,6 +235,7 @@ type StoryGroup struct {
 	CreatedAt        time.Time
 	FirstPublishedAt time.Time
 	LastPublishedAt  time.Time
+	JoinReasons      []JoinDecision
 }
 
 // NewStoryGroup creates a new story group from a single article.
@@ -236,6 +296,11 @@ func computeGroupID(articles []Article) string {
 type Clusterer struct {
 	SimilarityThreshold float64
 	TemporalWindow      time.Duration
+	// EntityAffinityMin is the minimum entity-set Jaccard affinity required
+	// before a scored merge is allowed when BOTH articles carry entities
+	// (AC-1). Defaults to 0.5. Setting it to 1.0 restores the pre-#25 lenient
+	// behavior (any shared entity suffices).
+	EntityAffinityMin float64
 }
 
 // TitleWeight and SummaryWeight are the weights for combining title and summary
@@ -246,11 +311,15 @@ const (
 	SummaryWeight = 0.30
 )
 
+// DefaultEntityAffinityMin is the default minimum entity-set affinity (AC-1).
+const DefaultEntityAffinityMin = 0.5
+
 // NewClusterer creates a new Clusterer with default settings.
 func NewClusterer() *Clusterer {
 	return &Clusterer{
 		SimilarityThreshold: 0.50,
 		TemporalWindow:      48 * time.Hour,
+		EntityAffinityMin:   DefaultEntityAffinityMin,
 	}
 }
 
@@ -260,10 +329,29 @@ func FingerprintSummary(text string) []string {
 	return TokenizeTitle(text)
 }
 
-// Cluster groups the input articles into story groups.
+// Cluster groups the input articles into story groups. It is a thin wrapper
+// over ClusterWithDecisions that discards the per-article join decisions, so
+// existing call sites keep working unchanged.
 func (c *Clusterer) Cluster(articles []Article) []StoryGroup {
+	groups, _ := c.ClusterWithDecisions(articles)
+	return groups
+}
+
+// ClusterWithDecisions groups the input articles into story groups and returns
+// the per-article join decisions (AC-3a). It is deterministic: the same input
+// always yields the same group IDs and the same decisions (except the decision
+// timestamps, which reflect the run).
+func (c *Clusterer) ClusterWithDecisions(articles []Article) ([]StoryGroup, []JoinDecision) {
 	if len(articles) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	// If a caller constructed the Clusterer directly without a default affinity
+	// floor (e.g. a zero struct literal), fall back to the documented default so
+	// the AC-1 constraint is always in effect.
+	affinityMin := c.EntityAffinityMin
+	if affinityMin <= 0 {
+		affinityMin = DefaultEntityAffinityMin
 	}
 
 	sorted := make([]Article, len(articles))
@@ -275,10 +363,13 @@ func (c *Clusterer) Cluster(articles []Article) []StoryGroup {
 	})
 
 	var groups []StoryGroup
+	var decisions []JoinDecision
+	now := time.Now().UTC().Format(time.RFC3339)
 
 	for _, article := range sorted {
 		bestGroup := -1
 		bestScore := -1.0
+		var bestDecision JoinDecision
 
 		for i, group := range groups {
 			groupFirstTime := group.FirstPublishedAt
@@ -288,73 +379,145 @@ func (c *Clusterer) Cluster(articles []Article) []StoryGroup {
 				continue
 			}
 
-			if article.HasEntities() {
-				if len(group.Articles) > 0 {
-					groupFirstArticle := group.Articles[0]
-					if groupFirstArticle.HasEntities() && !article.HasOverlappingEntity(&groupFirstArticle) {
-						continue
-					}
-				}
+			if len(group.Articles) == 0 {
+				continue
+			}
+			head := group.Articles[0]
+
+			// Entity gate (unchanged): an article with entities never joins a group
+			// whose head has entities and shares none of them. This is a hard
+			// disjointness constraint.
+			if article.HasEntities() && head.HasEntities() && !article.HasOverlappingEntity(&head) {
+				continue
 			}
 
-			// Check for exact URL match (fast path for canonicalized URLs)
-			urlMatch := false
-			if article.URL != "" {
-				// Only match if same source ID OR shared entity (or no entities on either)
-				sourceIDMatch := article.SourceID == group.Articles[0].SourceID
-				entityOverlap := article.HasOverlappingEntity(&group.Articles[0])
+			affinity := EntityAffinity(article, head)
+			bothHaveEntities := article.HasEntities() && head.HasEntities()
 
-				// Check if any article in group has matching canonical URL
+			// Check for exact URL match (fast path for canonicalized URLs).
+			// AC-1: a cross-source URL match only merges when the entity sets are
+			// compatible (identical) or neutral (one/both sides entity-less), or when
+			// the sources match. Partial-overlap-only URL matches fall through to the
+			// scored path, where the affinity floor applies.
+			urlMatch := false
+			urlSameSource := false
+			if article.URL != "" {
+				urlSameSource = article.SourceID == head.SourceID
 				for _, ga := range group.Articles {
 					if CanonicalURL(article.URL) == CanonicalURL(ga.URL) {
-						if sourceIDMatch || entityOverlap || (!article.HasEntities() && !ga.HasEntities()) {
+						if urlSameSource || affinity >= 1.0 || (!article.HasEntities() && !ga.HasEntities()) {
 							urlMatch = true
-							break
 						}
+						break
 					}
 				}
 			}
 
-			// If URL match found, this is a syndicated article - merge immediately
 			if urlMatch {
-				bestGroup = i
-				bestScore = 1.0
-			} else {
-				// Calculate combined score: weighted combination of title and summary
-				articleTokens := TokenizeTitle(article.Title)
-				groupTokens := TokenizeTitle(group.Headline)
-				titleScore := JaccardSimilarity(articleTokens, groupTokens)
-
-				// Also check summary similarity if both have summaries
-				summaryScore := 0.0
-				if article.Summary != "" && group.Articles[0].Summary != "" {
-					articleSummaryTokens := FingerprintSummary(article.Summary)
-					groupSummaryTokens := FingerprintSummary(group.Articles[0].Summary)
-					summaryScore = JaccardSimilarity(articleSummaryTokens, groupSummaryTokens)
-				}
-
-				// Combined score: weighted average
-				combinedScore := TitleWeight*titleScore + SummaryWeight*summaryScore
-
-				// For AC-3: if summary score is high enough, use it instead of combined
-				// This allows merging when summaries are identical but titles differ
-				score := math.Max(combinedScore, summaryScore)
-
-				if score > bestScore && score >= c.SimilarityThreshold {
-					bestScore = score
+				if i > bestGroup {
 					bestGroup = i
+					bestScore = 1.0
+					bestDecision = JoinDecision{
+						Reason:         "url",
+						EntityAffinity: affinity,
+						Threshold:      1.0,
+						At:             now,
+					}
+				}
+				continue
+			}
+
+			// Scored path.
+			articleTokens := TokenizeTitle(article.Title)
+			groupTokens := TokenizeTitle(group.Headline)
+			titleScore := JaccardSimilarity(articleTokens, groupTokens)
+
+			summaryScore := 0.0
+			if article.Summary != "" && head.Summary != "" {
+				articleSummaryTokens := FingerprintSummary(article.Summary)
+				groupSummaryTokens := FingerprintSummary(head.Summary)
+				summaryScore = JaccardSimilarity(articleSummaryTokens, groupSummaryTokens)
+			}
+
+			combinedScore := TitleWeight*titleScore + SummaryWeight*summaryScore
+
+			// AC-1 constraint: when both articles carry entities, the entity sets
+			// must be at least minimally compatible. Disjoint / low-affinity entity
+			// sets (e.g. the same team name on two unrelated events) block merging.
+			if bothHaveEntities && affinity < affinityMin {
+				continue
+			}
+
+			// Determine merge score + reason. The raw summary fast path
+			// (math.Max(combined, summary)) is only allowed when entity sets are
+			// identical (affinity == 1.0) or neutral; otherwise the boilerplate-lead
+			// bypass is closed and we require titleScore alone to clear the
+			// threshold.
+			var score float64
+			var reason string
+			switch {
+			case affinity >= 1.0:
+				// Identical/compatible entity sets: keep the historical lenient
+				// behavior (summary may rescue a changed title).
+				score = math.Max(combinedScore, summaryScore)
+				reason = reasonForScore(combinedScore, titleScore, summaryScore)
+			case !bothHaveEntities:
+				// One side entity-less: neutral; keep historical behavior.
+				score = math.Max(combinedScore, summaryScore)
+				reason = reasonForScore(combinedScore, titleScore, summaryScore)
+			default:
+				// Shared-but-not-identical entity sets: require the title alone to
+				// clear the threshold. Kills the boilerplate-summary bypass.
+				if titleScore < c.SimilarityThreshold {
+					continue
+				}
+				score = math.Max(titleScore, combinedScore)
+				reason = "title"
+			}
+
+			if score > bestScore && score >= c.SimilarityThreshold {
+				bestScore = score
+				bestGroup = i
+				bestDecision = JoinDecision{
+					Reason:         reason,
+					TitleScore:     titleScore,
+					SummaryScore:   summaryScore,
+					EntityAffinity: affinity,
+					Threshold:      c.SimilarityThreshold,
+					At:             now,
 				}
 			}
 		}
 
 		if bestGroup >= 0 {
 			groups[bestGroup].AddArticle(article)
+			bestDecision.GroupID = groups[bestGroup].ID
+			bestDecision.ArticleID = article.ID
+			bestDecision.SourceID = article.SourceID
+			// Persist the join decision on the group so it survives into the
+			// Story (AC-3a) and into ApplyCorrections re-partitioning.
+			groups[bestGroup].JoinReasons = append(groups[bestGroup].JoinReasons, bestDecision)
+			decisions = append(decisions, bestDecision)
 		} else {
 			groups = append(groups, NewStoryGroup(article))
 		}
 	}
 
-	return groups
+	return groups, decisions
+}
+
+// reasonForScore picks a reason code from the score components. "summary" is
+// returned when the summary fast path alone clears the threshold while the title
+// does not; "title" when the title alone does; otherwise "title+summary".
+func reasonForScore(combined, titleScore, summaryScore float64) string {
+	switch {
+	case titleScore >= 0.50 && summaryScore < 0.50:
+		return "title"
+	case summaryScore >= 0.50 && titleScore < 0.50:
+		return "summary"
+	default:
+		return "title+summary"
+	}
 }
 
 // GroupingResult represents the result of a grouping operation.
@@ -419,5 +582,6 @@ func NewStoryFromGroup(group StoryGroup) Story {
 		Entities:     earliest.Entities,
 		FirstSeenAt:  time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
+		JoinReasons:  group.JoinReasons,
 	}
 }
