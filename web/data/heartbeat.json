@@ -1,10 +1,10 @@
 {
   "version": "1",
   "status": "ok",
-  "run_id": "XcPU-ZCZlWEpqkHhryxX-Q==",
-  "attempted_at": "2026-11-20T10:57:13Z",
-  "ingested_at": "2026-11-19T14:32:58Z",
-  "published_at": "2026-11-19T14:32:58Z",
-  "sources_checked": 24,
+  "run_id": "m-lv4t-e-4wp9EltsC_jig==",
+  "attempted_at": "2026-11-23T16:59:07Z",
+  "ingested_at": "2026-11-23T16:59:07Z",
+  "published_at": "2026-11-23T16:59:07Z",
+  "sources_checked": 54,
   "sources_failed": 0
 }

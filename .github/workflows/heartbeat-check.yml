@@ -26,12 +26,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build heartbeat binary
-        run: make build
+      - name: Build unified CLI
+        run: make build-huddlescope
 
       - name: Run heartbeat check
         run: |
-          ./dist/heartbeat check --file web/data/heartbeat.json --stale-after 90m || {
+          ./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m || {
             echo "::error::Heartbeat is stale or invalid"
             exit 1
           }

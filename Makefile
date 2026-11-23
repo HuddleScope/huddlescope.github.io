@@ -15,7 +15,6 @@ GOSEC ?= ~/go/bin/gosec
 GOVULNCHECK ?= ~/go/bin/govulncheck
 
 PREFIX ?= dist
-BINARIES ?= $(PREFIX)/ingest $(PREFIX)/export $(PREFIX)/heartbeat
 PACKAGE := $(shell $(GO) list ./... 2>/dev/null | grep -v '/vendor/' || true)
 
 # Default target: help
@@ -55,9 +54,13 @@ check-coverage: ## Enforce >=80% coverage on internal packages
 	@bash ./scripts/coverage-check.sh
 
 # Build
-build: ## Build binaries to dist/
+build: ## Build unified huddlescope binary to dist/
 	@mkdir -p $(PREFIX)
-	$(GO) build -o $(PREFIX)/ ./cmd/...
+	$(GO) build -o $(PREFIX)/huddlescope ./cmd/huddlescope
+
+build-huddlescope: build ## Build unified huddlescope binary to dist/ (alias)
+
+.PHONY: build build-huddlescope
 
 # Check (CI pipeline)
 check: ## Run format, lint, test, coverage check, and security checks

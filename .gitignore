@@ -1,6 +1,9 @@
 # Build artifacts
 dist/
 coverage.out
+/huddlescope
+
+# Legacy entrypoints (deprecated; replaced by unified huddlescope)
 /ingest
 /export
 /heartbeat
