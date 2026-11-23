@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -93,6 +94,9 @@ type Config struct {
 	DataFile  string // Homepage snapshot filename (production: homepage.json)
 	// New for HS-061: Hugo content directory for generated story pages
 	HugoContentDir string // Hugo content directory (production: web/content)
+	// New for HS-024: clustering threshold and window
+	SimilarityThreshold float64
+	TemporalWindow      time.Duration
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -130,6 +134,9 @@ const (
 	defaultDataDir        = "web/data"
 	defaultDataFile       = "homepage.json"
 	defaultHugoContentDir = "web/content"
+	// New for HS-024: clustering defaults
+	defaultSimilarityThreshold = 0.50
+	defaultTemporalWindow      = 48 * time.Hour
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -149,6 +156,9 @@ func Load(configFile string) (Config, error) {
 		DataDir:        defaultDataDir,
 		DataFile:       defaultDataFile,
 		HugoContentDir: defaultHugoContentDir,
+		// New for HS-024
+		SimilarityThreshold: defaultSimilarityThreshold,
+		TemporalWindow:      defaultTemporalWindow,
 	}
 
 	// Override with config file if provided
@@ -238,6 +248,17 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("HSC_LOOKBACK"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.LookbackWindow = d
+		}
+	}
+	// New for HS-024
+	if v := os.Getenv("HSC_SIMILARITY_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.SimilarityThreshold = f
+		}
+	}
+	if v := os.Getenv("HSC_CLUSTER_WINDOW"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.TemporalWindow = d
 		}
 	}
 }
@@ -654,6 +675,18 @@ func loadEnvFile(path string, cfg *Config) error {
 			cfg.HugoContentDir = value
 		case "HSC_DATA_FILE":
 			cfg.DataFile = value
+		case "HSC_SIMILARITY_THRESHOLD":
+			if f, err := strconv.ParseFloat(value, 64); err == nil {
+				cfg.SimilarityThreshold = f
+			} else {
+				return fmt.Errorf("line %d: invalid similarity threshold %q: %v", i+1, value, err)
+			}
+		case "HSC_CLUSTER_WINDOW":
+			if d, err := time.ParseDuration(value); err == nil {
+				cfg.TemporalWindow = d
+			} else {
+				return fmt.Errorf("line %d: invalid cluster window duration %q: %v", i+1, value, err)
+			}
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -676,6 +709,16 @@ func (c Config) Validate() error {
 	// Validate LookbackWindow
 	if c.LookbackWindow < 0 {
 		errs = append(errs, fmt.Errorf("LookbackWindow must be non-negative; got %v", c.LookbackWindow))
+	}
+
+	// Validate SimilarityThreshold (AC-2: 0 < threshold <= 1)
+	if c.SimilarityThreshold <= 0 || c.SimilarityThreshold > 1 {
+		errs = append(errs, fmt.Errorf("SimilarityThreshold must be in (0, 1]; got %v", c.SimilarityThreshold))
+	}
+
+	// Validate TemporalWindow (AC-2: window > 0)
+	if c.TemporalWindow <= 0 {
+		errs = append(errs, errors.New("TemporalWindow must be positive"))
 	}
 
 	// Validate HeartbeatFile
@@ -932,4 +975,18 @@ func (c Config) SourceRegistry() *domain.FeedRegistry {
 		panic(fmt.Sprintf("failed to build feed registry from configured sources: %v", err))
 	}
 	return registry
+}
+
+// ClustererSettings returns a domain.Clusterer configured with the similarity threshold
+// and temporal window from this Config. Returns a default clusterer with 0.50 threshold
+// and 48h window if validation fails (caller should have already validated via Validate()).
+func (c Config) ClustererSettings() *domain.Clusterer {
+	// If values failed validation, return defaults to allow graceful degradation
+	if err := c.Validate(); err != nil {
+		return domain.NewClusterer()
+	}
+	return &domain.Clusterer{
+		SimilarityThreshold: c.SimilarityThreshold,
+		TemporalWindow:      c.TemporalWindow,
+	}
 }

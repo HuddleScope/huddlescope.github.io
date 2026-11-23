@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -570,5 +571,180 @@ func TestGroupingResult_NewGroupingResult(t *testing.T) {
 	}
 	if result.Errors != nil {
 		t.Errorf("Errors = %v; want nil", result.Errors)
+	}
+}
+
+// TestFingerprintSummary tests the new fingerprint summary function
+func TestFingerprintSummary(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"empty string", "", nil},
+		{"simple text", "hello world", []string{"hello", "world"}},
+		{"with stopwords", "the quick brown fox", []string{"quick", "brown", "fox"}},
+		{"mixed case", "Hello WORLD", []string{"hello", "world"}},
+		{"punctuation", "Hello, world!", []string{"hello", "world"}},
+		{"idempotent", "Hello World Test", []string{"hello", "world", "test"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FingerprintSummary(tt.input)
+			if len(result) != len(tt.expected) {
+				t.Errorf("FingerprintSummary(%q) = %v; expected %v", tt.input, result, tt.expected)
+			}
+			for i, token := range result {
+				if token != tt.expected[i] {
+					t.Errorf("FingerprintSummary(%q)[%d] = %q; want %q", tt.input, i, token, tt.expected[i])
+				}
+			}
+			// Test idempotency
+			result2 := FingerprintSummary(tt.input)
+			if !reflect.DeepEqual(result, result2) {
+				t.Errorf("FingerprintSummary not idempotent")
+			}
+		})
+	}
+}
+
+// TestClusterer_URLFastPath tests the URL fast path for canonical URLs
+func TestClusterer_URLFastPath(t *testing.T) {
+	c := NewClusterer()
+
+	// Same canonical URL should merge regardless of tracking params
+	fe1 := FeedEntry{
+		Title:       "Chiefs Sign WR",
+		Source:      "espn",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "ESPN report",
+		URL:         "https://espn.com/article?id=123&utm_source=news",
+		Entities:    []string{"chiefs"},
+	}
+
+	fe2 := FeedEntry{
+		Title:       "Chiefs Add WR John Doe", // Different title
+		Source:      "espn",
+		PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
+		Summary:     "ESPN report",
+		URL:         "https://espn.com/article?id=123", // Same canonical URL
+		Entities:    []string{"chiefs"},
+	}
+
+	articles := []Article{
+		NewArticle(fe1, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+
+	result := c.Cluster(articles)
+
+	if len(result) != 1 {
+		t.Errorf("Cluster(URLEquivalent) returned %d groups; want 1 (URL fast path)", len(result))
+	}
+}
+
+// TestClusterer_ChangedTitleSameLead tests AC-3: changed title but same lead should merge
+func TestClusterer_ChangedTitleSameLead(t *testing.T) {
+	c := NewClusterer()
+
+	// Same summary lead, different titles
+	fe1 := FeedEntry{
+		Title:       "Chiefs Sign Free Agent John Doe",
+		Source:      "espn",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "The Kansas City Chiefs signed free agent John Doe to a multi-year contract.",
+		URL:         "https://espn.com/1",
+		Entities:    []string{"chiefs"},
+	}
+
+	fe2 := FeedEntry{
+		Title:       "Chiefs AddVeteran Playerto Roster",
+		Source:      "fox-sports",
+		PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
+		Summary:     "The Kansas City Chiefs signed free agent John Doe to a multi-year contract.", // Same summary
+		URL:         "https://foxsports.com/1",
+		Entities:    []string{"chiefs"},
+	}
+
+	articles := []Article{
+		NewArticle(fe1, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+
+	result := c.Cluster(articles)
+
+	if len(result) != 1 {
+		t.Errorf("Cluster(changed title, same lead) returned %d groups; want 1 (summary matching)", len(result))
+	}
+}
+
+// TestClusterer_URLMatchSameSource tests URL match requires same source or entity overlap
+func TestClusterer_URLMatchSameSource(t *testing.T) {
+	c := NewClusterer()
+
+	// Same URL but different sources (even with same entity) should merge
+	fe1 := FeedEntry{
+		Title:       "Chiefs Sign Player",
+		Source:      "espn",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "ESPN report",
+		URL:         "https://espn.com/article?id=123",
+		Entities:    []string{"chiefs"},
+	}
+
+	fe2 := FeedEntry{
+		Title:       "Chiefs Sign Player", // Same title
+		Source:      "cbs-sports",         // Different source but same entity
+		PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
+		Summary:     "CBS Sports report",
+		URL:         "https://cbssports.com/article?id=123", // Same canonical URL after www strip
+		Entities:    []string{"chiefs"},
+	}
+
+	articles := []Article{
+		NewArticle(fe1, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+
+	result := c.Cluster(articles)
+
+	// Should merge because same canonical URL and shared entity
+	if len(result) != 1 {
+		t.Errorf("Cluster(same URL, same entity) returned %d groups; want 1", len(result))
+	}
+}
+
+// TestClusterer_UrlDifferentNoEntity tests URL match requires either same source or entity overlap
+func TestClusterer_URLDifferentNoEntity(t *testing.T) {
+	c := NewClusterer()
+
+	// Same URL but different sources and no entities -> should still merge
+	fe1 := FeedEntry{
+		Title:       "Breaking News",
+		Source:      "news-com",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "Breaking news story.",
+		URL:         "https://news.com/article?id=123",
+	}
+
+	fe2 := FeedEntry{
+		Title:       "Breaking News Updated",
+		Source:      "news-org",
+		PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
+		Summary:     "Breaking news story.",
+		URL:         "https://news.org/article?id=123", // Same canonical URL
+	}
+
+	articles := []Article{
+		NewArticle(fe1, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+
+	result := c.Cluster(articles)
+
+	// Should merge because same canonical URL and neither has entities
+	if len(result) != 1 {
+		t.Errorf("Cluster(same URL, no entities) returned %d groups; want 1", len(result))
 	}
 }

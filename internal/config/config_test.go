@@ -519,8 +519,8 @@ func TestValidate(t *testing.T) {
 		valid    bool
 		errMatch string
 	}{
-		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content"}, true, ""},
-		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content"}, true, ""},
+		{"valid-dev", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content", SimilarityThreshold: 0.5, TemporalWindow: 48 * time.Hour}, true, ""},
+		{"valid-production", Config{LogLevel: "info", UserAgent: "test/1", RequestTimeout: 30 * time.Second, HugoBaseURL: "https://example.com", StorageBackend: "turso", TursoDatabaseURL: "db", TursoAuthToken: "token", Env: "production", HeartbeatFile: "web/data/heartbeat.json", FeedsFile: "web/data/feeds.json", DataDir: "web/data", DataFile: "homepage.json", HugoContentDir: "web/content", SimilarityThreshold: 0.5, TemporalWindow: 48 * time.Hour}, true, ""},
 		{"invalid-log-level", Config{LogLevel: "invalid"}, false, "invalid log level"},
 		{"empty-user-agent", Config{UserAgent: ""}, false, "UserAgent"},
 		{"empty-heartbeat-file", Config{HeartbeatFile: ""}, false, "HeartbeatFile"},

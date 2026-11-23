@@ -95,7 +95,7 @@ func main() {
 	appOpts = append(appOpts, application.WithFetcherMap(sourceFetchers))
 
 	// Add clusterer and scorer (required for pipeline)
-	appOpts = append(appOpts, application.WithClusterer(domain.NewClusterer()))
+	appOpts = append(appOpts, application.WithClusterer(cfg.ClustererSettings()))
 	appOpts = append(appOpts, application.WithScorer(domain.NewScorer()))
 
 	// Add team registry for entity extraction

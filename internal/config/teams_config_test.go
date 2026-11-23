@@ -372,14 +372,16 @@ func TestTeamRegistryErrorOnEmptyTeams(t *testing.T) {
 // baseValidConfig returns a Config that passes Validate with no teams or sources.
 func baseValidConfig() Config {
 	return Config{
-		LogLevel:       "info",
-		UserAgent:      "test/1",
-		RequestTimeout: 30 * time.Second,
-		HeartbeatFile:  "web/data/heartbeat.json",
-		FeedsFile:      "web/data/feeds.json",
-		DataDir:        "web/data",
-		DataFile:       "homepage.json",
-		HugoContentDir: "web/content",
+		LogLevel:            "info",
+		UserAgent:           "test/1",
+		RequestTimeout:      30 * time.Second,
+		HeartbeatFile:       "web/data/heartbeat.json",
+		FeedsFile:           "web/data/feeds.json",
+		DataDir:             "web/data",
+		DataFile:            "homepage.json",
+		HugoContentDir:      "web/content",
+		SimilarityThreshold: 0.5,
+		TemporalWindow:      48 * time.Hour,
 	}
 }
 
@@ -543,19 +545,21 @@ func TestValidateDuplicateSourceID(t *testing.T) {
 
 func TestValidateProductionSuccess(t *testing.T) {
 	cfg := Config{
-		LogLevel:         "info",
-		UserAgent:        "test/1",
-		RequestTimeout:   30 * time.Second,
-		HugoBaseURL:      "https://example.com",
-		StorageBackend:   "turso",
-		TursoDatabaseURL: "db",
-		TursoAuthToken:   "token",
-		Env:              "production",
-		HeartbeatFile:    "web/data/heartbeat.json",
-		FeedsFile:        "web/data/feeds.json",
-		DataDir:          "web/data",
-		DataFile:         "homepage.json",
-		HugoContentDir:   "web/content",
+		LogLevel:            "info",
+		UserAgent:           "test/1",
+		RequestTimeout:      30 * time.Second,
+		HugoBaseURL:         "https://example.com",
+		StorageBackend:      "turso",
+		TursoDatabaseURL:    "db",
+		TursoAuthToken:      "token",
+		Env:                 "production",
+		HeartbeatFile:       "web/data/heartbeat.json",
+		FeedsFile:           "web/data/feeds.json",
+		DataDir:             "web/data",
+		DataFile:            "homepage.json",
+		HugoContentDir:      "web/content",
+		SimilarityThreshold: defaultSimilarityThreshold,
+		TemporalWindow:      defaultTemporalWindow,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate() error = %v; want nil for valid production config", err)
