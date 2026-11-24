@@ -62,3 +62,47 @@ The rendering model (`PublisherArticle`) deliberately omits article body/content
 - All domain tests pass with ≥70% coverage (71.9% application, 93.2% hugo adapter)
 - Site build verification: success, failure, idempotency paths
 - Hugo render produces stable output across builds
+
+---
+
+## Story Lifecycle (Issue #26)
+
+Stories have a stable, representative-anchored identity that persists across days, plus an optional lifecycle (active → archived → closed) and explicit alias support for merges and representative swaps.
+
+### Stable identity (AC-1)
+
+A story's public identity — slug, path, `storyID` front-matter — is derived from the **representative article** (earliest `PublishedAt`, ties on smallest canonical URL) via `ComputeStoryPageKey`. The representative is deterministic for a given article set, so the identity is stable across days. Adding a new source to a story appends an article without changing the slug, path, or `storyID`; `firstPublished` is pinned to the representative and `lastPublished` advances with the newest article.
+
+The front-matter `storyID` field renders the stable `PageKey` (representative-derived), **not** the internal group hash. The group hash remains an internal implementation detail and is never published.
+
+### Lifecycle statuses (AC-2)
+
+Stories carry a `Status` of `active` (default, zero-value), `archived`, or `closed`.
+
+- `active`: reporting is tracked normally.
+- `archived`: reporting is no longer tracked; the page shows a "This story is archived" banner and `status: "archived"` front-matter.
+- `closed`: terminal state; same rendering as archived (banner + `status: "closed"`).
+
+Status is a **stored correction rule**, not a clusterer behavior. New rule kinds `archive`, `close`, `reactivate` set the status by slug reference. Rules are applied in `RunStoryPages` after clustering and split/merge corrections.
+
+### Explicit aliases (AC-2)
+
+Merges record an alias: the merged-in story's representative slug is appended to the surviving story's `Aliases` list, rendered as Hugo-native `aliases:` front-matter (redirects) plus a "Merged From" section in the body. An explicit `alias` rule kind supports representative swaps and the "representative earlier than target" case, where the merged page must take over the source's URL.
+
+Alias lists are capped at 20 entries (front-matter and body) to keep output bounded for very large merges.
+
+### Known limitation: no undo of a merge or archive
+
+A merge cannot be undone (the alias is retained, but the articles are not re-split). An archive cannot be undone automatically — a `reactivate` rule restores `active` status but does not recreate removed articles. These are accepted per plan risk #3 and #4.
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `internal/domain/clustering.go` | `StoryStatus` type, `StoryAlias`, `Status`/`Aliases` on `StoryGroup` |
+| `internal/domain/storypage.go` | `PageKey`/`Status`/`Aliases` on `StoryDetailPage`; chronological article ordering |
+| `internal/domain/corrections.go` | New rule kinds; `ApplyLifecycle`; merge records alias |
+| `internal/domain/lifecycle_test.go` | Lifecycle rule tests |
+| `internal/adapters/hugo/publisher.go` | `status`/`aliases` front-matter, archive banner, "Merged From" section, `storyID`←PageKey, alias cap |
+| `web/fixtures/content/stories/archived-2023-draft-mock.md` | Archived fixture with aliases |
+| `docs/ops-runbook.md` | Ops runbook additions (lifecycle + alias rules) |

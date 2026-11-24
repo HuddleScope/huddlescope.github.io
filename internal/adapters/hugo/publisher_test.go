@@ -2,6 +2,7 @@ package hugo
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -501,4 +502,142 @@ func findSubstring(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestRenderMarkdownStatusAndAliases (issue #26, AC-2, T2.6): front-matter
+// status + aliases render, archive banner and "Merged from" section appear.
+func TestRenderMarkdownStatusAndAliases(t *testing.T) {
+	page := domain.StoryDetailPage{
+		Slug:             "merged-story",
+		Path:             "/stories/merged-story/",
+		StoryID:          "internal-hash",
+		PageKey:          "rep-derived-key",
+		Status:           domain.StatusArchived,
+		Headline:         "Merged Story",
+		FirstPublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		LastPublishedAt:  time.Date(2024, 1, 2, 10, 0, 0, 0, time.UTC),
+		FirstSeenAt:      time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC),
+		Aliases: []domain.StoryAlias{
+			{Slug: "source-story-a", Headline: "Source A", MergedAt: "2024-01-02T10:00:00Z"},
+			{Slug: "source-story-b", Headline: "Source B", MergedAt: "2024-01-02T10:00:00Z"},
+		},
+		Articles: []domain.PublisherArticle{{SourceID: "espn", SourceName: "ESPN", Title: "Art", URL: "https://espn.com/a", PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)}},
+	}
+
+	markdown, err := RenderMarkdown(page, "")
+	if err != nil {
+		t.Fatalf("RenderMarkdown failed: %v", err)
+	}
+	result := string(markdown)
+
+	// storyID renders the PageKey (D1), not the internal hash.
+	if !contains(result, `storyID: "rep-derived-key"`) {
+		t.Errorf("storyID should render PageKey, got:\n%s", result)
+	}
+	if contains(result, "internal-hash") {
+		t.Errorf("internal StoryID hash must not be rendered:\n%s", result)
+	}
+	// status front-matter.
+	if !contains(result, `status: "archived"`) {
+		t.Errorf("status front-matter missing:\n%s", result)
+	}
+	// aliases front-matter (Hugo-native).
+	if !contains(result, "aliases:") {
+		t.Errorf("aliases front-matter missing:\n%s", result)
+	}
+	if !contains(result, `- "source-story-a"`) || !contains(result, `- "source-story-b"`) {
+		t.Errorf("aliases entries missing:\n%s", result)
+	}
+	// Archive banner in body.
+	if !contains(result, "This story is archived") {
+		t.Errorf("archive banner missing:\n%s", result)
+	}
+	// Merged-from section in body.
+	if !contains(result, "## Merged From") {
+		t.Errorf("Merged From section missing:\n%s", result)
+	}
+}
+
+// TestRenderMarkdownActiveStatusOmitted (issue #26, D7): an active story (zero
+// or active status) renders no status front-matter, keeping output
+// byte-identical to pre-issue #26 for active pages.
+func TestRenderMarkdownActiveStatusOmitted(t *testing.T) {
+	page := domain.StoryDetailPage{
+		Slug:     "active-story",
+		Path:     "/stories/active-story/",
+		StoryID:  "hash",
+		PageKey:  "key",
+		Status:   domain.StatusActive,
+		Headline: "Active Story",
+		Articles: []domain.PublisherArticle{{SourceID: "espn", SourceName: "ESPN", Title: "Art", URL: "https://espn.com/a"}},
+	}
+	markdown, _ := RenderMarkdown(page, "")
+	if contains(string(markdown), "status:") {
+		t.Errorf("active page must not render status front-matter:\n%s", markdown)
+	}
+	// Zero status (unset) also renders no status.
+	pageZero := page
+	pageZero.Status = ""
+	markdownZero, _ := RenderMarkdown(pageZero, "")
+	if contains(string(markdownZero), "status:") {
+		t.Errorf("zero-status page must not render status front-matter:\n%s", markdownZero)
+	}
+}
+
+// TestRenderMarkdownAliasCap (issue #26, risk #3, T2.6): alias front-matter and
+// body are capped at 20.
+func TestRenderMarkdownAliasCap(t *testing.T) {
+	// Build 25 aliases.
+	aliases := make([]domain.StoryAlias, 25)
+	for i := range aliases {
+		aliases[i] = domain.StoryAlias{Slug: domain.StorySlug(fmt.Sprintf("alias-%02d", i)), MergedAt: "2024-01-01T00:00:00Z"}
+	}
+	page := domain.StoryDetailPage{
+		Slug: "capped", Path: "/stories/capped/", StoryID: "h", PageKey: "k",
+		Headline: "Capped", Aliases: aliases,
+		Articles: []domain.PublisherArticle{{SourceID: "s", SourceName: "S", Title: "t", URL: "https://x.com/c"}},
+	}
+	markdown, _ := RenderMarkdown(page, "")
+	result := string(markdown)
+
+	// Count alias entries in front-matter (lines starting with "  - "alias-").
+	fmCount := 0
+	for _, line := range strings.Split(result, "\n") {
+		if strings.HasPrefix(line, `  - "alias-`) {
+			fmCount++
+		}
+	}
+	if fmCount != 20 {
+		t.Errorf("front-matter alias count = %d; want 20 (capped)", fmCount)
+	}
+	// Body "Merged From" section also capped at 20. Count all body alias list
+	// items (lines starting with "- alias-") — these only appear in the
+	// Merged From section (front-matter entries are indented and quoted).
+	bodyCount := 0
+	for _, line := range strings.Split(result, "\n") {
+		if strings.HasPrefix(line, "- alias-") {
+			bodyCount++
+		}
+	}
+	if bodyCount != 20 {
+		t.Errorf("body alias count = %d; want 20 (capped)", bodyCount)
+	}
+}
+
+// TestRenderMarkdownClosedStatus (issue #26, AC-2): a closed story renders the
+// status and an archive-style banner.
+func TestRenderMarkdownClosedStatus(t *testing.T) {
+	page := domain.StoryDetailPage{
+		Slug: "closed-story", Path: "/stories/closed-story/", StoryID: "h", PageKey: "k",
+		Status: domain.StatusClosed, Headline: "Closed Story",
+		Articles: []domain.PublisherArticle{{SourceID: "s", SourceName: "S", Title: "t", URL: "https://x.com/c"}},
+	}
+	markdown, _ := RenderMarkdown(page, "")
+	result := string(markdown)
+	if !contains(result, `status: "closed"`) {
+		t.Errorf("closed status front-matter missing:\n%s", result)
+	}
+	if !contains(result, "This story is archived") {
+		t.Errorf("closed story should render archive-style banner:\n%s", result)
+	}
 }

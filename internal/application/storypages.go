@@ -88,17 +88,29 @@ func (a *Application) RunStoryPages(ctx context.Context, now time.Time, publishe
 
 	// Cluster to form story groups
 	groups := a.clusteringEngine.Cluster(articles)
+
+	// Apply stored correction rules (issue #25/#26) when a rule repository is
+	// injected: re-partitioning (split/merge) then lifecycle (archive/close/
+	// reactivate/alias). When no rule repository is configured the partition is
+	// unchanged (engine independence). On error the run reports the failure but
+	// the original partition is used (fail-soft, matching RunGrouping).
+	if corrected, err := a.applyCorrections(groups); err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("failed to apply correction rules: %w", err))
+		result.FailedStories = 1
+		return result
+	} else {
+		groups = corrected
+	}
+
 	result.PagesBuilt = len(groups)
 
-	// Build and publish each story page
+	// Build and publish each story page. Use the application-level resolver so
+	// every source in a multi-publisher story resolves to its display name
+	// (issue #26, D5), not just the first article's source.
+	resolver := a.sourceNameResolver()
 	published := make([]domain.StoryDetailPage, 0, len(groups))
 	for _, group := range groups {
 		// Build the story detail page
-		// Use a simple resolver (in production, this would come from config)
-		resolver := domain.NewStaticSourceResolver(map[string]string{
-			group.Articles[0].SourceID: group.Articles[0].SourceID,
-		})
-
 		page, err := domain.BuildStoryDetailPage(group, resolver, now)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("build failed for story group %s: %w", group.ID, err))

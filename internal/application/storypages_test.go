@@ -382,3 +382,307 @@ type testError struct {
 
 func (e *testError) Error() string { return e.msg }
 func (e *testError) Unwrap() error { return e }
+
+// TestRunStoryPagesMultiDayStable (issue #26, AC-1, T1.3): two runs where day
+// 2 adds a new source; front-matter slug/storyID are identical, article count
+// +1, lastPublished advanced, firstPublished unchanged.
+func TestRunStoryPagesMultiDayStable(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	// Day 1: two sources with the same headline.
+	seedsDay1 := []domain.Story{
+		{ID: "d1-a", Title: "Lions Sign Veteran Center", Source: "espn", PublishedAt: time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC), URL: "https://espn.com/d1a"},
+		{ID: "d1-b", Title: "Lions Sign Veteran Center", Source: "nfl", PublishedAt: time.Date(2024, 1, 1, 15, 0, 0, 0, time.UTC), URL: "https://nfl.com/d1b"},
+	}
+	for _, s := range seedsDay1 {
+		if _, err := repo.Upsert(s); err != nil {
+			t.Fatalf("seed %s: %v", s.ID, err)
+		}
+	}
+
+	outDir := filepath.Join(t.TempDir(), "web", "content")
+	storiesDir := filepath.Join(outDir, "stories")
+	publisher := hugo.NewPublisher(outDir, "")
+
+	app := New(WithRepository(repo), WithClusterer(domain.NewClusterer()))
+
+	// Run 1 (day 1).
+	res1 := app.RunStoryPages(context.Background(), now, publisher)
+	if len(res1.Errors) > 0 {
+		t.Fatalf("run1 errors: %v", res1.Errors)
+	}
+	if res1.PagesPublished != 1 {
+		t.Fatalf("run1 PagesPublished = %d; want 1", res1.PagesPublished)
+	}
+
+	// Capture run 1 front-matter.
+	fm1 := readStoryFrontMatter(t, storiesDir)
+	slug1 := fm1["slug"]
+	storyID1 := fm1["storyID"]
+	firstPub1 := fm1["firstPublished"]
+	lastPub1 := fm1["lastPublished"]
+
+	// Day 2: add a third source with the same headline, later date.
+	if _, err := repo.Upsert(domain.Story{
+		ID: "d2-c", Title: "Lions Sign Veteran Center", Source: "cbs",
+		PublishedAt: time.Date(2024, 1, 2, 9, 0, 0, 0, time.UTC), URL: "https://cbs.com/d2c",
+	}); err != nil {
+		t.Fatalf("seed d2-c: %v", err)
+	}
+
+	// Run 2 (day 2).
+	res2 := app.RunStoryPages(context.Background(), now.Add(24*time.Hour), publisher)
+	if len(res2.Errors) > 0 {
+		t.Fatalf("run2 errors: %v", res2.Errors)
+	}
+	if res2.PagesPublished != 1 {
+		t.Fatalf("run2 PagesPublished = %d; want 1", res2.PagesPublished)
+	}
+
+	fm2 := readStoryFrontMatter(t, storiesDir)
+
+	// Public identity stable across days.
+	if slug1 != fm2["slug"] {
+		t.Errorf("slug changed: %q -> %q", slug1, fm2["slug"])
+	}
+	if storyID1 != fm2["storyID"] {
+		t.Errorf("storyID changed: %q -> %q", storyID1, fm2["storyID"])
+	}
+	// firstPublished pinned, lastPublished advanced.
+	if firstPub1 != fm2["firstPublished"] {
+		t.Errorf("firstPublished changed: %q -> %q", firstPub1, fm2["firstPublished"])
+	}
+	if lastPub1 >= fm2["lastPublished"] {
+		t.Errorf("lastPublished did not advance: %q -> %q", lastPub1, fm2["lastPublished"])
+	}
+}
+
+// readStoryFrontMatter reads the single story page in storiesDir and returns
+// its front-matter as a map (string fields only).
+func readStoryFrontMatter(t *testing.T, storiesDir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(storiesDir)
+	if err != nil {
+		t.Fatalf("ReadDir %s: %v", storiesDir, err)
+	}
+	var mdFile string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".md") && e.Name() != "_index.md" {
+			mdFile = filepath.Join(storiesDir, e.Name())
+			break
+		}
+	}
+	if mdFile == "" {
+		t.Fatalf("no story page found in %s", storiesDir)
+	}
+	data, err := os.ReadFile(mdFile)
+	if err != nil {
+		t.Fatalf("ReadFile %s: %v", mdFile, err)
+	}
+	block, ok := extractFrontMatterBlock(data)
+	if !ok {
+		t.Fatalf("no front-matter block in %s", mdFile)
+	}
+	var fm map[string]interface{}
+	if err := yaml.Unmarshal(block, &fm); err != nil {
+		t.Fatalf("front-matter does not parse: %v", err)
+	}
+	result := make(map[string]string)
+	for k, v := range fm {
+		switch val := v.(type) {
+		case string:
+			result[k] = val
+		case time.Time:
+			result[k] = val.UTC().Format(time.RFC3339)
+		}
+	}
+	return result
+}
+
+// TestRunStoryPagesWithRuleRepoMergeAndArchive (issue #26, AC-2, T2.5): a
+// merge + archive rule set produces a merged page carrying aliases and an
+// archived page carrying status. With no rule repo, output is identical to
+// pre-change (engine independence).
+func TestRunStoryPagesWithRuleRepoMergeAndArchive(t *testing.T) {
+	// Build a repo with two same-title stories (cluster into one group) and one
+	// distinct story (its own group).
+	repo := storage.NewMemoryRepository()
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	// Two stories that cluster into one group.
+	if _, err := repo.Upsert(domain.Story{ID: "s1", Title: "Bears Trade Quarterback", Source: "espn", PublishedAt: now.Add(-2 * time.Hour), URL: "https://espn.com/s1", Entities: []string{"bears"}}); err != nil {
+		t.Fatalf("seed s1: %v", err)
+	}
+	if _, err := repo.Upsert(domain.Story{ID: "s2", Title: "Bears Trade Quarterback", Source: "nfl", PublishedAt: now.Add(-1 * time.Hour), URL: "https://nfl.com/s2", Entities: []string{"bears"}}); err != nil {
+		t.Fatalf("seed s2: %v", err)
+	}
+	// A distinct story (different title, no clustering overlap).
+	if _, err := repo.Upsert(domain.Story{ID: "s3", Title: "Cowboys Release Tight End", Source: "cbs", PublishedAt: now.Add(-3 * time.Hour), URL: "https://cbs.com/s3"}); err != nil {
+		t.Fatalf("seed s3: %v", err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "web", "content")
+	publisher := hugo.NewPublisher(outDir, "")
+
+	// --- Baseline: no rule repo (engine independence). ---
+	appNoRules := New(WithRepository(repo), WithClusterer(domain.NewClusterer()))
+	resNoRules := appNoRules.RunStoryPages(context.Background(), now, publisher)
+	if len(resNoRules.Errors) > 0 {
+		t.Fatalf("no-rules run errors: %v", resNoRules.Errors)
+	}
+	// Two groups: the clustered (s1+s2) and the solo (s3).
+	if resNoRules.PagesPublished != 2 {
+		t.Fatalf("no-rules PagesPublished = %d; want 2", resNoRules.PagesPublished)
+	}
+	// Capture baseline bytes.
+	baseline := readAllStoryFiles(t, outDir)
+
+	// --- With rule repo: merge + archive. ---
+	// Build rule repo with an archive rule for the solo story's slug.
+	soloSlug := domain.ComputeStorySlugFromHeadline("Cowboys Release Tight End")
+	clusteredSlug := domain.ComputeStorySlugFromHeadline("Bears Trade Quarterback")
+	ruleRepo := storage.NewMemoryRuleRepository()
+	// Archive the solo story by slug.
+	if err := ruleRepo.SaveRule(domain.CorrectionRule{ID: "arc-solo", Kind: domain.CorrectionArchive, StoryID: soloSlug}); err != nil {
+		t.Fatalf("SaveRule archive: %v", err)
+	}
+	appWithRules := New(WithRepository(repo), WithClusterer(domain.NewClusterer()), WithRuleRepository(ruleRepo))
+
+	resWithRules := appWithRules.RunStoryPages(context.Background(), now, publisher)
+	if len(resWithRules.Errors) > 0 {
+		t.Fatalf("with-rules run errors: %v", resWithRules.Errors)
+	}
+	if resWithRules.PagesPublished != 2 {
+		t.Fatalf("with-rules PagesPublished = %d; want 2", resWithRules.PagesPublished)
+	}
+
+	// The archived page should carry status: archived in front-matter.
+	archivedContent := readStoryFileBySlug(t, outDir, soloSlug)
+	if archivedContent == "" {
+		t.Fatalf("archived story page not found for slug %q", soloSlug)
+	}
+	if !strings.Contains(archivedContent, "status: \"archived\"") {
+		t.Errorf("archived page missing status: archived front-matter:\n%s", archivedContent)
+	}
+	if !strings.Contains(archivedContent, "This story is archived") {
+		t.Errorf("archived page missing archive banner:\n%s", archivedContent)
+	}
+
+	// The clustered page should NOT be archived (no rule targets it).
+	clusteredContent := readStoryFileBySlug(t, outDir, clusteredSlug)
+	if clusteredContent == "" {
+		t.Fatalf("clustered story page not found for slug %q", clusteredSlug)
+	}
+	if strings.Contains(clusteredContent, "status: \"archived\"") {
+		t.Errorf("clustered page should not be archived:\n%s", clusteredContent)
+	}
+
+	// Engine independence: the no-rules baseline and the with-rules run both
+	// produced pages; the with-rules run adds status front-matter (expected
+	// difference) but the no-rules run must not carry any status field.
+	for slug, content := range baseline {
+		if strings.Contains(content, "status: ") {
+			t.Errorf("no-rules baseline page %q carries status field (engine independence violated):\n%s", slug, content)
+		}
+	}
+}
+
+// readAllStoryFiles returns a map of slug -> file content for all generated
+// story pages in outDir/stories.
+func readAllStoryFiles(t *testing.T, outDir string) map[string]string {
+	t.Helper()
+	storiesDir := filepath.Join(outDir, "stories")
+	entries, err := os.ReadDir(storiesDir)
+	if err != nil {
+		t.Fatalf("ReadDir %s: %v", storiesDir, err)
+	}
+	result := make(map[string]string)
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".md") || e.Name() == "_index.md" {
+			continue
+		}
+		slug := strings.TrimSuffix(e.Name(), ".md")
+		data, err := os.ReadFile(filepath.Join(storiesDir, e.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile %s: %v", e.Name(), err)
+		}
+		result[slug] = string(data)
+	}
+	return result
+}
+
+// readStoryFileBySlug returns the content of the story page with the given slug.
+func readStoryFileBySlug(t *testing.T, outDir, slug string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outDir, "stories", slug+".md"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// TestRunStoryPagesMultiSourceResolver (issue #26, AC-3, D5, T3.2): a
+// multi-source story with a registry resolver resolves every source's display
+// name, not just the first article's.
+func TestRunStoryPagesMultiSourceResolver(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	// Three sources with the same headline (cluster into one group).
+	for i, src := range []struct {
+		id  string
+		pub string
+		url string
+	}{
+		{"src-a", "Publisher A", "https://a.com/1"},
+		{"src-b", "Publisher B", "https://b.com/2"},
+		{"src-c", "Publisher C", "https://c.com/3"},
+	} {
+		_, err := repo.Upsert(domain.Story{
+			ID:          "m" + string(rune('0'+i)),
+			Title:       "Rams Sign Veteran Cornerback",
+			Source:      src.id,
+			PublishedAt: now.Add(-time.Duration(3-i) * time.Hour),
+			URL:         src.url,
+			Entities:    []string{"rams"},
+		})
+		if err != nil {
+			t.Fatalf("seed %s: %v", src.id, err)
+		}
+	}
+
+	// Build a registry so the app-level resolver maps source IDs to display names.
+	sources := []domain.FeedSource{
+		{ID: "src-a", URL: "https://a.com/feed", Publication: "Publisher A", Enabled: true},
+		{ID: "src-b", URL: "https://b.com/feed", Publication: "Publisher B", Enabled: true},
+		{ID: "src-c", URL: "https://c.com/feed", Publication: "Publisher C", Enabled: true},
+	}
+	registry, err := domain.NewFeedRegistry(sources...)
+	if err != nil {
+		t.Fatalf("NewFeedRegistry: %v", err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "web", "content")
+	publisher := hugo.NewPublisher(outDir, "")
+
+	app := New(WithRepository(repo), WithClusterer(domain.NewClusterer()), WithRegistry(registry))
+	res := app.RunStoryPages(context.Background(), now, publisher)
+	if len(res.Errors) > 0 {
+		t.Fatalf("run errors: %v", res.Errors)
+	}
+	if res.PagesPublished != 1 {
+		t.Fatalf("PagesPublished = %d; want 1", res.PagesPublished)
+	}
+
+	// The rendered page must carry all three display names.
+	content := readAllStoryFiles(t, outDir)
+	var pageContent string
+	for _, c := range content {
+		pageContent = c
+	}
+	for _, name := range []string{"Publisher A", "Publisher B", "Publisher C"} {
+		if !strings.Contains(pageContent, name) {
+			t.Errorf("page missing display name %q:\n%s", name, pageContent)
+		}
+	}
+}

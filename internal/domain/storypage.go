@@ -22,9 +22,19 @@ type StoryPageKey string
 
 // StoryDetailPage represents a single, canonical story page with metadata from all sources.
 type StoryDetailPage struct {
-	Slug             StorySlug
-	Path             StoryPath
-	StoryID          string
+	Slug    StorySlug
+	Path    StoryPath
+	StoryID string
+	// PageKey is the stable, representative-derived public identity of the
+	// story page (issue #26, D1). Unlike StoryID (an internal group hash that
+	// changes when members change), PageKey is invariant while later articles
+	// arrive and changes only when the representative changes (merge or
+	// backfill), which aliasing absorbs.
+	PageKey StoryPageKey
+	// Status is the story lifecycle state (issue #26, AC-2). Zero value = active.
+	Status StoryStatus
+	// Aliases are identities of stories merged into this one (issue #26, AC-2).
+	Aliases          []StoryAlias
 	Headline         string
 	FirstPublishedAt time.Time
 	LastPublishedAt  time.Time
@@ -106,6 +116,15 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 		return StoryDetailPage{}, fmt.Errorf("cannot build page: no articles have a valid URL")
 	}
 
+	// Chronological timeline (issue #26, D6): sort by PublishedAt, ties on URL,
+	// so the rendered listing is chronological across multi-day updates.
+	sort.Slice(articles, func(i, j int) bool {
+		if !articles[i].PublishedAt.Equal(articles[j].PublishedAt) {
+			return articles[i].PublishedAt.Before(articles[j].PublishedAt)
+		}
+		return articles[i].URL < articles[j].URL
+	})
+
 	// Compute stable slug from the representative's headline
 	slug := StorySlug(ComputeStorySlugFromHeadline(rep.Title))
 
@@ -113,6 +132,9 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 		Slug:             slug,
 		Path:             StoryPath("/stories/" + string(slug) + "/"),
 		StoryID:          group.ID,
+		PageKey:          ComputeStoryPageKey(rep),
+		Status:           group.Status,
+		Aliases:          group.Aliases,
 		Headline:         group.Headline,
 		FirstPublishedAt: group.FirstPublishedAt,
 		LastPublishedAt:  group.LastPublishedAt,
