@@ -25,7 +25,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 | `internal/domain` | Core domain models and interfaces |
 | `internal/application` | Application orchestration and business logic |
 | `internal/adapters/rss` | RSS feed fetching adapter |
-| `internal/adapters/storage` | Storage adapters (in-memory, SQLite file; Turso planned) |
+| `internal/adapters/storage` | Storage adapters (in-memory, SQLite file, Turso) |
 | `internal/adapters/hugo` | Hugo data/snapshot publisher adapter |
 | `internal/adapters/publish` | Story publishing adapter |
 | `internal/config` | Configuration loading and validation |
@@ -161,7 +161,7 @@ This repository uses a GitHub Actions workflow (`.github/workflows/refresh-news.
 - **Secrets required**: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` must be configured in repository settings for production mode.
 - **Environment**: The workflow uses the `github-pages` environment and deploys via GitHub Pages with `pages: write` and `id-token: write` permissions.
 - **Safety**: If the export pipeline produces an empty snapshot (no stories), the workflow restores the last-committed homepage.json and warns instead of publishing an empty site.
-- **Known issue**: The refresh workflow currently sets `HSC_STORAGE_BACKEND=turso`, but the turso backend is unimplemented and causes the ingest step to fail; see docs/ops-runbook.md Known issues for details.
+- **Production backend**: The refresh workflow sets `HSC_STORAGE_BACKEND=turso`. The Turso backend is implemented via `libsql-client-go` (`internal/adapters/storage/turso`); production mode requires `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which are validated at startup (a missing value fails the ingest step with a clear error). Use `sqlite-file` for local runs.
 
 See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflow.
 
@@ -175,7 +175,7 @@ See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflo
 | `HSC_USER_AGENT` | `huddlescope/0.1` | No | User agent string for HTTP requests |
 | `HSC_REQUEST_TIMEOUT` | `30s` | No | Request timeout (e.g., `60s`) |
 | `HSC_HUGO_BASE_URL` | `https://huddlescope.github.io/` | No | Base URL for Hugo exports |
-| `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file; turso is unimplemented and causes ingest to exit with an error at startup until the driver is implemented |
+| `HSC_STORAGE_BACKEND` | `memory` | Yes | Storage backend: memory, turso, sqlite-file; turso is implemented via libsql-client-go and requires `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` in production |
 | `HSC_SOURCES` | (none) | No | Source list: `id,name,url[,interval];...` (legacy; prefer `HSC_SOURCES_FILE`) |
 | `HSC_SOURCES_FILE` | `conf/sources.yaml` | No | Path to the YAML sources file |
 | `HSC_TEAMS_FILE` | `conf/teams.yaml` | No | Path to the YAML teams file |
@@ -285,7 +285,7 @@ Set `HSC_ENV=production` to enable production mode. Production requires:
 - `TURSO_DATABASE_URL` must be set
 - `TURSO_AUTH_TOKEN` must be set
 
-The turso backend is currently unimplemented (factory returns an error at startup); use `sqlite-file` until the driver is implemented.
+The Turso backend is implemented via `libsql-client-go`; it requires `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (validated at startup). `sqlite-file` is available for local runs and does not require credentials.
 
 Invalid production configuration causes the application to fail with a clear error message listing all missing/invalid fields.
 
