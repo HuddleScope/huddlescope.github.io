@@ -58,6 +58,13 @@ func TestDefaultNewRepository(t *testing.T) {
 	assert.NotNil(t, repo)
 }
 
+func TestDefaultNewRetentionService(t *testing.T) {
+	svc, err := DefaultNewRetentionService(config.StorageConfig{Backend: "memory"})
+	assert.NoError(t, err)
+	assert.NotNil(t, svc)
+	assert.NoError(t, svc.Close())
+}
+
 func TestDefaultNewApp(t *testing.T) {
 	app := DefaultNewApp(nil)
 	assert.NotNil(t, app)

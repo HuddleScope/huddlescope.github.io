@@ -27,11 +27,12 @@ Usage:
   huddlescope [command] [flags]
 
 Available Commands:
-  ingest    Run the ingestion pipeline (fetch feeds, group stories, score and rank)
-  export    Export stories to Hugo site (generate homepage.json and story pages)
-  heartbeat Check heartbeat health and staleness
-  config    Validate and display configuration
-  version   Show CLI version information
+  ingest      Run the ingestion pipeline (fetch feeds, group stories, score and rank)
+  export      Export stories to Hugo site (generate homepage.json and story pages)
+  heartbeat   Check heartbeat health and staleness
+  retention   Run retention: export expiring rows to a package, archive, restore
+  config      Validate and display configuration
+  version     Show CLI version information
 
 Global Flags:
       --config PATH       Path to config file (.env format)
@@ -54,6 +55,7 @@ For more information, visit https://huddlescope.github.io/
 	rootCmd.AddCommand(NewIngestCommand(d))
 	rootCmd.AddCommand(NewExportCommand(d))
 	rootCmd.AddCommand(NewHeartbeatCommand(d))
+	rootCmd.AddCommand(NewRetentionCommand(d))
 	rootCmd.AddCommand(NewConfigCommand(d))
 	rootCmd.AddCommand(NewVersionCommand(d))
 

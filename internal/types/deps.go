@@ -81,6 +81,15 @@ func DefaultNewRuleRepository(cfg config.StorageConfig) (domain.CorrectionRuleRe
 	return storage.NewRuleRepository(cfg)
 }
 
+// NewRetentionServiceFunc is a function type for creating a retention service
+// (issue #120 / HS-065).
+type NewRetentionServiceFunc func(cfg config.StorageConfig) (domain.RetentionService, error)
+
+// DefaultNewRetentionService is the default retention service constructor.
+func DefaultNewRetentionService(cfg config.StorageConfig) (domain.RetentionService, error) {
+	return storage.NewRetentionService(cfg)
+}
+
 // NewAppFunc is a function type for creating an application.
 type NewAppFunc func(opts []application.Option) *application.Application
 
@@ -135,31 +144,33 @@ func LoadHeartbeat(path string) (*domain.Heartbeat, bool, error) {
 
 // Deps holds dependencies for command wiring.
 type Deps struct {
-	Output        io.Writer
-	ErrorOutput   io.Writer
-	LoadConfig    LoadConfigFunc
-	NewRepository NewRepoFunc
-	NewRuleRepo   NewRuleRepoFunc
-	NewApp        NewAppFunc
-	NewPublisher  NewPublisherFunc
-	NewFetcher    NewFetcherFunc
-	Now           NowFunc
-	LoadHeartbeat LoadHeartbeatFunc
+	Output              io.Writer
+	ErrorOutput         io.Writer
+	LoadConfig          LoadConfigFunc
+	NewRepository       NewRepoFunc
+	NewRuleRepo         NewRuleRepoFunc
+	NewRetentionService NewRetentionServiceFunc
+	NewApp              NewAppFunc
+	NewPublisher        NewPublisherFunc
+	NewFetcher          NewFetcherFunc
+	Now                 NowFunc
+	LoadHeartbeat       LoadHeartbeatFunc
 }
 
 // NewDeps creates a new deps instance with options.
 func NewDeps(opts ...Option) *Deps {
 	d := &Deps{
-		Output:        os.Stdout,
-		ErrorOutput:   os.Stderr,
-		LoadConfig:    DefaultLoadConfig,
-		NewRepository: DefaultNewRepository,
-		NewRuleRepo:   DefaultNewRuleRepository,
-		NewApp:        DefaultNewApp,
-		NewPublisher:  DefaultNewPublisher,
-		NewFetcher:    DefaultNewFetcher,
-		Now:           DefaultNow,
-		LoadHeartbeat: DefaultLoadHeartbeat,
+		Output:              os.Stdout,
+		ErrorOutput:         os.Stderr,
+		LoadConfig:          DefaultLoadConfig,
+		NewRepository:       DefaultNewRepository,
+		NewRuleRepo:         DefaultNewRuleRepository,
+		NewRetentionService: DefaultNewRetentionService,
+		NewApp:              DefaultNewApp,
+		NewPublisher:        DefaultNewPublisher,
+		NewFetcher:          DefaultNewFetcher,
+		Now:                 DefaultNow,
+		LoadHeartbeat:       DefaultLoadHeartbeat,
 	}
 	for _, opt := range opts {
 		opt(d)

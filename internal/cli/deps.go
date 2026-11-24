@@ -14,17 +14,18 @@ import (
 
 // Re-export types from internal/types for convenience
 type (
-	ExitError         = types.ExitError
-	RunResult         = types.RunResult
-	LoadConfigFunc    = types.LoadConfigFunc
-	NewRepoFunc       = types.NewRepoFunc
-	NewAppFunc        = types.NewAppFunc
-	NewPublisherFunc  = types.NewPublisherFunc
-	NewFetcherFunc    = types.NewFetcherFunc
-	NowFunc           = types.NowFunc
-	LoadHeartbeatFunc = types.LoadHeartbeatFunc
-	Deps              = types.Deps
-	Option            = types.Option
+	ExitError               = types.ExitError
+	RunResult               = types.RunResult
+	LoadConfigFunc          = types.LoadConfigFunc
+	NewRepoFunc             = types.NewRepoFunc
+	NewAppFunc              = types.NewAppFunc
+	NewPublisherFunc        = types.NewPublisherFunc
+	NewFetcherFunc          = types.NewFetcherFunc
+	NowFunc                 = types.NowFunc
+	LoadHeartbeatFunc       = types.LoadHeartbeatFunc
+	NewRetentionServiceFunc = types.NewRetentionServiceFunc
+	Deps                    = types.Deps
+	Option                  = types.Option
 )
 
 // NewExitError creates a new ExitError.
@@ -127,4 +128,11 @@ func WithNow(fn NowFunc) Option {
 // WithLoadHeartbeat sets the heartbeat loader.
 func WithLoadHeartbeat(fn LoadHeartbeatFunc) Option {
 	return types.WithLoadHeartbeat(fn)
+}
+
+// WithNewRetentionService sets the retention service constructor (issue #120).
+func WithNewRetentionService(fn NewRetentionServiceFunc) Option {
+	return func(d *Deps) {
+		d.NewRetentionService = fn
+	}
 }

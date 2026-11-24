@@ -1,204 +1,165 @@
-# Implementation Report: Issue #25 — Cross-publisher event clustering with entity-aware constraints
+# Implementation: Issue #120 — Wire retention to the pipeline; add export-to-package and import
 
-## Status: COMPLETE
+Implemented `autopilot/issue-120` per the saved plan (plan §1–§7). Retention is
+now a real, backend-agnostic pipeline: expiring rows in the hot tables
+(`articles`, `stories`, `ranking_snapshots`) are exported to a portable
+`huddlescope-retention-package` (v1) before they are archived into the
+`*_archive` mirrors, and packages can be restored idempotently via import.
+The pipeline is wired into the `huddlescope` CLI (`retention` command), the
+GitHub Actions refresh workflow (`run-retention` steps, export → commit →
+apply), and the config surface (`HSC_RETENTION_ENABLED`, `HSC_RETENTION_DAYS`).
 
-Entity overlap is now a **constraint** (not a merge signal) in the clustering
-algorithm. `JoinDecision` metadata is persisted on each story, deterministic
-split/merge `CorrectionRule`s are supported with a dedicated storage layer, and
-the feature is wired through config, application, runner, and storage-factory
-layers. All acceptance criteria are met; tests and the coverage gate pass.
+No unrelated work was touched; the pre-existing (unwired) HS-041 retention
+functions were refactored into `*sql.DB`-level functions that the existing
+path-based API now wraps, so all prior behavior and tests are preserved.
 
-No `git commit`, `git push`, or GitHub mutations were performed.
+## What was built
 
----
+### Domain contract (`internal/domain/retention.go`, new)
 
-## ✅ Completed Changes
+- `RetentionPolicy` (window, batch limit, free-tier budget, source backend)
+  with sane defaults (`90` days, `500` rows/batch, `512 MiB`).
+- `PackageReport`, `RetentionReport`, `RetentionStatus` report types.
+- `RetentionService` interface: `ExportPackage` (no-op-safe, never deletes),
+  `Apply` (archive + budget check), `Import` (validated restore), `Status`,
+  `Close`.
 
-### 1. Domain — entity-aware clustering constraint (AC-1)
-**File**: `internal/domain/clustering.go`
+### Driver-agnostic storage layer
 
-- `EntityAffinity(a, b Article) float64` — Jaccard affinity over
-  NFC-normalized, de-duplicated entity sets.
-  - both entity-less → `1.0` (neutral)
-  - one side entity-less → `1.0` (neutral)
-  - otherwise Jaccard(|A∩B| / |A∪B|)
-- `Article.NormalizedEntitySet() map[string]bool` — shared helper;
-  whitespace-only entities ignored.
-- `Clusterer.EntityAffinityMin float64` (default `0.5`, constant
-  `DefaultEntityAffinityMin`) — the minimum entity-set compatibility required
-  before two entity-bearing articles may merge.
-- `ClusterWithDecisions(articles) ([]StoryGroup, []JoinDecision)` — the core
-  clustering loop, which now applies the entity constraint on **both** the
-  URL fast path and the scored path:
-  - URL fast path merges across sources only when sources match, entity sets
-    are identical (`affinity >= 1.0`), or one/both sides are entity-less.
-    Partial-overlap-only URL matches fall through to the scored path, where the
-    affinity floor applies.
-  - Scored path: when both articles carry entities, `affinity < EntityAffinityMin`
-    blocks merging (this kills the "same team name on two unrelated events"
-    false positive).
-  - The boilerplate-summary fast path (`math.Max(combined, summary)`) is only
-    allowed when entity sets are identical or neutral; otherwise the title
-    alone must clear the threshold (closes the boilerplate-lead bypass).
-- `Cluster(articles) []StoryGroup` is now a thin wrapper over
-  `ClusterWithDecisions`, returning only the groups (backward compatible).
-- `StoryGroup.JoinReasons []JoinDecision` — the group carries its join
-  decisions; `NewStoryFromGroup` copies them to `Story.JoinReasons`.
-- `JoinDecision` struct (group, article, source, reason code, title/summary
-  Jaccard scores, entity affinity, threshold, timestamp).
+- `internal/adapters/storage/sqlite/retentiondb.go` (new): DB-level
+  `ArchiveOldDB`, `StorageEstimateDB`, `SchemaVersionDB`,
+  `ApplyRetentionDB` operating on an open `*sql.DB` handle — works identically
+  on the modernc sqlite driver and the libsql (Turso) driver.
+- `internal/adapters/storage/sqlite/retentionpkg.go` (new): package
+  export/import. Export writes `manifest.json` + `tables/<table>.sql`
+  (`INSERT OR REPLACE` in bounded 500-row transactions) into a `.tar.gz`
+  (0600, temp-file + atomic rename); no-op when nothing expires. Import
+  validates format/version, the 3-table whitelist, per-file row counts, and
+  classifies every statement (only `INSERT OR REPLACE`/`BEGIN`/`COMMIT`
+  allowed; `DROP`/`DELETE`/`UPDATE`/`ALTER`/`CREATE` rejected; path traversal
+  rejected; size cap enforced).
+- `internal/adapters/storage/sqlite/retention.go` (refactored): the original
+  path-based HS-041 API (`ArchiveOld`, `StorageEstimate`,
+  `ApplyRetention`, …) is now a thin wrapper over the DB-level functions on a
+  single modernc handle — existing behavior and tests preserved.
+- `internal/adapters/storage/sqlite/retentionservice.go` (new): `DBService`
+  implementing `domain.RetentionService` on a `*sql.DB` handle.
+- `internal/adapters/storage/turso/retention.go` (new): Turso
+  `RetentionService` — construction is network-free (`buildDSN` + `sql.Open`
+  only; no `Ping`), matching the Turso backend's lazy style; first operation
+  runs `PRAGMA foreign_keys = ON` + migrations once; errors are redacted
+  (`RedactedDSN`, never leaks the token).
+- `internal/adapters/storage/retention.go` (new): `NewRetentionService(cfg)`
+  factory: `sqlite-file` (eager migrations), `turso` (lazy), `memory`
+  (documented no-op: export/import fail loudly — packages must be persisted;
+  apply is a safe no-op), unknown backend errors.
 
-### 2. Domain — correction rules (AC-3)
-**File**: `internal/domain/corrections.go` (new)
+### CLI (`internal/cli/retention.go`, new; wired in `root.go`, `deps.go`)
 
-- `CorrectionRule` struct + `CorrectionKind` (`split`, `merge`).
-- `CorrectionRule.Validate()` — intrinsic validation (malformed rules rejected).
-- `CorrectionRule.ValidateAgainstGroups(groups)` — references resolve against
-  the current partition (unknown group/article → error).
-- `ApplyCorrections(groups, rules) ([]StoryGroup, error)` — deterministic:
-  - rules applied in canonical (ID-sorted) order;
-  - idempotent: re-applying the same rules yields the same partition;
-  - cyclic merges rejected (A→B + B→A detection);
-  - group IDs recomputed deterministically after any re-partitioning;
-  - input partition never mutated on error (a fresh copy is returned);
-  - join reasons preserved: split keeps them on the surviving group; merge
-    combines source + target join reasons.
+`huddlescope retention` with subcommands:
 
-### 3. Domain — story & source interfaces
-- `internal/domain/story.go` — `Story.JoinReasons []JoinDecision` with
-  backward-compatible JSON marshal/unmarshal (old JSON without `joinReasons`
-  unmarshals to `nil`).
-- `internal/domain/source.go` — `CorrectionRuleRepository` interface
-  (`SaveRule`, `ListRules`).
+- `run` — export then apply; `--dry-run` exports only; any export failure
+  aborts before apply (AC-2).
+- `export` — write expiring rows to `--output` (default
+  `archive/retention`); no-op-safe, exit 0 when nothing expired.
+- `apply` — archive expiring rows, check storage budget.
+- `import --package <file>` — validated, idempotent restore (flag required).
+- `status` — enabled/window/backend/schema/size/budget.
 
-### 4. Config (AC-3 wiring)
-**File**: `internal/config/config.go`
+All honor `HSC_RETENTION_ENABLED=false` (clean no-op) and `--window`/
+`HSC_RETENTION_DAYS`. `types.Deps` gains `NewRetentionService` (default:
+`storage.NewRetentionService`) with a `WithNewRetentionService` option for
+tests.
 
-- `Config.EntityAffinityMin float64` with default handling, env var
-  `HSC_CLUSTER_ENTITY_AFFINITY`, env-file parsing, and validation (zero
-  treated as unset).
-- Wired into `ClustererSettings()`.
+### Config (`internal/config/config.go`)
 
-### 5. Storage adapters
-- `internal/adapters/storage/memory.go` — `MemoryRuleRepository` (in-memory,
-  deterministic ID-sorted `ListRules`).
-- `internal/adapters/storage/sqlite/migrations/007_correction_rules.sql` (new)
-  — `correction_rules` table.
-- `internal/adapters/storage/sqlite/repository.go` — `RuleRepository`
-  (`SaveRule`/`ListRules`) + `DB()` accessor.
-- `internal/adapters/storage/turso/repository.go` — `DB()` accessor exposed;
-  Turso serves the same `sqlite.RuleRepository`.
-- `internal/adapters/storage/factory.go` — `storage.NewRuleRepository` for
-  memory/sqlite/turso backends.
+- `Config.RetentionEnabled` (default `true`) + `Config.RetentionWindowDays`
+  (default `90`); env `HSC_RETENTION_ENABLED` (bool-ish) and
+  `HSC_RETENTION_DAYS` (positive int) via both `loadFromEnv` and
+  `loadEnvFile` (unknown-key-permissive, invalid values rejected); validation
+  accepts zero (unset) and rejects negative; included in `Redacted`/
+  `MarshalJSON` safe config. `.env.example` documents both.
 
-### 6. Application layer (AC-3b)
-**File**: `internal/application/app.go`
+### Pipeline wiring
 
-- `WithRuleRepository` option + `ruleRepository` field.
-- `applyCorrections` helper loads rules (when a rule repository is injected)
-  and applies them after clustering in the grouping, scoring, and pipeline
-  paths. Rules referencing missing groups surface as an error (no crash).
+- `Makefile`: new `retention` target (`./dist/huddlescope retention run`).
+- `.github/workflows/refresh-news.yml`: new `run-retention` input (default
+  `true`) and three steps **after** all DB reads (ingest, export, site build):
+  `retention export` → `commit retention package` (skips cleanly on a no-op
+  export; any failure fails the job) → `retention apply`. No
+  `continue-on-error` anywhere, so apply can never run without a persisted
+  package in Git (AC-2).
+- `archive/retention/README.md` (new): documents the package store and the
+  restore command.
 
-### 7. Runner & types wiring
-- `internal/types/deps.go` — `NewRuleRepoFunc`, `DefaultNewRuleRepository`,
-  `Deps.NewRuleRepo`.
-- `internal/runner/runner.go` — `Runner` constructs and injects the rule
-  repository (`WithRuleRepository`) after building the clusterer/scorer.
+### Docs
 
----
+- `docs/ops-runbook.md`: new "Retention and archiving (HS-065 / issue #120)"
+  section — pipeline order, local commands, restore procedure, safety
+  properties; the stale "not yet wired" note from HS-041 is corrected.
+- `docs/editorial-policy.md`: archive-retention note added to the data
+  deletion section (archives are not dropped; opt-outs apply to archives;
+  restore via `retention import`).
 
-## 📋 Acceptance Criteria Status
+## Tests added (targeted regression coverage)
 
-| AC | Description | Status | Notes |
-|----|-------------|--------|-------|
-| AC-1 | Entity overlap is a constraint, not a merge signal | ✅ | URL fast path + scored path both gated; same-team/different-events do not merge; true duplicate coverage still merges |
-| AC-2 | Benchmark dataset with FP/FN gates | ✅ | `internal/domain/testdata/clustering_bench.json` + `TestClusterer_Benchmark*` gate FP=0, FN≤2 |
-| AC-3a | Persist `JoinDecision` metadata per story | ✅ | `Story.JoinReasons`; backward-compatible JSON |
-| AC-3b | Deterministic split/merge `CorrectionRule`s + storage | ✅ | `ApplyCorrections` (idempotent, cycle-safe) + `CorrectionRuleRepository` (memory/sqlite/turso) + integration through app/runner |
-| AC-3c | Config + coverage gate | ✅ | `HSC_CLUSTER_ENTITY_AFFINITY` env; coverage gate passes |
+- `sqlite/retentiondb_test.go`: archive across all three tables (exact counts,
+  hot vs archive, idempotent second run), bounded batching (1200 rows),
+  storage estimate, schema version, apply + budget-exceeded policy.
+- `sqlite/retentionpkg_test.go`: export selects only expiring rows; no-op
+  export writes nothing; export→delete→import round-trip is exact (unicode,
+  embedded quotes/newlines, NULLs, JSON `story_data` preserved byte-for-byte);
+  import idempotency (double import, no duplicates); FK-safe import with
+  `foreign_keys=ON` (fresh rows' links survive); malicious-package rejection
+  (extra manifest table, `DROP` statement, wrong format, row-count mismatch,
+  path-traversal member); valid empty package imports.
+- `turso/retention_test.go`: service over a real `*sql.DB` handle
+  (driver-agnostic proof) covering export/apply/import/status; lazy
+  `NewRetentionService` (no network at construction); first-operation failure
+  with token redaction; `init()` DSN branch; empty-URL rejection.
+- `storage/retention_test.go`: factory per backend — memory no-op semantics
+  (export/import fail loudly, apply no-op, status ok), sqlite-file
+  (migrated, schema 7), unknown backend error, turso empty-URL error.
+- `cli/retention_test.go`: command wiring (all five subcommands), disabled
+  config no-op, `--dry-run` skips apply, export failure aborts apply, export
+  no-op message, import `--package` required, import success, status output.
+- `config/config_retention_test.go`: env parsing (enabled/days/invalid),
+  validation (negative rejected, zero accepted), env-file parsing.
+- `types/deps_test.go`: `DefaultNewRetentionService` default constructor.
 
----
+## Verification
 
-## 🧪 Test Results
+- `make check` — **all checks passed**: build, vet, golangci-lint (0
+  issues), `go test ./...`, coverage gates (all internal packages at/above
+  thresholds; turso 74.4%, types back above 70%), gosec (0 issues; two
+  path-scoped exclusions added to the Makefile's `-exclude-rules` for the
+  import file-open G304 and the cobra flag-mark G104, consistent with the
+  existing backup.go exclusions), govulncheck (no vulnerabilities).
+- End-to-end smoke test with `HSC_STORAGE_BACKEND=sqlite-file`: seeded old +
+  fresh rows across all three tables, ran `retention run` → package
+  `retention-<UTC-stamp>.tar.gz` written with 3 rows (1 per table), apply
+  archived exactly those 3 rows, `status` reports `enabled=true window=90
+  schema_version=7 budget_ok=true`. Smoke-test artifacts removed.
+- `refresh-news.yml` YAML validated; `huddlescope retention --help` renders.
 
-```
-go vet ./...                       ✅ PASS
-go test ./...                      ✅ PASS (all packages)
-scripts/coverage-check.sh          ✅ PASS (core ≥80%, other internal ≥70%)
-```
+## Key files
 
-Coverage:
+- `internal/domain/retention.go` (new) — contract + defaults.
+- `internal/adapters/storage/sqlite/retentiondb.go` (new) — DB-level archive/estimate/version/apply.
+- `internal/adapters/storage/sqlite/retentionpkg.go` (new) — package export/import + validation.
+- `internal/adapters/storage/sqlite/retentionservice.go` (new) — `DBService`.
+- `internal/adapters/storage/sqlite/retention.go` (refactored) — path-based API wraps DB-level.
+- `internal/adapters/storage/turso/retention.go` (new) — Turso service (lazy, redacted).
+- `internal/adapters/storage/retention.go` (+ `_test.go`) (new) — backend factory.
+- `internal/cli/retention.go` (+ `_test.go`) (new) — `hs retention` command tree.
+- `internal/cli/root.go`, `internal/cli/deps.go`, `internal/types/deps.go` (+ test) — wiring.
+- `internal/config/config.go` (+ `config_retention_test.go`) — config surface.
+- `.github/workflows/refresh-news.yml` — export → commit → apply steps + input.
+- `Makefile`, `.env.example`, `archive/retention/README.md`, `docs/ops-runbook.md`, `docs/editorial-policy.md`.
 
-```
-internal/application           86.1% (≥80% ✅)
-internal/config                87.8% (≥80% ✅)
-internal/domain                85.2% (≥80% ✅)
-internal/adapters/storage       76.0% (≥70% ✅)
-internal/adapters/storage/sqlite 80.2% (≥70% ✅)
-internal/adapters/storage/turso  70.4% (≥70% ✅)
-internal/types                  70.2% (≥70% ✅)
-```
+## Deviations from the plan
 
-### New / updated tests
-
-**Domain** (`internal/domain/`):
-- `clustering_entity_test.go` — AC-1: entity-overlap-no-merge, multi-outlet
-  duplicate coverage merge, boilerplate-summary no-merge, `EntityAffinity`
-  table test, whitespace-only entity handling.
-- `clustering_decisions_test.go` — AC-3a: `ClusterWithDecisions` reason codes,
-  `Cluster` thin-wrapper parity, `Story` JSON round-trip incl. backward
-  compatibility, nil/malformed-time/empty-entity edge cases, concurrent safety.
-- `clustering_bench_test.go` — AC-2: benchmark dataset FP/FN gate,
-  idempotency, whole-case partition vs ground truth.
-- `corrections_test.go` — AC-3: split, merge, idempotency, invalid-rule
-  rejection (unknown group/article, self-merge, cycles), re-cluster survival,
-  no-op (no rules).
-
-**Adapters** (`internal/adapters/storage/`):
-- `rules_test.go` — memory rule repo round-trip + factory wiring.
-- `sqlite/rules_test.go` — 007 migration creates `correction_rules`;
-  save/list round-trip; invalid rule rejected.
-
-**Application** (`internal/application/`):
-- `app_corrections_test.go` — AC-3b: full RunGrouping with a split rule loaded
-  from the rule repository; join reasons present on resulting stories; orphan
-  rule reference surfaces an error without crashing.
-
-**Migrations** (existing tests updated for 007):
-- `sqlite/migrations_test.go`, `sqlite/repository_test.go`, `turso/turso_test.go`
-  — migration count 6 → 7.
-
----
-
-## 📚 Related Files
-
-### Created
-- `internal/domain/corrections.go`
-- `internal/domain/corrections_test.go`
-- `internal/domain/clustering_entity_test.go`
-- `internal/domain/clustering_decisions_test.go`
-- `internal/domain/clustering_bench_test.go`
-- `internal/domain/testdata/clustering_bench.json`
-- `internal/adapters/storage/rules_test.go`
-- `internal/adapters/storage/sqlite/rules_test.go`
-- `internal/adapters/storage/sqlite/migrations/007_correction_rules.sql`
-- `internal/application/app_corrections_test.go`
-
-### Modified
-- `internal/domain/clustering.go`
-- `internal/domain/story.go`
-- `internal/domain/source.go`
-- `internal/config/config.go`
-- `internal/adapters/storage/memory.go`
-- `internal/adapters/storage/factory.go`
-- `internal/adapters/storage/sqlite/repository.go`
-- `internal/adapters/storage/sqlite/migrations_test.go`
-- `internal/adapters/storage/sqlite/repository_test.go`
-- `internal/adapters/storage/turso/repository.go`
-- `internal/adapters/storage/turso/turso_test.go`
-- `internal/application/app.go`
-- `internal/runner/runner.go`
-- `internal/types/deps.go`
-
----
-
-*Implementation completed for issue #25.*
+- None material. The plan's `archive/retention/` location is used verbatim
+  (the directory's README is the only committed content; packages land there
+  at runtime). The in-memory backend is a documented no-op rather than a
+  silent in-memory store, per AC-2 (packages must be persisted).

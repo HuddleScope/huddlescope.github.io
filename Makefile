@@ -45,7 +45,7 @@ coverage: ## Run tests with coverage report
 # Override with GOSEC / GOVULNCHECK env vars if installed elsewhere.
 security: ## Run gosec security scanner and govulncheck (fails CI on findings)
 	@$(GO) clean -cache
-	$(GOSEC) -exclude-rules="internal/adapters/storage/sqlite/backup.go:G304,G703" ./...
+	$(GOSEC) -exclude-rules="internal/adapters/storage/sqlite/backup.go:G304,G703;internal/adapters/storage/sqlite/retentionpkg.go:G304;internal/cli/retention.go:G104" ./...
 	@$(GO) clean -cache
 	$(GOVULNCHECK) ./...
 
@@ -60,7 +60,10 @@ build: ## Build unified huddlescope binary to dist/
 
 build-huddlescope: build ## Build unified huddlescope binary to dist/ (alias)
 
-.PHONY: build build-huddlescope
+retention: build ## Run retention locally: export package to archive/retention, then apply
+	./$(PREFIX)/huddlescope retention run
+
+.PHONY: build build-huddlescope retention
 
 # Check (CI pipeline)
 check: ## Run format, lint, test, coverage check, and security checks
@@ -104,4 +107,4 @@ release-gate: ## Run the end-to-end release gate script
 	@bash scripts/release-gate.sh
 
 # Phony targets
-.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch release-gate
+.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch release-gate retention

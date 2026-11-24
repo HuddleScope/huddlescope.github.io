@@ -265,8 +265,73 @@ The following functions are available in the sqlite package:
 - `DumpToFile(dbPath, dumpPath)` — SQL dump to file
 - `ApplyRetention(dbPath)` — archive rows older than 90 days in bounded batches
 
-These functions are not yet wired into the ingest/export pipeline; the
-operational backup path remains Turso Cloud services.
+These functions are now wired into the retention pipeline via the
+`huddlescope retention` CLI (issue #120) and the `run-retention` step in the
+`refresh-news.yml` workflow.
+
+## Retention and archiving (HS-065 / issue #120)
+
+Hot tables (`articles`, `stories`, `ranking_snapshots`) are bounded to a
+retention window (default **90 days**, `HSC_RETENTION_DAYS`). Rows older than
+the window are moved into `*_archive` mirrors (they stay in the same database;
+the archives are *not* dropped). Before archiving, the expiring rows are
+exported to a portable package that is committed to `archive/retention/` so
+nothing is ever lost.
+
+### How the pipeline runs
+
+1. **Export** — `huddlescope retention export --output archive/retention`
+   writes rows older than the window to `retention-<UTC-stamp>.tar.gz`
+   (format `huddlescope-retention-package`, v1: `manifest.json` +
+   `tables/{articles,stories,ranking_snapshots}.sql` with `INSERT OR REPLACE`
+   statements in bounded 500-row transactions). Export never deletes anything.
+   A run with no expiring rows writes nothing.
+2. **Commit** — the workflow commits the new package to `archive/retention/`
+   in Git *before* archiving. If the export or commit fails, the build job
+   fails and archiving never runs (packages must be persisted — AC-2).
+3. **Apply** — `huddlescope retention apply` archives the expiring rows in
+   bounded batches and checks the storage budget.
+4. **Import (restore)** — `huddlescope retention import --package <file>`
+   validates the package (format v1, whitelisted tables, statement classifier,
+   size cap) and restores rows into the hot tables. Import is idempotent:
+   re-importing the same package does not duplicate rows.
+
+### Local usage
+
+```bash
+# Full local run (export + apply)
+huddlescope retention run
+# Export only (no archiving)
+huddlescope retention run --dry-run
+# Individual steps
+huddlescope retention export --output archive/retention
+huddlescope retention apply
+huddlescope retention import --package archive/retention/retention-20260101T000000Z.tar.gz
+huddlescope retention status
+```
+
+Disable retention locally or in CI with `HSC_RETENTION_ENABLED=false`.
+
+### Restore procedure (archive → hot)
+
+1. Identify the package in `archive/retention/` (chronological by timestamp).
+2. Verify it: `./dist/huddlescope retention import --package archive/retention/<pkg>.tar.gz`
+   (idempotent; safe to run twice).
+3. If the restore must roll back, delete the restored rows by their primary
+   keys (the package manifest lists per-table row counts) — or restore the
+   database from a Turso Cloud backup taken before the import.
+
+### Safety properties
+
+- Packages contain **only** the three whitelisted hot tables — never sources,
+  tokens, correction rules, or link tables.
+- Import executes only `INSERT OR REPLACE` / `BEGIN` / `COMMIT` statements
+  classified against the file's declared table; anything else aborts the
+  import.
+- The manifest pins `format` + `version: 1`; unknown formats or versions are
+  rejected rather than guessed.
+- Packages are portable: no absolute paths, no foreign keys, stable primary
+  keys.
 
 ## Secret rotation
 
