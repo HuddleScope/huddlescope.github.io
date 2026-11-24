@@ -24,6 +24,7 @@ type Runner struct {
 	loadConfig    types.LoadConfigFunc
 	newRepository types.NewRepoFunc
 	newRuleRepo   types.NewRuleRepoFunc
+	newIngestRuns types.NewIngestRunRepoFunc
 	newApp        types.NewAppFunc
 	newPublisher  types.NewPublisherFunc
 	newFetcher    types.NewFetcherFunc
@@ -55,6 +56,7 @@ func NewRunner(opts ...Option) *Runner {
 		loadConfig:    types.DefaultLoadConfig,
 		newRepository: types.DefaultNewRepository,
 		newRuleRepo:   types.DefaultNewRuleRepository,
+		newIngestRuns: types.DefaultNewIngestRunRepository,
 		newApp:        types.DefaultNewApp,
 		newPublisher:  types.DefaultNewPublisher,
 		newFetcher:    types.DefaultNewFetcher,
@@ -100,6 +102,14 @@ func WithNewRepository(fn types.NewRepoFunc) Option {
 func WithNewRuleRepo(fn types.NewRuleRepoFunc) Option {
 	return func(r *Runner) {
 		r.newRuleRepo = fn
+	}
+}
+
+// WithNewIngestRunRepo sets the ingest-run repository constructor (issue #159).
+// A nil function disables run tracking.
+func WithNewIngestRunRepo(fn types.NewIngestRunRepoFunc) Option {
+	return func(r *Runner) {
+		r.newIngestRuns = fn
 	}
 }
 
@@ -223,6 +233,51 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 			appOpts = append(appOpts, application.WithRuleRepository(ruleRepo))
 		}
 	}
+
+	// Issue #159 (HS-PORT-03): register the run in the shared database.
+	// Tracking is best-effort: a storage failure must never fail the ingest
+	// pipeline (same pattern as heartbeat/feed-health publishing).
+	var runsRepo domain.IngestRunRepository
+	if r.newIngestRuns != nil {
+		if rr, rerr := r.newIngestRuns(cfg.Storage()); rerr == nil && rr != nil {
+			runsRepo = rr
+		} else if rerr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: ingest-run tracking unavailable: %v\n", rerr)
+		}
+	}
+
+	var startedRun domain.IngestRun
+	var startedRunRegistered bool
+	if runsRepo != nil {
+		runID := domain.NewRunID()
+		startedRun = domain.IngestRun{
+			RunID:     runID.String(),
+			Origin:    cfg.RunnerOrigin,
+			StartedAt: r.now().UTC(),
+			Status:    domain.IngestRunRunning,
+		}
+		if cerr := runsRepo.Create(context.Background(), startedRun); cerr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to register ingest run: %v\n", cerr)
+			runsRepo = nil // degrade: no tracking for this run
+		} else {
+			startedRunRegistered = true
+		}
+	}
+	// Defer finalization with a FRESH context: runCtx may be cancelled
+	// (interrupt) and must not abort the bookkeeping write (AC-6).
+	defer func() {
+		if !startedRunRegistered || runsRepo == nil || result.Result == nil {
+			return
+		}
+		finished := domain.NewIngestRunFromRecord(*result.Result, cfg.RunnerOrigin)
+		finished.RunID = startedRun.RunID // preserve the registered run id
+		fctx, fcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer fcancel()
+		if ferr := runsRepo.Finish(fctx, finished); ferr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to finalize ingest run: %v\n", ferr)
+		}
+		_ = runsRepo.Close()
+	}()
 
 	// Add team registry for entity extraction
 	appOpts = append(appOpts, application.WithTeamRegistry(teamRegistry))

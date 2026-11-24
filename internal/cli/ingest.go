@@ -65,19 +65,24 @@ func NewIngestRunCommand(d *Deps) *cobra.Command {
 	return cmd
 }
 
-// NewIngestStatusCommand creates the ingest status subcommand.
+// NewIngestStatusCommand creates the ingest status subcommand (issue #159).
+// Reads run-level ingest history from the shared database (Turso).
 func NewIngestStatusCommand(d *Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show ingestion status (stub for HS-PORT-03)",
-		Long:  `Show ingestion status. This is a stub command for HS-PORT-03.`,
+		Short: "Show ingestion status from the shared run history",
+		Long: `Show run-level ingestion status from the shared database (issue #159):
+last attempt, last successful run, age, state, counters, and execution source.
+
+This is a DB-sourced query: the memory backend cannot serve it (per-host
+volatile store) and the command exits non-zero in that case. On any database
+error the command exits non-zero WITHOUT printing a verdict (fail closed).`,
 		Annotations: map[string]string{
 			"commandType": "ingest_status",
-			"deprecated":  "true",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Ingestion status: stub for HS-PORT-03")
-			return nil
+			output, _ := cmd.Flags().GetString("output")
+			return runIngestStatus(cmd, d, output)
 		},
 	}
 
@@ -85,19 +90,34 @@ func NewIngestStatusCommand(d *Deps) *cobra.Command {
 	return cmd
 }
 
-// NewIngestShouldRunCommand creates the ingest should-run subcommand.
+// NewIngestShouldRunCommand creates the ingest should-run subcommand (issue #159).
+// Stable JSON contract: {"should_run":bool,"reason":"fresh|stale|never_succeeded",
+// "last_successful_ingest_at":"RFC3339Z"|null}.
 func NewIngestShouldRunCommand(d *Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "should-run",
-		Short: "Check if ingestion should run (stub for HS-PORT-03)",
-		Long:  `Check if ingestion should run. This is a stub command for HS-PORT-03.`,
+		Short: "Check if ingestion should run based on shared run history",
+		Long: `Decide whether a backup ingest should run, based purely on the shared
+database's last successful ingest (issue #159).
+
+Exit codes: 0 on a correct query (regardless of the true/false decision);
+non-zero on database errors, in which case NO verdict is printed (callers
+must fail closed and never treat an error as "run").`,
 		Annotations: map[string]string{
 			"commandType": "ingest_should_run",
-			"deprecated":  "true",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "true")
-			return nil
+			staleAfterStr, _ := cmd.Flags().GetString("stale-after")
+			output, _ := cmd.Flags().GetString("output")
+			staleAfter := 75 * time.Minute
+			if staleAfterStr != "" {
+				parsed, err := time.ParseDuration(staleAfterStr)
+				if err != nil {
+					return fmt.Errorf("invalid stale-after duration: %w", err)
+				}
+				staleAfter = parsed
+			}
+			return runIngestShouldRun(cmd, d, staleAfter, output)
 		},
 	}
 

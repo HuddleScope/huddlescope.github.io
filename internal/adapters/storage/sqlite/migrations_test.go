@@ -20,8 +20,8 @@ func TestMigrate005DropsOrphanedTablesPreservesRanking(t *testing.T) {
 	}
 
 	// Check that we have 7 migrations now (001-007)
-	if len(versions) != 7 {
-		t.Errorf("expected 7 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 8 {
+		t.Errorf("expected 8 migrations, got %d: %v", len(versions), versions)
 	}
 
 	// Verify that teams and article_teams tables no longer exist
