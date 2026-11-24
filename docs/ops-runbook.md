@@ -93,13 +93,9 @@ To disable a feed source without deleting it permanently:
 
 ## Turso backup/restore
 
-## Turso backup/restore
-
 See `internal/adapters/storage/sqlite/backup.go` and `internal/adapters/storage/sqlite/retention.go` for the in-repo implementation (HS-041).
 
-### Operational backup ( Turso Cloud)
-
-### Operational backup ( Turso Cloud)
+### Operational backup (Turso Cloud)
 
 1. **Export from Turso**
    ```bash
@@ -266,7 +262,7 @@ Heartbeat staleness is visually indicated in workflow run output:
 
 ## Known issues
 
-- Export always uses memory repository (default `HSC_STORAGE_BACKEND=memory`); turso backend unimplemented (factory error, verified exit 1) — see Known issues
+- The refresh workflow runs in production with `HSC_STORAGE_BACKEND=turso`. The Turso backend is implemented via `libsql-client-go`; production mode requires `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which are validated at startup (a missing value fails the ingest step with a clear, redacted error). Local runs can use `sqlite-file` or `memory`.
 - The heartbeat file commits to the repo; the refresh workflow does not push any data back to the default branch
 - Backup/restore code implemented in sqlite package (HS-041), not yet wired into the pipeline
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline
