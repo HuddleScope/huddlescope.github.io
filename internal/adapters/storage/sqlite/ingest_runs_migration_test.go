@@ -18,8 +18,8 @@ func TestMigrate008CreatesIngestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 8 {
-		t.Fatalf("expected 8 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 9 {
+		t.Fatalf("expected 9 migrations, got %d: %v", len(versions), versions)
 	}
 
 	repo, err := NewRepository(dbPath)
@@ -108,13 +108,14 @@ func TestMigrate008CarryOver(t *testing.T) {
 		}
 	}
 
-	// Now run MigrateDB: only 008 is new -> carry-over + drop legacy.
+	// Now run MigrateDB: 008 and 009 are new -> carry-over + drop legacy (008),
+	// then rebuild ingest_runs + create ingest_lease (009).
 	versions, err := MigrateDB(db)
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	if len(versions) != 1 {
-		t.Errorf("expected only migration 008 applied, got %d: %v", len(versions), versions)
+	if len(versions) != 2 {
+		t.Errorf("expected migrations 008 and 009 applied, got %d: %v", len(versions), versions)
 	}
 
 	// Carry-over verification.

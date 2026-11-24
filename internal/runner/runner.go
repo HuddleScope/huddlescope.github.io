@@ -2,16 +2,23 @@ package runner
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	ossignal "os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/heartbeat"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/hugo"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 	"github.com/HuddleScope/huddlescope.github.io/internal/types"
@@ -25,6 +32,7 @@ type Runner struct {
 	newRepository types.NewRepoFunc
 	newRuleRepo   types.NewRuleRepoFunc
 	newIngestRuns types.NewIngestRunRepoFunc
+	newLeaseRepo  types.NewLeaseRepoFunc
 	newApp        types.NewAppFunc
 	newPublisher  types.NewPublisherFunc
 	newFetcher    types.NewFetcherFunc
@@ -57,6 +65,7 @@ func NewRunner(opts ...Option) *Runner {
 		newRepository: types.DefaultNewRepository,
 		newRuleRepo:   types.DefaultNewRuleRepository,
 		newIngestRuns: types.DefaultNewIngestRunRepository,
+		newLeaseRepo:  types.DefaultNewLeaseRepository,
 		newApp:        types.DefaultNewApp,
 		newPublisher:  types.DefaultNewPublisher,
 		newFetcher:    types.DefaultNewFetcher,
@@ -113,6 +122,15 @@ func WithNewIngestRunRepo(fn types.NewIngestRunRepoFunc) Option {
 	}
 }
 
+// WithNewLeaseRepo sets the ingest lease repository constructor (issue #160 /
+// HS-PORT-04). A nil function disables distributed mutual exclusion (the runner
+// proceeds without a lease and warns).
+func WithNewLeaseRepo(fn types.NewLeaseRepoFunc) Option {
+	return func(r *Runner) {
+		r.newLeaseRepo = fn
+	}
+}
+
 // WithNewApp sets the application constructor.
 func WithNewApp(fn types.NewAppFunc) Option {
 	return func(r *Runner) {
@@ -155,7 +173,19 @@ type RunIngestResult struct {
 	Summary string
 }
 
-// RunIngest runs the ingestion pipeline.
+// LeaseTTL is the default distributed lease lifetime (issue #160 / plan §6).
+const LeaseTTL = 20 * time.Minute
+
+// LeaseRenewInterval is the interval between lease renewals (issue #160 / plan
+// §6). It must be comfortably less than LeaseTTL so a single network blip
+// does not cause a spurious hand-off. Declared as a var (not const) so the
+// runner tests can shorten it deterministically; production uses the default.
+var LeaseRenewInterval = 5 * time.Minute
+
+// RunIngest runs the ingestion pipeline with distributed mutual exclusion
+// (issue #160 / HS-PORT-04). mode is "primary" or "backup"; staleAfter is the
+// freshness threshold for the backup pre-check; force skips the staleness
+// pre-check but NEVER the lease.
 func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Duration, force bool) *RunIngestResult {
 	result := &RunIngestResult{}
 
@@ -246,8 +276,184 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 		}
 	}
 
+	// ---------------------------------------------------------------------
+	// Issue #160 (HS-PORT-04): distributed mutual exclusion via a shared
+	// database lease. The lease is the SINGLE mechanism that keeps exactly one
+	// host doing RSS work at a time.
+	// ---------------------------------------------------------------------
+
+	// Build the lease repository (best-effort construction; a failure degrades
+	// to "no lease" with a warning — local/dev use, never a remote race).
+	var leaseRepo domain.LeaseRepository
+	if r.newLeaseRepo != nil {
+		if lr, lerr := r.newLeaseRepo(cfg.Storage()); lerr == nil && lr != nil {
+			leaseRepo = lr
+		} else if errors.Is(lerr, storage.ErrLeaseUnavailable) {
+			// memory backend: no cross-host coordination possible.
+			_, _ = fmt.Fprintf(r.err, "Warning: distributed lease unavailable (memory backend); proceeding without mutual exclusion\n")
+		} else if lerr != nil {
+			// A real DB error constructing the lease repo: fail closed so we never
+			// run two ingesters unknowingly. The issue mandates that a lease-DB
+			// failure is non-zero (never alter last_successful_ingest_at).
+			result.ExitCode = 1
+			result.Error = fmt.Errorf("failed to create lease repository: %w", lerr)
+			return result
+		}
+	}
+
+	// The holder identity: <origin>:<hostname>:<8-hex-random>. Sanitized to
+	// [a-z0-9-] so it never carries secrets or shell metacharacters (plan §7).
+	holderID := buildLeaseHolderID(cfg.RunnerOrigin)
+
+	// Run registration state shared with the deferred finalizer below.
 	var startedRun domain.IngestRun
 	var startedRunRegistered bool
+	var lease *domain.Lease
+	// leaseLost is written by the renewal goroutine and read by the main
+	// goroutine after RunPipeline returns; it must be atomic to be race-free.
+	var leaseLost int32
+	var skippedIngest bool // true when we register a skipped_* row and bail early
+
+	// registerSkip registers a terminal skipped_* run row (best-effort) and
+	// marks the result so the deferred finalizer does not re-finalize it.
+	registerSkip := func(status domain.IngestRunStatus) {
+		skippedIngest = true
+		if runsRepo == nil {
+			return
+		}
+		runID := domain.NewRunID()
+		fin := r.now().UTC()
+		skip := domain.IngestRun{
+			RunID:      runID.String(),
+			Origin:     cfg.RunnerOrigin,
+			StartedAt:  r.now().UTC(),
+			FinishedAt: &fin,
+			Status:     status,
+		}
+		fctx, fcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer fcancel()
+		if cerr := runsRepo.Create(fctx, skip); cerr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to register skipped run: %v\n", cerr)
+		}
+		if ferr := runsRepo.Finish(fctx, skip); ferr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to finalize skipped run: %v\n", ferr)
+		}
+	}
+
+	// releaseLease relinquishes the held lease (guarded; idempotent).
+	releaseLease := func() {
+		if leaseRepo == nil || lease == nil {
+			return
+		}
+		lctx, lcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer lcancel()
+		if rerr := leaseRepo.Release(lctx, lease); rerr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to release lease: %v\n", rerr)
+		}
+	}
+
+	// Defer cleanup: release the lease and (if we actually started a normal run)
+	// finalize it with a FRESH context so an interrupt cannot abort the
+	// bookkeeping write (AC-6). Skipped runs finalize themselves in registerSkip.
+	defer func() {
+		releaseLease()
+		if !startedRunRegistered || runsRepo == nil || skippedIngest {
+			return
+		}
+		if result.Result == nil {
+			return
+		}
+		finished := domain.NewIngestRunFromRecord(*result.Result, cfg.RunnerOrigin)
+		finished.RunID = startedRun.RunID // preserve the registered run id
+		fctx, fcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer fcancel()
+		if ferr := runsRepo.Finish(fctx, finished); ferr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to finalize ingest run: %v\n", ferr)
+		}
+		_ = runsRepo.Close()
+	}()
+
+	// -----------------------------------------------------------------
+	// Step 1: Backup pre-check (mode=backup, unless --force).
+	// If the data is already fresh, print a skip and exit 0 WITHOUT touching the
+	// lease (cheaper than acquiring just to immediately give up).
+	// -----------------------------------------------------------------
+	if mode == "backup" && !force && runsRepo != nil {
+		lastSuccess, _, serr := runsRepo.LastSuccess(context.Background())
+		if serr != nil {
+			// DB error on the freshness read: fail closed (existing contract).
+			result.ExitCode = 1
+			result.Error = fmt.Errorf("failed to read last successful ingest: %w", serr)
+			return result
+		}
+		decision := domain.DecideShouldRun(lastSuccess, r.now(), staleAfter)
+		if !decision.ShouldRun {
+			_, _ = fmt.Fprintf(r.out, "Ingest skipped (backup): last successful ingest is fresh (age %s <= threshold %s)\n", decision.Age, staleAfter)
+			result.ExitCode = 0
+			result.Summary = "skipped: fresh"
+			return result
+		}
+	}
+
+	// -----------------------------------------------------------------
+	// Step 2: Acquire the lease (both modes; --force NEVER omits the lease).
+	// -----------------------------------------------------------------
+	if leaseRepo != nil {
+		aCtx, aCancel := context.WithTimeout(ctx, 30*time.Second)
+		acquired, ok, aerr := leaseRepo.Acquire(aCtx, holderID, LeaseTTL)
+		aCancel()
+		if aerr != nil {
+			// Lease DB failure: fail closed. Never proceed without knowing who
+			// holds the lease; never alter last_successful_ingest_at.
+			result.ExitCode = 1
+			result.Error = fmt.Errorf("failed to acquire ingest lease: %w", aerr)
+			return result
+		}
+		if !ok {
+			// Another host holds a valid lease: register skipped_locked, print a
+			// visible skip, exit 0 (AC-1 — not a false error).
+			registerSkip(domain.IngestRunSkippedLocked)
+			until := "unknown"
+			if acquired != nil {
+				until = acquired.LeaseUntil.UTC().Format(time.RFC3339)
+			}
+			_, _ = fmt.Fprintf(r.out, "Ingest skipped (locked): held by %s until %s\n", holderIDOf(acquired), until)
+			result.ExitCode = 0
+			result.Summary = "skipped: locked"
+			return result
+		}
+		lease = acquired
+
+		// ---------------------------------------------------------------
+		// Step 3: Backup in-lock re-check (AC-3 TOCTOU). After acquiring, re-run
+		// the freshness check IMMEDIATELY before fetching. If the primary
+		// recovered while we were waiting, the data is fresh: release the lease,
+		// register skipped_fresh, exit 0 — NO RSS fetch.
+		// ---------------------------------------------------------------
+		if mode == "backup" && runsRepo != nil {
+			lastSuccess, _, serr := runsRepo.LastSuccess(context.Background())
+			if serr != nil {
+				// Fail closed: we hold the lease, so release it on the way out.
+				result.ExitCode = 1
+				result.Error = fmt.Errorf("failed to re-check freshness in lock: %w", serr)
+				return result // deferred releaseLease runs
+			}
+			decision := domain.DecideShouldRun(lastSuccess, r.now(), staleAfter)
+			if !decision.ShouldRun {
+				registerSkip(domain.IngestRunSkippedFresh)
+				_, _ = fmt.Fprintf(r.out, "Ingest skipped (fresh in lock): another host already refreshed (age %s <= threshold %s); releasing lease\n", decision.Age, staleAfter)
+				result.ExitCode = 0
+				result.Summary = "skipped: fresh in lock"
+				return result // deferred releaseLease runs
+			}
+		}
+	}
+
+	// -----------------------------------------------------------------
+	// Register the run (status running) and start the pipeline under a
+	// cancellable context. The renewal goroutine cancels that context if the
+	// lease is lost (AC-4: a lagged holder stops making changes).
+	// -----------------------------------------------------------------
 	if runsRepo != nil {
 		runID := domain.NewRunID()
 		startedRun = domain.IngestRun{
@@ -263,21 +469,6 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 			startedRunRegistered = true
 		}
 	}
-	// Defer finalization with a FRESH context: runCtx may be cancelled
-	// (interrupt) and must not abort the bookkeeping write (AC-6).
-	defer func() {
-		if !startedRunRegistered || runsRepo == nil || result.Result == nil {
-			return
-		}
-		finished := domain.NewIngestRunFromRecord(*result.Result, cfg.RunnerOrigin)
-		finished.RunID = startedRun.RunID // preserve the registered run id
-		fctx, fcancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer fcancel()
-		if ferr := runsRepo.Finish(fctx, finished); ferr != nil {
-			_, _ = fmt.Fprintf(r.err, "Warning: failed to finalize ingest run: %v\n", ferr)
-		}
-		_ = runsRepo.Close()
-	}()
 
 	// Add team registry for entity extraction
 	appOpts = append(appOpts, application.WithTeamRegistry(teamRegistry))
@@ -287,19 +478,71 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	// Build timestamp for pipeline
 	now := r.now()
 
-	// Run pipeline
+	// Run pipeline under a cancellable context.
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Catch interrupt to cancel the pipeline
+	// Catch SIGINT/SIGTERM to cancel the pipeline (issue #160: add SIGTERM so a
+	// systemd/container stop drives the same abort + release path). Use a single
+	// goroutine watching the signal channel.
 	signalChan := make(chan os.Signal, 1)
+	ossignal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	defer ossignal.Stop(signalChan)
 	go func() {
 		<-signalChan
 		cancel()
 	}()
 
+	// -----------------------------------------------------------------
+	// Renewal goroutine (issue #160 / AC-4). Every LeaseRenewInterval we renew;
+	// a lost lease (false) or an unrecoverable error cancels the pipeline and
+	// flags leaseLost so the run finalizes as failed (non-zero exit).
+	// -----------------------------------------------------------------
+	if leaseRepo != nil && lease != nil {
+		go func() {
+			ticker := time.NewTicker(LeaseRenewInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case <-ticker.C:
+					ok, rerr := leaseRepo.Renew(runCtx, lease, LeaseTTL)
+					if rerr != nil && runCtx.Err() == nil {
+						// Transient renewal error (flaky network): retry within the
+						// TTL rather than aborting immediately (plan §8/R5). If the
+						// context was cancelled in the meantime, treat as lost.
+						continue
+					}
+					if !ok {
+						// Lease lost: stop all work. A Renew returning false is the
+						// authoritative loss-of-ownership signal (fenced by token).
+						atomic.StoreInt32(&leaseLost, 1)
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+
 	runRecord := app.RunPipeline(runCtx, now)
 	result.Result = &runRecord
+
+	// If the lease was lost during the pipeline, force a failed outcome: the
+	// homepage must NOT be committed by a holder that no longer owns the lease
+	// (AC-4). The bookkeeping write to our own run_id row remains safe.
+	if atomic.LoadInt32(&leaseLost) == 1 {
+		result.Result.Committed = false
+		if result.Result.Status == domain.RunStatusOK || result.Result.Status == domain.RunStatusPartial {
+			result.Result.Status = domain.RunStatusFailed
+		}
+		result.ExitCode = 1
+		result.Error = fmt.Errorf("ingest lease lost during pipeline; aborting (no commit)")
+		// Still release (guarded, no-op if already gone) and finalize as failed
+		// via the deferred path. Return early to skip the normal publish steps.
+		return result
+	}
 
 	// Publish heartbeat (best-effort: failures don't affect run exit)
 	heartbeatPath := cfg.HeartbeatFile
@@ -344,6 +587,50 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	}
 
 	return result
+}
+
+// buildLeaseHolderID composes a sanitized holder identity:
+// <origin>:<hostname>:<8-hex-random>. The colon-separated form is human-readable
+// in logs and the DB; the random suffix disambiguates processes on the same host
+// (e.g., two ingesters on one box during an upgrade). The whole value is
+// lowercased and restricted to [a-z0-9:-] (plan §7: no secrets, no shell
+// metacharacters). The random suffix is crypto-random so two holders can never
+// collide by chance.
+func buildLeaseHolderID(origin string) string {
+	hostname, herr := os.Hostname()
+	if herr != nil || hostname == "" {
+		hostname = "unknown"
+	}
+	randBytes := make([]byte, 4)
+	_, _ = rand.Read(randBytes)
+	randHex := hex.EncodeToString(randBytes)
+	id := fmt.Sprintf("%s:%s:%s", origin, hostname, randHex)
+	return sanitizeHolderID(id)
+}
+
+// sanitizeHolderID restricts a holder ID to [a-z0-9:-] (lowercased). Any other
+// rune is dropped. This guarantees the value stored in the DB and printed in
+// logs carries no secrets or shell metacharacters (plan §7).
+func sanitizeHolderID(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ':' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "unknown"
+	}
+	return b.String()
+}
+
+// holderIDOf returns the holder_id of a lease, or "unknown" when the lease is
+// nil (used only in the skip message).
+func holderIDOf(l *domain.Lease) string {
+	if l == nil {
+		return "unknown"
+	}
+	return l.HolderID
 }
 
 // buildIngestSummary builds a summary string for the ingest result.

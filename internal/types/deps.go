@@ -100,6 +100,17 @@ func DefaultNewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRe
 	return storage.NewIngestRunRepository(cfg)
 }
 
+// NewLeaseRepoFunc is a function type for creating the ingest lease
+// repository (issue #160 / HS-PORT-04). A nil function or an error result
+// means no lease is available; the runner warns and proceeds without mutual
+// exclusion (memory backend degradation, plan §3.3).
+type NewLeaseRepoFunc func(cfg config.StorageConfig) (domain.LeaseRepository, error)
+
+// DefaultNewLeaseRepository is the default lease repository constructor.
+func DefaultNewLeaseRepository(cfg config.StorageConfig) (domain.LeaseRepository, error) {
+	return storage.NewLeaseRepository(cfg)
+}
+
 // NewAppFunc is a function type for creating an application.
 type NewAppFunc func(opts []application.Option) *application.Application
 
@@ -161,6 +172,7 @@ type Deps struct {
 	NewRuleRepo         NewRuleRepoFunc
 	NewRetentionService NewRetentionServiceFunc
 	NewIngestRunRepo    NewIngestRunRepoFunc
+	NewLeaseRepo        NewLeaseRepoFunc
 	NewApp              NewAppFunc
 	NewPublisher        NewPublisherFunc
 	NewFetcher          NewFetcherFunc
@@ -178,6 +190,7 @@ func NewDeps(opts ...Option) *Deps {
 		NewRuleRepo:         DefaultNewRuleRepository,
 		NewRetentionService: DefaultNewRetentionService,
 		NewIngestRunRepo:    DefaultNewIngestRunRepository,
+		NewLeaseRepo:        DefaultNewLeaseRepository,
 		NewApp:              DefaultNewApp,
 		NewPublisher:        DefaultNewPublisher,
 		NewFetcher:          DefaultNewFetcher,
@@ -196,6 +209,14 @@ func NewDeps(opts ...Option) *Deps {
 // for testing.
 func AddDeps(d *Deps, fn NewIngestRunRepoFunc) {
 	d.NewIngestRunRepo = fn
+}
+
+// WithNewLeaseRepo sets the lease repository constructor on an existing Deps
+// (issue #160 / HS-PORT-04). A nil constructor disables the lease.
+func WithNewLeaseRepo(fn NewLeaseRepoFunc) Option {
+	return func(d *Deps) {
+		d.NewLeaseRepo = fn
+	}
 }
 
 func DefaultDeps() *Deps {

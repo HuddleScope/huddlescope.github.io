@@ -21,8 +21,8 @@ func TestMigrateSuccess(t *testing.T) {
 	if len(versions) == 0 {
 		t.Fatal("Migrate() returned empty versions")
 	}
-	if len(versions) != 8 {
-		t.Errorf("expected 8 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 9 {
+		t.Errorf("expected 9 migrations, got %d: %v", len(versions), versions)
 	}
 }
 

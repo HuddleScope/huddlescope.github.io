@@ -48,15 +48,10 @@ func NewIngestRunCommand(d *Deps) *cobra.Command {
 		},
 	}
 
-	// Add flags
-	cmd.Flags().String("mode", "primary", "Mode of operation (primary/backup)")
-	cmd.Flags().String("stale-after", "75m", "Duration after which a heartbeat is considered stale")
-	cmd.Flags().Bool("force", false, "Force run even if stale")
-
-	// Mark flags as hidden (no-op for contract completeness)
-	_ = cmd.Flags().MarkHidden("mode")
-	_ = cmd.Flags().MarkHidden("stale-after")
-	_ = cmd.Flags().MarkHidden("force")
+	// Add flags (issue #160: un-hidden — these were placeholder no-ops).
+	cmd.Flags().String("mode", "primary", "Mode of operation (primary|backup). backup re-checks freshness before fetching.")
+	cmd.Flags().String("stale-after", "75m", "Duration after which the last successful ingest is considered stale (backup mode)")
+	cmd.Flags().Bool("force", false, "Force run: skip the staleness pre-check. NEVER skips the distributed lease.")
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		return runIngest(cmd, d)
@@ -127,10 +122,15 @@ must fail closed and never treat an error as "run").`,
 }
 
 func runIngest(cmd *cobra.Command, d *Deps) error {
-	// Get flags
-	_, _ = cmd.Flags().GetString("mode") // no-op for now
+	// Get flags (issue #160: mode/stale-after/force are now live).
+	mode, _ := cmd.Flags().GetString("mode")
 	staleAfterStr, _ := cmd.Flags().GetString("stale-after")
 	force, _ := cmd.Flags().GetBool("force")
+
+	// Validate mode (issue #160): primary|backup only.
+	if mode != "primary" && mode != "backup" {
+		return fmt.Errorf("invalid mode %q; must be primary or backup", mode)
+	}
 
 	// Parse staleAfter
 	staleAfter := 75 * time.Minute
@@ -142,10 +142,10 @@ func runIngest(cmd *cobra.Command, d *Deps) error {
 		staleAfter = parsed
 	}
 
-	_ = force // no-op for now
-
-	// Create runner
-	r := runner.NewRunner(
+	// Create runner (wire the lease repository for distributed mutual exclusion,
+	// issue #160). NewRunner accepts the lease repo as a variadic option; when
+	// d.NewLeaseRepo is nil the default (storage-based) constructor is used.
+	opts := []runner.Option{
 		runner.WithOutput(cmd.OutOrStdout()),
 		runner.WithErrorOutput(cmd.ErrOrStderr()),
 		runner.WithLoadConfig(d.LoadConfig),
@@ -155,10 +155,17 @@ func runIngest(cmd *cobra.Command, d *Deps) error {
 		runner.WithNewFetcher(d.NewFetcher),
 		runner.WithNow(d.Now),
 		runner.WithLoadHeartbeat(d.LoadHeartbeat),
-	)
+	}
+	if d.NewIngestRunRepo != nil {
+		opts = append(opts, runner.WithNewIngestRunRepo(d.NewIngestRunRepo))
+	}
+	if d.NewLeaseRepo != nil {
+		opts = append(opts, runner.WithNewLeaseRepo(d.NewLeaseRepo))
+	}
+	r := runner.NewRunner(opts...)
 
-	// Run ingest
-	result := r.RunIngest(cmd.Context(), "primary", staleAfter, force)
+	// Run ingest, passing the validated mode.
+	result := r.RunIngest(cmd.Context(), mode, staleAfter, force)
 
 	if result.Error != nil {
 		return result.Error

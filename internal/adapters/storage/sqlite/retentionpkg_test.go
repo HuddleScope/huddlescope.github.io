@@ -43,8 +43,8 @@ func TestExportPackage_OnlyExpiringRows(t *testing.T) {
 	if rep.Rows["stories"] != 1 || rep.Rows["articles"] != 1 || rep.Rows["ranking_snapshots"] != 1 {
 		t.Errorf("rows: %v", rep.Rows)
 	}
-	if rep.SchemaVersion != 8 {
-		t.Errorf("schema version: want 8, got %d", rep.SchemaVersion)
+	if rep.SchemaVersion != 9 {
+		t.Errorf("schema version: want 9, got %d", rep.SchemaVersion)
 	}
 	if rep.TotalRows != 3 {
 		t.Errorf("total rows: want 3, got %d", rep.TotalRows)
