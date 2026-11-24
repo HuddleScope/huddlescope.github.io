@@ -24,6 +24,7 @@ type (
 	NowFunc                 = types.NowFunc
 	LoadHeartbeatFunc       = types.LoadHeartbeatFunc
 	NewRetentionServiceFunc = types.NewRetentionServiceFunc
+	NewIngestRunRepoFunc    = types.NewIngestRunRepoFunc
 	Deps                    = types.Deps
 	Option                  = types.Option
 )
@@ -135,4 +136,17 @@ func WithNewRetentionService(fn NewRetentionServiceFunc) Option {
 	return func(d *Deps) {
 		d.NewRetentionService = fn
 	}
+}
+
+// WithNewIngestRunRepo sets the ingest-run repository constructor (issue #159).
+func WithNewIngestRunRepo(fn NewIngestRunRepoFunc) Option {
+	return func(d *Deps) {
+		d.NewIngestRunRepo = fn
+	}
+}
+
+// DefaultNewIngestRunRepository is the default ingest-run repository
+// constructor (issue #159).
+func DefaultNewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
+	return types.DefaultNewIngestRunRepository(cfg)
 }

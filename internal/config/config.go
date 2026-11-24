@@ -102,6 +102,9 @@ type Config struct {
 	// New for issue #120 (HS-065): retention policy for hot tables.
 	RetentionEnabled    bool
 	RetentionWindowDays int
+	// New for issue #159 (HS-PORT-03): execution origin recorded on ingest
+	// run rows (e.g., raspberry, vps, github-backup). Default "local".
+	RunnerOrigin string
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -147,6 +150,8 @@ const (
 	// New for issue #120 (HS-065): retention defaults.
 	defaultRetentionEnabled    = true
 	defaultRetentionWindowDays = domain.DefaultRetentionDays
+	// New for issue #159 (HS-PORT-03): default execution origin.
+	defaultRunnerOrigin = "local"
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -173,6 +178,7 @@ func Load(configFile string) (Config, error) {
 		// New for issue #120
 		RetentionEnabled:    defaultRetentionEnabled,
 		RetentionWindowDays: defaultRetentionWindowDays,
+		RunnerOrigin:        defaultRunnerOrigin,
 	}
 
 	// Override with config file if provided
@@ -294,6 +300,10 @@ func (c *Config) loadFromEnv() {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.RetentionWindowDays = n
 		}
+	}
+	// New for issue #159 (HS-PORT-03): execution origin for ingest run rows.
+	if v := os.Getenv("HSC_RUNNER_ORIGIN"); v != "" {
+		c.RunnerOrigin = sanitizeRunnerOrigin(v)
 	}
 }
 
@@ -742,6 +752,8 @@ func loadEnvFile(path string, cfg *Config) error {
 				return fmt.Errorf("line %d: invalid HSC_RETENTION_DAYS %q (expected positive integer)", i+1, value)
 			}
 			cfg.RetentionWindowDays = n
+		case "HSC_RUNNER_ORIGIN":
+			cfg.RunnerOrigin = sanitizeRunnerOrigin(value)
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -755,6 +767,23 @@ func trimComment(line string) string {
 		return strings.TrimSpace(line[:idx])
 	}
 	return line
+}
+
+// sanitizeRunnerOrigin normalizes the HSC_RUNNER_ORIGIN value to the allowed
+// charset [a-z0-9-] (max 64 chars) so it is safe to store and log. An empty
+// result keeps the previous/default value.
+func sanitizeRunnerOrigin(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	var b strings.Builder
+	for _, r := range v {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+		if b.Len() >= 64 {
+			return b.String()
+		}
+	}
+	return b.String()
 }
 
 // Validate checks the configuration for validity and returns all errors.

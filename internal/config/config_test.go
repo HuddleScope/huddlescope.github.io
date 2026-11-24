@@ -1178,3 +1178,70 @@ func TestStorage(t *testing.T) {
 		t.Errorf("zero Config.Storage() = %+v; want %+v", got, StorageConfig{})
 	}
 }
+
+// TestConfig_RunnerOrigin (issue #159 / AC-6): HSC_RUNNER_ORIGIN parsing and
+// sanitization (file + env, env wins; charset [a-z0-9-], default "local").
+func TestConfig_RunnerOrigin_Default(t *testing.T) {
+	c := Config{RunnerOrigin: defaultRunnerOrigin}
+	if c.RunnerOrigin != "local" {
+		t.Errorf("default origin = %q, want local", c.RunnerOrigin)
+	}
+}
+
+func TestConfig_RunnerOrigin_Env(t *testing.T) {
+	t.Setenv("HSC_RUNNER_ORIGIN", "Raspberry-Pi_1")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerOrigin != "raspberry-pi1" {
+		t.Errorf("origin = %q, want raspberry-pi1 (sanitized, _ dropped)", cfg.RunnerOrigin)
+	}
+}
+
+func TestConfig_RunnerOrigin_EnvWinsOverFile(t *testing.T) {
+	t.Setenv("HSC_RUNNER_ORIGIN", "vps")
+	// Build a config file with a different origin, then env should win.
+	tmp := t.TempDir()
+	file := tmp + "/env"
+	if err := os.WriteFile(file, []byte("HSC_RUNNER_ORIGIN=raspberry\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(file)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerOrigin != "vps" {
+		t.Errorf("origin = %q, want vps (env wins)", cfg.RunnerOrigin)
+	}
+}
+
+func TestConfig_RunnerOrigin_Sanitization(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"github-backup", "github-backup"},
+		{"  VPS-PROD  ", "vps-prod"},
+		{"a/b\\c:d", "abcd"},
+		{"x", "x"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := sanitizeRunnerOrigin(c.in); got != c.want {
+			t.Errorf("sanitizeRunnerOrigin(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestConfig_RunnerOrigin_FileKey(t *testing.T) {
+	tmp := t.TempDir()
+	file := tmp + "/env"
+	if err := os.WriteFile(file, []byte("HSC_RUNNER_ORIGIN=github-backup\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cfg, err := Load(file)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RunnerOrigin != "github-backup" {
+		t.Errorf("origin = %q, want github-backup", cfg.RunnerOrigin)
+	}
+}

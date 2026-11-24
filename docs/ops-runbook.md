@@ -559,3 +559,40 @@ To view or interact with team data:
 1. Inspect `conf/teams.yaml` directly
 2. Use the application's team registry API via `config.TeamRegistry()` in code
 3. The ranking system uses team identity from the configuration, not the database
+
+## Ingest run history and freshness (issue #159 / HS-PORT-03)
+
+The `ingest_runs` table (migration 008) records one row per ingest run —
+run-level history shared by all hosts (Raspberry, VPS, GitHub Actions) via
+Turso. It complements, and does not duplicate, the per-feed `feeds.json`
+health data and the publication heartbeat.
+
+### Retention limit
+
+Rows are small (~1 KB) and bounded (~50/day across all hosts). There is no
+automatic prune; recommend pruning rows older than 90 days
+(`domain.DefaultRetentionDays`) manually or via a cron:
+
+```sql
+DELETE FROM ingest_runs
+WHERE COALESCE(finished_at, started_at) <
+      strftime('%Y-%m-%dT%H:%M:%SZ','now','-90 days');
+```
+
+### Ingest health vs publication health
+
+- **Ingest health** (`ingest status` / `ingest should-run`): DB-sourced, from
+  `ingest_runs`. Answers "did any host successfully ingest recently?"
+- **Publication health** (`heartbeat check --file`): file-sourced, from
+  `web/data/heartbeat.json`. Answers "was the last homepage committed?"
+
+These are different concepts and are intentionally not merged.
+
+### `should-run` caller contract (fail closed)
+
+`huddlescope ingest should-run` exits 0 on a correct query **regardless** of
+the `should_run` true/false decision. It exits non-zero (with no verdict on
+stdout) when the database is unreachable, the schema is invalid, or the
+backend is not a shared source of truth (e.g., `memory`). **Callers must treat
+a non-zero exit as "cannot decide" and must NOT default to running** — a blind
+backup run on DB failure is exactly the failure mode this issue removes.

@@ -55,6 +55,7 @@ jobs:
     env:
       HSC_ENV: production
       HSC_STORAGE_BACKEND: turso
+      HSC_RUNNER_ORIGIN: github-backup
       TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
       TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       HSC_HUGO_BASE_URL: https://huddlescope.github.io/

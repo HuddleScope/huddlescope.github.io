@@ -90,6 +90,16 @@ func DefaultNewRetentionService(cfg config.StorageConfig) (domain.RetentionServi
 	return storage.NewRetentionService(cfg)
 }
 
+// NewIngestRunRepoFunc is a function type for creating an ingest-run
+// repository (issue #159 / HS-PORT-03).
+type NewIngestRunRepoFunc func(cfg config.StorageConfig) (domain.IngestRunRepository, error)
+
+// DefaultNewIngestRunRepository is the default ingest-run repository
+// constructor.
+func DefaultNewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
+	return storage.NewIngestRunRepository(cfg)
+}
+
 // NewAppFunc is a function type for creating an application.
 type NewAppFunc func(opts []application.Option) *application.Application
 
@@ -150,6 +160,7 @@ type Deps struct {
 	NewRepository       NewRepoFunc
 	NewRuleRepo         NewRuleRepoFunc
 	NewRetentionService NewRetentionServiceFunc
+	NewIngestRunRepo    NewIngestRunRepoFunc
 	NewApp              NewAppFunc
 	NewPublisher        NewPublisherFunc
 	NewFetcher          NewFetcherFunc
@@ -166,6 +177,7 @@ func NewDeps(opts ...Option) *Deps {
 		NewRepository:       DefaultNewRepository,
 		NewRuleRepo:         DefaultNewRuleRepository,
 		NewRetentionService: DefaultNewRetentionService,
+		NewIngestRunRepo:    DefaultNewIngestRunRepository,
 		NewApp:              DefaultNewApp,
 		NewPublisher:        DefaultNewPublisher,
 		NewFetcher:          DefaultNewFetcher,
@@ -179,6 +191,13 @@ func NewDeps(opts ...Option) *Deps {
 }
 
 // DefaultDeps returns a deps instance with default values.
+// AddDeps attaches an ingest-run repository constructor to an existing Deps
+// (issue #159 / HS-PORT-03). Used by the CLI layer to override the constructor
+// for testing.
+func AddDeps(d *Deps, fn NewIngestRunRepoFunc) {
+	d.NewIngestRunRepo = fn
+}
+
 func DefaultDeps() *Deps {
 	return NewDeps()
 }
@@ -263,6 +282,9 @@ func (d *Deps) Validate() error {
 	}
 	if d.NewRepository == nil {
 		return fmt.Errorf("NewRepository is nil")
+	}
+	if d.NewIngestRunRepo == nil {
+		return fmt.Errorf("NewIngestRunRepo is nil")
 	}
 	if d.NewApp == nil {
 		return fmt.Errorf("NewApp is nil")

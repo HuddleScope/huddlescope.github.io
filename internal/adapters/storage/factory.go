@@ -27,6 +27,31 @@ func NewRepository(cfg config.StorageConfig) (domain.Repository, error) {
 	}
 }
 
+// NewIngestRunRepository returns a domain.IngestRunRepository for the given
+// backend (issue #159 / HS-PORT-03). memory returns a per-host volatile
+// store (freshness CLI over it must fail closed); sqlite-file opens the DB
+// (applying migrations) and wraps the same handle; turso opens a lazy
+// libsql connection (no network at construction).
+func NewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
+	switch cfg.Backend {
+	case "memory":
+		return NewMemoryIngestRunRepository(), nil
+	case "sqlite-file":
+		if cfg.Path == "" {
+			cfg.Path = "data/huddlescope.db"
+		}
+		repo, err := sqlite.NewRepository(cfg.Path)
+		if err != nil {
+			return nil, err
+		}
+		return sqlite.NewIngestRunRepoFromDB(repo.DB()), nil
+	case "turso":
+		return turso.NewIngestRunRepository(cfg.TursoURL, cfg.TursoToken)
+	default:
+		return nil, fmt.Errorf("unknown backend %q; use memory, sqlite-file, or turso", cfg.Backend)
+	}
+}
+
 // NewRuleRepository returns a domain.CorrectionRuleRepository for the given
 // backend. For memory it returns an in-memory rule store; for sqlite-file and
 // turso it opens the DB (applying migrations) and wraps the same connection.

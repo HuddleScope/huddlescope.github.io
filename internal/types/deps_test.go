@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/publish"
+	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
+	"github.com/HuddleScope/huddlescope.github.io/internal/application"
 	"github.com/HuddleScope/huddlescope.github.io/internal/config"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -233,4 +236,100 @@ func TestDepsDefaultValues(t *testing.T) {
 	d := NewDeps()
 	assert.NotNil(t, d.Output)
 	assert.NotNil(t, d.ErrorOutput)
+}
+
+func TestDefaultNewIngestRunRepository(t *testing.T) {
+	repo, err := DefaultNewIngestRunRepository(config.StorageConfig{Backend: "memory"})
+	assert.NoError(t, err)
+	assert.NotNil(t, repo)
+	assert.NoError(t, repo.Close())
+}
+
+func TestAddDepsIngestRunRepo(t *testing.T) {
+	d := NewDeps()
+	AddDeps(d, func(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
+		return nil, errors.New("stub")
+	})
+	assert.NotNil(t, d.NewIngestRunRepo)
+}
+
+func TestDepsIngestRunRepoDefault(t *testing.T) {
+	d := NewDeps()
+	assert.NotNil(t, d.NewIngestRunRepo)
+}
+
+func TestDepsValidateNilNewIngestRunRepo(t *testing.T) {
+	d := &Deps{
+		LoadConfig:       DefaultLoadConfig,
+		NewRepository:    DefaultNewRepository,
+		NewApp:           DefaultNewApp,
+		NewPublisher:     DefaultNewPublisher,
+		NewFetcher:       DefaultNewFetcher,
+		Now:              DefaultNow,
+		LoadHeartbeat:    DefaultLoadHeartbeat,
+		NewIngestRunRepo: nil,
+	}
+	assert.Error(t, d.Validate())
+}
+
+func TestWithLoadConfig(t *testing.T) {
+	d := NewDeps(WithLoadConfig(func(string) (config.Config, error) {
+		return config.Config{}, nil
+	}))
+	assert.NotNil(t, d.LoadConfig)
+}
+
+func TestWithNewRepository(t *testing.T) {
+	d := NewDeps(WithNewRepository(func(config.StorageConfig) (domain.Repository, error) {
+		return nil, nil
+	}))
+	assert.NotNil(t, d.NewRepository)
+}
+
+func TestWithNewRuleRepo(t *testing.T) {
+	d := NewDeps(WithNewRuleRepo(func(config.StorageConfig) (domain.CorrectionRuleRepository, error) {
+		return nil, nil
+	}))
+	assert.NotNil(t, d.NewRuleRepo)
+}
+
+func TestWithNewApp(t *testing.T) {
+	d := NewDeps(WithNewApp(func([]application.Option) *application.Application {
+		return nil
+	}))
+	assert.NotNil(t, d.NewApp)
+}
+
+func TestWithNewPublisher(t *testing.T) {
+	d := NewDeps(WithNewPublisher(func() *publish.LogPublisher {
+		return nil
+	}))
+	assert.NotNil(t, d.NewPublisher)
+}
+
+func TestWithNewFetcher(t *testing.T) {
+	d := NewDeps(WithNewFetcher(func(domain.FeedSource, ...rss.Option) domain.FeedFetcher {
+		return nil
+	}))
+	assert.NotNil(t, d.NewFetcher)
+}
+
+func TestWithLoadHeartbeat(t *testing.T) {
+	d := NewDeps(WithLoadHeartbeat(func(string) (*domain.Heartbeat, bool, error) {
+		return nil, false, nil
+	}))
+	assert.NotNil(t, d.LoadHeartbeat)
+}
+
+func TestDefaultNewRuleRepository(t *testing.T) {
+	repo, err := DefaultNewRuleRepository(config.StorageConfig{Backend: "memory"})
+	assert.NoError(t, err)
+	assert.NotNil(t, repo)
+}
+
+func TestExitErrorError(t *testing.T) {
+	base := errors.New("boom")
+	err := NewExitError(3, base)
+	assert.Equal(t, "boom", err.Error())
+	assert.ErrorIs(t, err, base)
 }
