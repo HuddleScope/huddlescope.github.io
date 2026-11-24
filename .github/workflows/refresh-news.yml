@@ -24,6 +24,11 @@ on:
         required: true
         default: 'true'
         type: boolean
+      run-retention:
+        description: 'Run retention (export package, commit, archive) after build verification'
+        required: true
+        default: 'true'
+        type: boolean
 
 # Cancel in-progress runs of this workflow on new dispatches
 # Safe-state: build job is cancelled if a new dispatch starts; deploy only runs
@@ -197,6 +202,42 @@ jobs:
             exit 1
           fi
           echo "No demo markers in web/public/"
+
+      # Retention (issue #120 / HS-065): runs after all DB reads (ingest,
+      # export, site build) so the deployed snapshot is unaffected. The
+      # ordering is load-bearing: export -> commit -> apply. A failed export
+      # or commit fails the build job (no continue-on-error), so apply never
+      # runs without a persisted package in Git (AC-2).
+      - name: Retention export
+        id: retention-export
+        if: inputs.run-retention
+        run: |
+          echo "Exporting rows older than the retention window..."
+          ./dist/huddlescope retention export --output archive/retention
+          echo "Retention export completed"
+
+      - name: Commit retention package
+        id: retention-commit
+        if: inputs.run-retention
+        run: |
+          # Persist the exported package in Git BEFORE the delete commits.
+          # A no-op export (no expiring rows) leaves nothing staged: a valid
+          # skip. Any failure here fails the job; apply is skipped.
+          if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
+            git add archive/retention
+            git commit -m "Retention package: archive rows expiring outside window (Closes #120)"
+            echo "Retention package committed"
+          else
+            echo "No retention package to commit (no expiring rows), skipping"
+          fi
+
+      - name: Retention apply
+        id: retention-apply
+        if: inputs.run-retention
+        run: |
+          echo "Archiving rows older than the retention window..."
+          ./dist/huddlescope retention apply
+          echo "Retention apply completed"
 
       - name: Verify Hugo build artifacts
         run: |

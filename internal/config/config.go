@@ -99,6 +99,9 @@ type Config struct {
 	TemporalWindow      time.Duration
 	// New for issue #25: minimum entity-set affinity for a scored merge.
 	EntityAffinityMin float64
+	// New for issue #120 (HS-065): retention policy for hot tables.
+	RetentionEnabled    bool
+	RetentionWindowDays int
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -141,6 +144,9 @@ const (
 	defaultTemporalWindow      = 48 * time.Hour
 	// New for issue #25: default minimum entity-set affinity.
 	defaultEntityAffinityMin = domain.DefaultEntityAffinityMin
+	// New for issue #120 (HS-065): retention defaults.
+	defaultRetentionEnabled    = true
+	defaultRetentionWindowDays = domain.DefaultRetentionDays
 )
 
 // Load loads configuration from environment variables with optional file override.
@@ -164,6 +170,9 @@ func Load(configFile string) (Config, error) {
 		SimilarityThreshold: defaultSimilarityThreshold,
 		TemporalWindow:      defaultTemporalWindow,
 		EntityAffinityMin:   defaultEntityAffinityMin,
+		// New for issue #120
+		RetentionEnabled:    defaultRetentionEnabled,
+		RetentionWindowDays: defaultRetentionWindowDays,
 	}
 
 	// Override with config file if provided
@@ -270,6 +279,20 @@ func (c *Config) loadFromEnv() {
 	if v := os.Getenv("HSC_CLUSTER_ENTITY_AFFINITY"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			c.EntityAffinityMin = f
+		}
+	}
+	// New for issue #120 (HS-065)
+	if v := os.Getenv("HSC_RETENTION_ENABLED"); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes", "on":
+			c.RetentionEnabled = true
+		case "false", "0", "no", "off":
+			c.RetentionEnabled = false
+		}
+	}
+	if v := os.Getenv("HSC_RETENTION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.RetentionWindowDays = n
 		}
 	}
 }
@@ -704,6 +727,21 @@ func loadEnvFile(path string, cfg *Config) error {
 			} else {
 				return fmt.Errorf("line %d: invalid entity affinity %q: %v", i+1, value, err)
 			}
+		case "HSC_RETENTION_ENABLED":
+			switch strings.ToLower(value) {
+			case "true", "1", "yes", "on":
+				cfg.RetentionEnabled = true
+			case "false", "0", "no", "off":
+				cfg.RetentionEnabled = false
+			default:
+				return fmt.Errorf("line %d: invalid HSC_RETENTION_ENABLED %q (expected true/false)", i+1, value)
+			}
+		case "HSC_RETENTION_DAYS":
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				return fmt.Errorf("line %d: invalid HSC_RETENTION_DAYS %q (expected positive integer)", i+1, value)
+			}
+			cfg.RetentionWindowDays = n
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -743,6 +781,14 @@ func (c Config) Validate() error {
 	// DefaultEntityAffinityMin. This keeps Config literals that omit the field valid.
 	if c.EntityAffinityMin != 0 && (c.EntityAffinityMin < 0 || c.EntityAffinityMin > 1) {
 		errs = append(errs, fmt.Errorf("EntityAffinityMin must be in (0, 1]; got %v", c.EntityAffinityMin))
+	}
+
+	// Validate RetentionWindowDays (issue #120: when explicitly set, must be
+	// non-negative). Zero means "unset" and is accepted; the retention service
+	// falls back to domain.DefaultRetentionDays. This keeps Config literals
+	// that omit the field valid.
+	if c.RetentionWindowDays < 0 {
+		errs = append(errs, fmt.Errorf("RetentionWindowDays must be non-negative; got %d", c.RetentionWindowDays))
 	}
 
 	// Validate HeartbeatFile
@@ -898,36 +944,40 @@ func (c Config) Redacted() Config {
 // Uses value receiver to ensure json.Marshal() works with both cfg and &cfg.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type SafeConfig struct {
-		ConfigFile     string   `json:"ConfigFile"`
-		LogLevel       string   `json:"LogLevel"`
-		UserAgent      string   `json:"UserAgent"`
-		RequestTimeout int64    `json:"RequestTimeout"`
-		HugoBaseURL    string   `json:"HugoBaseURL"`
-		StorageBackend string   `json:"StorageBackend"`
-		Env            string   `json:"Env"`
-		Sources        []Source `json:"Sources"`
-		Teams          []Team   `json:"Teams"`
-		HeartbeatFile  string   `json:"HeartbeatFile"`
-		FeedsFile      string   `json:"FeedsFile"`
-		DataDir        string   `json:"DataDir"`
-		DataFile       string   `json:"DataFile"`
-		HugoContentDir string   `json:"HugoContentDir"`
+		ConfigFile          string   `json:"ConfigFile"`
+		LogLevel            string   `json:"LogLevel"`
+		UserAgent           string   `json:"UserAgent"`
+		RequestTimeout      int64    `json:"RequestTimeout"`
+		HugoBaseURL         string   `json:"HugoBaseURL"`
+		StorageBackend      string   `json:"StorageBackend"`
+		Env                 string   `json:"Env"`
+		Sources             []Source `json:"Sources"`
+		Teams               []Team   `json:"Teams"`
+		HeartbeatFile       string   `json:"HeartbeatFile"`
+		FeedsFile           string   `json:"FeedsFile"`
+		DataDir             string   `json:"DataDir"`
+		DataFile            string   `json:"DataFile"`
+		HugoContentDir      string   `json:"HugoContentDir"`
+		RetentionEnabled    bool     `json:"RetentionEnabled"`
+		RetentionWindowDays int      `json:"RetentionWindowDays"`
 	}
 	safe := SafeConfig{
-		ConfigFile:     c.ConfigFile,
-		LogLevel:       c.LogLevel,
-		UserAgent:      c.UserAgent,
-		RequestTimeout: c.RequestTimeout.Nanoseconds(),
-		HugoBaseURL:    c.HugoBaseURL,
-		StorageBackend: c.StorageBackend,
-		Env:            c.Env,
-		Sources:        c.Sources,
-		Teams:          c.Teams,
-		HeartbeatFile:  c.HeartbeatFile,
-		FeedsFile:      c.FeedsFile,
-		DataDir:        c.DataDir,
-		DataFile:       c.DataFile,
-		HugoContentDir: c.HugoContentDir,
+		ConfigFile:          c.ConfigFile,
+		LogLevel:            c.LogLevel,
+		UserAgent:           c.UserAgent,
+		RequestTimeout:      c.RequestTimeout.Nanoseconds(),
+		HugoBaseURL:         c.HugoBaseURL,
+		StorageBackend:      c.StorageBackend,
+		Env:                 c.Env,
+		Sources:             c.Sources,
+		Teams:               c.Teams,
+		HeartbeatFile:       c.HeartbeatFile,
+		FeedsFile:           c.FeedsFile,
+		DataDir:             c.DataDir,
+		DataFile:            c.DataFile,
+		HugoContentDir:      c.HugoContentDir,
+		RetentionEnabled:    c.RetentionEnabled,
+		RetentionWindowDays: c.RetentionWindowDays,
 	}
 	return json.Marshal(safe)
 }

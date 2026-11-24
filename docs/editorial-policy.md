@@ -60,6 +60,16 @@ If a source publisher or content owner requests removal:
    - We aim to process removal requests within 7 days
    - If the request is valid, we remove the content from our system and deploy the change
 
+### Archive retention (HS-065)
+
+- Rows older than the retention window (default 90 days, `HSC_RETENTION_DAYS`)
+  are archived automatically into `*_archive` tables; they are not dropped.
+- Before archiving, expiring rows are exported to a portable package committed
+  to `archive/retention/` (see the ops runbook, "Retention and archiving").
+- Restoring archived content uses `huddlescope retention import --package <file>`
+  (idempotent). Opt-out removals also apply to archived rows: delete by primary
+  key in both the hot and archive tables.
+
 ## Feed disable procedure
 
 To disable a feed source without deleting it permanently:
