@@ -85,7 +85,12 @@ jobs:
         id: ingest
         run: |
           echo "Running ingestion pipeline..."
-          ./dist/huddlescope ingest run
+          # Issue #160 (HS-PORT-04): this Actions host runs as BACKUP. It first
+          # checks freshness (already fresh -> visible skip, exit 0, no RSS work),
+          # then acquires the distributed lease; if the lease is held it registers
+          # a skipped_locked run and exits 0. --stale-after 75m is the issue's
+          # stated backup contract.
+          ./dist/huddlescope ingest run --mode backup --stale-after 75m
           echo "Ingestion completed"
 
       - name: Export snapshot to Hugo data

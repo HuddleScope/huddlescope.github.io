@@ -18,6 +18,14 @@ const (
 	IngestRunOK
 	IngestRunPartial
 	IngestRunFailed
+	// IngestRunSkippedLocked: the run could not acquire the distributed lease
+	// (another host holds it). This is NOT a success and never alters
+	// last_successful_ingest_at (issue #160 / AC-1).
+	IngestRunSkippedLocked
+	// IngestRunSkippedFresh: the run held the lease but the in-lock freshness
+	// re-check found the data already fresh, so it omitted the work (AC-3).
+	// This is NOT a success either (it did not produce a stored result).
+	IngestRunSkippedFresh
 )
 
 // String returns the stable persistence/JSON string form.
@@ -31,6 +39,10 @@ func (s IngestRunStatus) String() string {
 		return "partial"
 	case IngestRunFailed:
 		return "failed"
+	case IngestRunSkippedLocked:
+		return "skipped_locked"
+	case IngestRunSkippedFresh:
+		return "skipped_fresh"
 	default:
 		return fmt.Sprintf("unknown(%d)", s)
 	}
@@ -47,6 +59,10 @@ func ParseIngestRunStatus(s string) (IngestRunStatus, error) {
 		return IngestRunPartial, nil
 	case "failed":
 		return IngestRunFailed, nil
+	case "skipped_locked":
+		return IngestRunSkippedLocked, nil
+	case "skipped_fresh":
+		return IngestRunSkippedFresh, nil
 	default:
 		return 0, fmt.Errorf("unknown ingest run status %q", s)
 	}
@@ -73,7 +89,10 @@ func (s *IngestRunStatus) UnmarshalJSON(data []byte) error {
 
 // IsSuccess reports whether the run counts as a successful ingest for
 // freshness purposes: ok and partial both produced a completed, stored
-// result. Running (never finished) and failed never do.
+// result. Running (never finished), failed, and the two skipped_* statuses
+// never do. The skipped_* values are non-success by construction, so they are
+// invisible to LastSuccess / DecideShouldRun and never update
+// last_successful_ingest_at (issue #160 requirement).
 func (s IngestRunStatus) IsSuccess() bool {
 	return s == IngestRunOK || s == IngestRunPartial
 }

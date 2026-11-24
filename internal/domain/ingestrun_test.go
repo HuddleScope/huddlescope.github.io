@@ -17,6 +17,8 @@ func TestIngestRunStatus_String(t *testing.T) {
 		{IngestRunOK, "ok"},
 		{IngestRunPartial, "partial"},
 		{IngestRunFailed, "failed"},
+		{IngestRunSkippedLocked, "skipped_locked"},
+		{IngestRunSkippedFresh, "skipped_fresh"},
 		{IngestRunStatus(99), "unknown(99)"},
 	}
 	for _, c := range cases {
@@ -27,16 +29,44 @@ func TestIngestRunStatus_String(t *testing.T) {
 }
 
 func TestParseIngestRunStatus(t *testing.T) {
-	if s, err := ParseIngestRunStatus("ok"); err != nil || s != IngestRunOK {
-		t.Errorf("ParseIngestRunStatus(ok) = %v, %v", s, err)
+	cases := []struct {
+		in   string
+		want IngestRunStatus
+	}{
+		{"running", IngestRunRunning},
+		{"ok", IngestRunOK},
+		{"partial", IngestRunPartial},
+		{"failed", IngestRunFailed},
+		{"skipped_locked", IngestRunSkippedLocked},
+		{"skipped_fresh", IngestRunSkippedFresh},
+	}
+	for _, c := range cases {
+		if s, err := ParseIngestRunStatus(c.in); err != nil || s != c.want {
+			t.Errorf("ParseIngestRunStatus(%q) = %v, %v", c.in, s, err)
+		}
 	}
 	if _, err := ParseIngestRunStatus("bogus"); err == nil {
 		t.Error("expected error for unknown status")
 	}
 }
 
+// TestIngestRunSkippedStatusesNotSuccess (issue #160): the two skipped_*
+// statuses are non-success by construction, so they are invisible to
+// LastSuccess / DecideShouldRun and never update last_successful_ingest_at.
+func TestIngestRunSkippedStatusesNotSuccess(t *testing.T) {
+	if IngestRunSkippedLocked.IsSuccess() {
+		t.Error("skipped_locked must not be a success")
+	}
+	if IngestRunSkippedFresh.IsSuccess() {
+		t.Error("skipped_fresh must not be a success")
+	}
+	if IngestRunOK.IsSuccess() != true || IngestRunPartial.IsSuccess() != true {
+		t.Error("ok/partial must remain success")
+	}
+}
+
 func TestIngestRunStatus_JSONRoundTrip(t *testing.T) {
-	for _, s := range []IngestRunStatus{IngestRunRunning, IngestRunOK, IngestRunPartial, IngestRunFailed} {
+	for _, s := range []IngestRunStatus{IngestRunRunning, IngestRunOK, IngestRunPartial, IngestRunFailed, IngestRunSkippedLocked, IngestRunSkippedFresh} {
 		var round IngestRunStatus
 		if err := jsonUnmarshal(`"`+s.String()+`"`, &round); err != nil || round != s {
 			t.Errorf("JSON round trip %v failed: %v %v", s, round, err)

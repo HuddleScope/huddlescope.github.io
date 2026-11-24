@@ -596,3 +596,78 @@ stdout) when the database is unreachable, the schema is invalid, or the
 backend is not a shared source of truth (e.g., `memory`). **Callers must treat
 a non-zero exit as "cannot decide" and must NOT default to running** — a blind
 backup run on DB failure is exactly the failure mode this issue removes.
+
+## Distributed mutual exclusion for ingest (issue #160 / HS-PORT-04)
+
+Multiple hosts (Raspberry/VPS primary + GitHub Actions backup) can run the
+ingest pipeline. A shared-database lease guarantees **exactly one host does RSS
+work at a time**; the other omits visibly and does **not** count as a false
+error.
+
+### The lease
+
+- **Table:** `ingest_lease` (migration 009). Single fixed key `rss-ingest`.
+- **Columns:** `holder_id`, `fencing_token` (monotonic), `lease_until`,
+  `updated_at`. All timestamps are **server-side** (SQL `now`); a skewed client
+  clock can never grant or expire a lease.
+- **TTL:** 20 minutes. **Renewal:** every 5 minutes (must stay < TTL so a
+  single network blip does not cause a spurious hand-off).
+- **Fencing:** each successful (re)acquire increments `fencing_token`. Renew and
+  Release are both guarded on `(holder_id, fencing_token)`, so a lagged holder
+  whose token was advanced by a newer acquirer can neither renew nor release —
+  it stops making changes (its in-flight upserts are bounded by the existing
+  GUID/canonical-URL dedup and are harmless no-op duplicates).
+
+### `ingest run` modes and flags (now live, previously hidden no-ops)
+
+| Flag | Meaning |
+|------|---------|
+| `--mode primary` | Acquire the lease and run. If held, register `skipped_locked`, print a visible skip, exit 0. |
+| `--mode backup` | Pre-check freshness (skip + exit 0 if fresh, no lease touch); then acquire; then **re-check freshness inside the held lease** just before fetching (TOCTOU). If fresh in lock, release, register `skipped_fresh`, exit 0 — no RSS work. |
+| `--stale-after 75m` | Freshness threshold for the backup checks. |
+| `--force` | Skips the staleness **pre-check only**. It **NEVER** skips the lease. Documented manual operation. |
+
+Exit codes: success and all skips → `0`; lease DB failure, lost lease during
+the pipeline, or pipeline failure → non-zero (fail closed; never alters
+`last_successful_ingest_at`).
+
+### New run statuses (migration 009 widens the `ingest_runs` CHECK)
+
+- `skipped_locked` — could not acquire the lease (another host holds it).
+- `skipped_fresh` — held the lease but the in-lock re-check said fresh.
+
+Both are **non-success**: `IsSuccess()` stays `ok||partial`, so they are
+invisible to `LastSuccess` / `DecideShouldRun` and never update
+`last_successful_ingest_at` (the issue requirement).
+
+### Failure recovery (no manual row deletion)
+
+If the primary dies, its lease simply **expires** after the 20-minute TTL.
+Another host's next `Acquire` is a single conditional upsert that takes over the
+expired row (fencing token +1) — **recovery is automatic; never delete the
+`ingest_lease` row by hand.** An expired row is just re-acquired.
+
+### Deploy order (load-bearing)
+
+Migration 009 widens the `ingest_runs` status CHECK and adds `ingest_lease`.
+Because the rebuild is forward-only:
+
+1. **Deploy the new binary to ALL hosts before the backup starts dispatching**
+   with `--mode backup`. Old binaries do not understand `skipped_*` rows.
+2. The PR ships the binary + workflow together; the workflow ingest step now
+   passes `--mode backup --stale-after 75m`.
+3. Rollback: reverting the PR is safe — the residual schema is harmless (old
+   binaries never read `ingest_lease`; the widened CHECK is backward compatible
+   for all old status values). If a rolled-back host serves `ingest status`
+   while new hosts write `skipped_*` rows, `status` exits non-zero on that host
+   (freshness queries are unaffected — they filter `ok`/`partial` in SQL).
+
+### Backends
+
+- `turso` and `sqlite-file` backends provide the lease (shared store).
+- The `memory` backend **cannot** coordinate across hosts: the factory returns
+  `ErrLeaseUnavailable`, the runner warns and proceeds without mutual
+  exclusion. Use this only for local/dev; never for two live hosts.
+
+Remote coordination is **database-only** (no local files/flock), per the issue.
+Writes are assumed to hit the single Turso primary node.
