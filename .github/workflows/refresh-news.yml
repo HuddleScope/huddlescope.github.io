@@ -92,7 +92,7 @@ jobs:
         id: export
         run: |
           echo "Running export pipeline..."
-          ./dist/huddlescope export
+          ./dist/huddlescope export run
           echo "Export completed"
 
       - name: Commit heartbeat
