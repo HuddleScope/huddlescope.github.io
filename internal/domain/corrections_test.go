@@ -287,3 +287,188 @@ func TestApplyCorrections_NoRules(t *testing.T) {
 		t.Errorf("no-rules apply changed the partition")
 	}
 }
+
+// TestApplyCorrections_MergeRecordsAlias: a merge rule records the source
+// group's representative slug in the target's Aliases (issue #26, AC-2).
+func TestApplyCorrections_MergeRecordsAlias(t *testing.T) {
+	a1 := Article{ID: "a1", Title: "Vikings Trade Defensive End", PublishedAt: "2024-01-01T10:00:00Z"}
+	a2 := Article{ID: "a2", Title: "Packers Sign Offensive Guard", PublishedAt: "2024-01-01T11:00:00Z"}
+
+	g1 := groupWithArticles("h1", a1)
+	g2 := groupWithArticles("h2", a2)
+	groups := []StoryGroup{g1, g2}
+
+	sourceSlug := groupRepSlug(g2)
+	targetSlug := groupRepSlug(g1)
+
+	rule := CorrectionRule{
+		ID:          "rule-merge-alias",
+		Kind:        CorrectionMerge,
+		StoryID:     g2.ID,
+		IntoStoryID: g1.ID,
+	}
+
+	corrected, err := ApplyCorrections(groups, []CorrectionRule{rule})
+	if err != nil {
+		t.Fatalf("ApplyCorrections merge error = %v", err)
+	}
+	if len(corrected) != 1 {
+		t.Fatalf("merge returned %d groups; want 1", len(corrected))
+	}
+	merged := corrected[0]
+	if groupRepSlug(merged) != targetSlug {
+		t.Errorf("merged rep slug = %q; want %q", groupRepSlug(merged), targetSlug)
+	}
+	if len(merged.Aliases) != 1 {
+		t.Fatalf("merged aliases = %d; want 1", len(merged.Aliases))
+	}
+	if merged.Aliases[0].Slug != sourceSlug {
+		t.Errorf("alias slug = %q; want %q", merged.Aliases[0].Slug, sourceSlug)
+	}
+	if merged.Aliases[0].Headline != g2.Headline {
+		t.Errorf("alias headline = %q; want %q", merged.Aliases[0].Headline, g2.Headline)
+	}
+}
+
+// TestApplyCorrections_MergeSelfAliasDeduped: when the source group's
+// representative slug equals the target's representative slug (identical
+// headline), the self-alias is dropped (representative-earlier-than-target case).
+func TestApplyCorrections_MergeSelfAliasDeduped(t *testing.T) {
+	a1 := Article{ID: "a1", Title: "Same Headline Story", PublishedAt: "2024-01-01T10:00:00Z"}
+	a2 := Article{ID: "a2", Title: "Same Headline Story", PublishedAt: "2024-01-01T11:00:00Z"}
+
+	g1 := groupWithArticles("h", a1)
+	g2 := groupWithArticles("h", a2)
+	groups := []StoryGroup{g1, g2}
+
+	// Both groups have the same representative slug (same headline).
+	if groupRepSlug(g1) != groupRepSlug(g2) {
+		t.Fatalf("setup: expected identical rep slugs")
+	}
+
+	rule := CorrectionRule{
+		ID:          "rule-merge-self",
+		Kind:        CorrectionMerge,
+		StoryID:     g2.ID,
+		IntoStoryID: g1.ID,
+	}
+
+	corrected, err := ApplyCorrections(groups, []CorrectionRule{rule})
+	if err != nil {
+		t.Fatalf("merge error = %v", err)
+	}
+	if len(corrected) != 1 {
+		t.Fatalf("merge returned %d groups; want 1", len(corrected))
+	}
+	if len(corrected[0].Aliases) != 0 {
+		t.Errorf("self-alias should be dropped; got %d aliases", len(corrected[0].Aliases))
+	}
+}
+
+// TestApplyCorrections_MixedKinds: a mixed split/merge/archive/alias rule set
+// applies split/merge in ApplyCorrections and lifecycle in ApplyLifecycle,
+// deterministically (issue #26, AC-2).
+func TestApplyCorrections_MixedKinds(t *testing.T) {
+	a1 := Article{ID: "a1", Title: "Steelers Sign Quarterback", PublishedAt: "2024-01-01T10:00:00Z"}
+	a2 := Article{ID: "a2", Title: "Browns Trade Cornerback", PublishedAt: "2024-01-01T11:00:00Z"}
+	a3 := Article{ID: "a3", Title: "Ravens Release Wide Receiver", PublishedAt: "2024-01-01T12:00:00Z"}
+
+	g1 := groupWithArticles("h1", a1)
+	g2 := groupWithArticles("h2", a2)
+	g3 := groupWithArticles("h3", a3)
+	groups := []StoryGroup{g1, g2, g3}
+
+	// Merge g2 into g1, archive g3 by slug.
+	slug3 := groupRepSlug(g3)
+	rules := []CorrectionRule{
+		{ID: "m1", Kind: CorrectionMerge, StoryID: g2.ID, IntoStoryID: g1.ID},
+		{ID: "arc3", Kind: CorrectionArchive, StoryID: string(slug3)},
+	}
+
+	// ApplyCorrections should apply the merge (re-partition) and skip the
+	// archive (lifecycle kind), leaving g3 active but merged set correct.
+	partition, err := ApplyCorrections(groups, rules)
+	if err != nil {
+		t.Fatalf("ApplyCorrections mixed error = %v", err)
+	}
+	// g2 folded into g1; g3 still present (not dropped by ApplyCorrections).
+	if len(partition) != 2 {
+		t.Fatalf("ApplyCorrections returned %d groups; want 2", len(partition))
+	}
+	// g3 should still be active here (archive not applied yet).
+	for _, g := range partition {
+		if groupRepSlug(g) == slug3 && g.Status != "" {
+			t.Errorf("g3 status = %q after ApplyCorrections; want empty (archive not applied)", g.Status)
+		}
+	}
+
+	// Now ApplyLifecycle applies the archive.
+	lifecycle, err := ApplyLifecycle(partition, rules)
+	if err != nil {
+		t.Fatalf("ApplyLifecycle mixed error = %v", err)
+	}
+	for _, g := range lifecycle {
+		if groupRepSlug(g) == slug3 && g.Status != StatusArchived {
+			t.Errorf("g3 status = %q after ApplyLifecycle; want %q", g.Status, StatusArchived)
+		}
+	}
+}
+
+// TestCorrectionRuleValidate_NewKinds: Validate accepts the new lifecycle kinds
+// and rejects malformed ones (issue #26, AC-2, T2.3).
+func TestCorrectionRuleValidate_NewKinds(t *testing.T) {
+	t.Run("archive valid", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionArchive, StoryID: "valid-slug"}
+		if err := r.Validate(); err != nil {
+			t.Errorf("archive valid: unexpected error %v", err)
+		}
+	})
+	t.Run("close valid", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionClose, StoryID: "valid-slug"}
+		if err := r.Validate(); err != nil {
+			t.Errorf("close valid: unexpected error %v", err)
+		}
+	})
+	t.Run("reactivate valid", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionReactivate, StoryID: "valid-slug"}
+		if err := r.Validate(); err != nil {
+			t.Errorf("reactivate valid: unexpected error %v", err)
+		}
+	})
+	t.Run("alias valid", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionAlias, StoryID: "target-slug", IntoStoryID: "alias-slug"}
+		if err := r.Validate(); err != nil {
+			t.Errorf("alias valid: unexpected error %v", err)
+		}
+	})
+	t.Run("archive empty slug", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionArchive, StoryID: ""}
+		if err := r.Validate(); err == nil {
+			t.Error("archive empty slug: expected error")
+		}
+	})
+	t.Run("archive bad charset", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionArchive, StoryID: "Bad_Slug/Here"}
+		if err := r.Validate(); err == nil {
+			t.Error("archive bad charset: expected error")
+		}
+	})
+	t.Run("alias self", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionAlias, StoryID: "same", IntoStoryID: "same"}
+		if err := r.Validate(); err == nil {
+			t.Error("alias self: expected error")
+		}
+	})
+	t.Run("alias empty story slug", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionAlias, StoryID: "", IntoStoryID: "x"}
+		if err := r.Validate(); err == nil {
+			t.Error("alias empty StorySlug: expected error")
+		}
+	})
+	t.Run("unknown kind rejected", func(t *testing.T) {
+		r := CorrectionRule{ID: "r", Kind: CorrectionKind("bogus")}
+		if err := r.Validate(); err == nil {
+			t.Error("unknown kind: expected error")
+		}
+	})
+}

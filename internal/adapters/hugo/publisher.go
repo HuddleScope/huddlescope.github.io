@@ -77,10 +77,35 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 	fmt.Fprintf(&buf, "---\n")
 	fmt.Fprintf(&buf, "title: %s\n", yamlString(page.Headline))
 	fmt.Fprintf(&buf, "slug: %s\n", yamlString(string(page.Slug)))
-	fmt.Fprintf(&buf, "storyID: %s\n", yamlString(page.StoryID))
+	// storyID renders the stable, representative-derived PageKey (issue #26, D1).
+	// The internal group hash (page.StoryID) is an opaque implementation detail
+	// and is not published.
+	storyID := string(page.PageKey)
+	if storyID == "" {
+		// Backward compatibility: if PageKey is not set (e.g. a legacy page
+		// built before issue #26), fall back to the internal StoryID.
+		storyID = page.StoryID
+	}
+	fmt.Fprintf(&buf, "storyID: %s\n", yamlString(storyID))
 	fmt.Fprintf(&buf, "description: %s\n", yamlString(page.Headline))
 	fmt.Fprintf(&buf, "source: multi\n")
 	fmt.Fprintf(&buf, "canonical: %s\n", yamlString(string(page.Path)))
+	// status front-matter (issue #26, AC-2): only rendered when non-active so
+	// the default (active) page is byte-identical to pre-issue #26 output.
+	if page.Status != "" && page.Status != domain.StatusActive {
+		fmt.Fprintf(&buf, "status: %s\n", yamlString(string(page.Status)))
+	}
+	// aliases front-matter (Hugo-native redirect front-matter; issue #26, D7).
+	// Capped at MaxAliases to keep front-matter bounded for large merges.
+	if len(page.Aliases) > 0 {
+		fmt.Fprintf(&buf, "aliases:\n")
+		for i, a := range page.Aliases {
+			if i >= maxAliases {
+				break
+			}
+			fmt.Fprintf(&buf, "  - %s\n", yamlString(string(a.Slug)))
+		}
+	}
 	fmt.Fprintf(&buf, "generator: %s\n", generatorValue)
 	fmt.Fprintf(&buf, "firstPublished: %s\n", formatTime(page.FirstPublishedAt))
 	fmt.Fprintf(&buf, "lastPublished: %s\n", formatTime(page.LastPublishedAt))
@@ -98,6 +123,11 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 	fmt.Fprintf(&buf, "---\n\n")
 
 	// Content body
+	// Archive banner (issue #26, AC-2): rendered when the story is archived or closed.
+	if page.Status == domain.StatusArchived || page.Status == domain.StatusClosed {
+		fmt.Fprintf(&buf, "> **This story is archived.** Reporting on this story is no longer being tracked.\n\n")
+	}
+
 	fmt.Fprintf(&buf, "# %s\n\n", page.Headline)
 	fmt.Fprintf(&buf, "This page aggregates reporting from multiple sources on this story.\n\n")
 	fmt.Fprintf(&buf, "## Reporting Sources\n\n")
@@ -107,6 +137,19 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 		fmt.Fprintf(&buf, "**Title:** [%s](%s)\n\n", art.Title, art.URL)
 		fmt.Fprintf(&buf, "**Published:** %s\n\n", formatTime(art.PublishedAt))
 		fmt.Fprintf(&buf, "[View original article](%s)\n\n", art.URL)
+	}
+
+	// Merged-from section (issue #26, AC-2): lists the identities of stories
+	// that were merged into this one.
+	if len(page.Aliases) > 0 {
+		fmt.Fprintf(&buf, "## Merged From\n\n")
+		for i, a := range page.Aliases {
+			if i >= maxAliases {
+				break
+			}
+			fmt.Fprintf(&buf, "- %s\n", a.Slug)
+		}
+		fmt.Fprintf(&buf, "\n")
 	}
 
 	fmt.Fprintf(&buf, "## Story Timeline\n\n")
@@ -119,6 +162,10 @@ func RenderMarkdown(page domain.StoryDetailPage, baseURL string) ([]byte, error)
 
 	return []byte(buf.String()), nil
 }
+
+// maxAliases caps the number of aliases rendered in front-matter and body to
+// keep output bounded for very large merges (issue #26, risk #3).
+const maxAliases = 20
 
 // formatTime produces a stable formatted time string.
 func formatTime(t time.Time) string {

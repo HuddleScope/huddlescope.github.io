@@ -95,3 +95,51 @@ func TestSaveListRules_RoundTrip_Sqlite(t *testing.T) {
 		t.Errorf("SaveRule(invalid) expected error")
 	}
 }
+
+// TestRuleRepository_LifecycleKindsRoundTrip (issue #26, AC-2, T2.4):
+// archive/close/reactivate/alias rules save and list through sqlite with the
+// `kind` text and slug references (carried in story_id / into_story_id columns)
+// round-tripping. No schema migration is required.
+func TestRuleRepository_LifecycleKindsRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	ruleRepo := NewRuleRepository(repo.db)
+
+	rules := []domain.CorrectionRule{
+		{ID: "arc-1", Kind: domain.CorrectionArchive, StoryID: "story-a"},
+		{ID: "cls-1", Kind: domain.CorrectionClose, StoryID: "story-b"},
+		{ID: "react-1", Kind: domain.CorrectionReactivate, StoryID: "story-c"},
+		{ID: "alias-1", Kind: domain.CorrectionAlias, StoryID: "story-d", IntoStoryID: "old-slug"},
+	}
+	for _, r := range rules {
+		if err := ruleRepo.SaveRule(r); err != nil {
+			t.Fatalf("SaveRule(%s) error = %v", r.ID, err)
+		}
+	}
+
+	got, err := ruleRepo.ListRules()
+	if err != nil {
+		t.Fatalf("ListRules() error = %v", err)
+	}
+	byID := make(map[string]domain.CorrectionRule, len(got))
+	for _, r := range got {
+		byID[r.ID] = r
+	}
+	if r, ok := byID["arc-1"]; !ok || r.Kind != domain.CorrectionArchive || r.StoryID != "story-a" {
+		t.Errorf("arc-1 round-trip failed: %+v", r)
+	}
+	if r, ok := byID["cls-1"]; !ok || r.Kind != domain.CorrectionClose || r.StoryID != "story-b" {
+		t.Errorf("cls-1 round-trip failed: %+v", r)
+	}
+	if r, ok := byID["react-1"]; !ok || r.Kind != domain.CorrectionReactivate || r.StoryID != "story-c" {
+		t.Errorf("react-1 round-trip failed: %+v", r)
+	}
+	if r, ok := byID["alias-1"]; !ok || r.Kind != domain.CorrectionAlias || r.StoryID != "story-d" || r.IntoStoryID != "old-slug" {
+		t.Errorf("alias-1 round-trip failed: %+v", r)
+	}
+}

@@ -434,6 +434,12 @@ func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
 // corrected groups. When no rule repository is configured it returns the input
 // unchanged (engine independence, AC-4). On error the input groups are left
 // unmodified and the error is returned.
+//
+// Issue #26 (D4): the pass now applies both re-partitioning corrections
+// (split/merge) and lifecycle transitions (archive/close/reactivate/alias).
+// Lifecycle runs after corrections so merge-induced representative changes are
+// settled before slug references resolve. Rules of all kinds may coexist in
+// the repository; each pass only acts on its own kinds.
 func (a *Application) applyCorrections(groups []domain.StoryGroup) ([]domain.StoryGroup, error) {
 	if a.ruleRepository == nil {
 		return groups, nil
@@ -445,11 +451,17 @@ func (a *Application) applyCorrections(groups []domain.StoryGroup) ([]domain.Sto
 	if len(rules) == 0 {
 		return groups, nil
 	}
+	// Pass 1: re-partitioning (split/merge). Skips lifecycle kinds.
 	corrected, err := domain.ApplyCorrections(groups, rules)
 	if err != nil {
 		return groups, err
 	}
-	return corrected, nil
+	// Pass 2: lifecycle (archive/close/reactivate/alias). Skips split/merge.
+	lifecycle, err := domain.ApplyLifecycle(corrected, rules)
+	if err != nil {
+		return corrected, err
+	}
+	return lifecycle, nil
 }
 
 // resolveFetcher returns a FeedFetcher for the given source ID.

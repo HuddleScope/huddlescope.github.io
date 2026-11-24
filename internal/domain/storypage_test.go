@@ -388,3 +388,166 @@ func equalMaps(a, b map[string]bool) bool {
 	}
 	return true
 }
+
+// TestStoryPageIdentityStableAcrossDays: day-1 articles cluster into a group;
+// a later-dated article from a new source is added; the slug, PageKey, and
+// path are all unchanged (issue #26, AC-1, T1.1). The group ID may change
+// (membership hash) but the public identity must not.
+func TestStoryPageIdentityStableAcrossDays(t *testing.T) {
+	day1Early := Article{
+		ID:          "d1-early",
+		SourceID:    "espn-nfl",
+		Title:       "Cowboys Sign Veteran Safety",
+		Summary:     "Day 1 early",
+		URL:         "https://espn.com/d1-early",
+		PublishedAt: "2024-01-01T09:00:00Z",
+	}
+	day1Late := Article{
+		ID:          "d1-late",
+		SourceID:    "nfl-com",
+		Title:       "Cowboys Sign Veteran Safety",
+		Summary:     "Day 1 late",
+		URL:         "https://nfl.com/d1-late",
+		PublishedAt: "2024-01-01T15:00:00Z",
+	}
+	day2 := Article{
+		ID:          "d2-new",
+		SourceID:    "cbs-nfl",
+		Title:       "Cowboys Sign Veteran Safety",
+		Summary:     "Day 2 new source",
+		URL:         "https://cbs.com/d2-new",
+		PublishedAt: "2024-01-02T09:00:00Z",
+	}
+
+	// Day 1: two articles cluster into one group.
+	groupDay1 := NewStoryGroup(day1Early)
+	groupDay1.AddArticle(day1Late)
+
+	resolver := NewStaticSourceResolver(map[string]string{
+		"espn-nfl": "ESPN",
+		"nfl-com":  "NFL.com",
+		"cbs-nfl":  "CBS Sports",
+	})
+
+	pageDay1, err := BuildStoryDetailPage(groupDay1, resolver, time.Date(2024, 1, 1, 23, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage day1: %v", err)
+	}
+
+	// Day 2: a new source adds a later-dated article to the same story.
+	groupDay2 := NewStoryGroup(day1Early)
+	groupDay2.AddArticle(day1Late)
+	groupDay2.AddArticle(day2)
+
+	pageDay2, err := BuildStoryDetailPage(groupDay2, resolver, time.Date(2024, 1, 2, 23, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage day2: %v", err)
+	}
+
+	// Public identity must be stable across days.
+	if pageDay1.Slug != pageDay2.Slug {
+		t.Errorf("Slug changed across days: %q -> %q", pageDay1.Slug, pageDay2.Slug)
+	}
+	if pageDay1.PageKey != pageDay2.PageKey {
+		t.Errorf("PageKey changed across days: %q -> %q", pageDay1.PageKey, pageDay2.PageKey)
+	}
+	if pageDay1.Path != pageDay2.Path {
+		t.Errorf("Path changed across days: %q -> %q", pageDay1.Path, pageDay2.Path)
+	}
+	// Article count advanced.
+	if len(pageDay1.Articles) != 2 || len(pageDay2.Articles) != 3 {
+		t.Errorf("article count day1=%d day2=%d; want 2 and 3", len(pageDay1.Articles), len(pageDay2.Articles))
+	}
+	// firstPublished pinned, lastPublished advanced.
+	if !pageDay1.FirstPublishedAt.Equal(pageDay2.FirstPublishedAt) {
+		t.Errorf("FirstPublishedAt changed: %v -> %v", pageDay1.FirstPublishedAt, pageDay2.FirstPublishedAt)
+	}
+	if !pageDay2.LastPublishedAt.After(pageDay1.LastPublishedAt) {
+		t.Errorf("LastPublishedAt did not advance: %v -> %v", pageDay1.LastPublishedAt, pageDay2.LastPublishedAt)
+	}
+}
+
+// TestBuildStoryDetailPageChronological: articles are sorted by PublishedAt
+// (ties on URL) so the rendered timeline is chronological (issue #26, AC-3, D6, T3.1).
+func TestBuildStoryDetailPageChronological(t *testing.T) {
+	articles := []Article{
+		{
+			ID:          "late",
+			SourceID:    "cbs",
+			Title:       "Story",
+			URL:         "https://cbs.com/late",
+			PublishedAt: "2024-01-03T12:00:00Z",
+		},
+		{
+			ID:          "early",
+			SourceID:    "espn",
+			Title:       "Story",
+			URL:         "https://espn.com/early",
+			PublishedAt: "2024-01-01T10:00:00Z",
+		},
+		{
+			ID:          "mid",
+			SourceID:    "nfl",
+			Title:       "Story",
+			URL:         "https://nfl.com/mid",
+			PublishedAt: "2024-01-02T11:00:00Z",
+		},
+	}
+
+	group := NewStoryGroup(articles[0])
+	group.AddArticle(articles[1])
+	group.AddArticle(articles[2])
+
+	resolver := NewStaticSourceResolver(map[string]string{})
+	page, err := BuildStoryDetailPage(group, resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage: %v", err)
+	}
+
+	if len(page.Articles) != 3 {
+		t.Fatalf("articles = %d; want 3", len(page.Articles))
+	}
+	// Expect chronological order: early, mid, late.
+	wantURLs := []string{"https://espn.com/early", "https://nfl.com/mid", "https://cbs.com/late"}
+	for i, want := range wantURLs {
+		if page.Articles[i].URL != want {
+			t.Errorf("articles[%d].URL = %q; want %q (chronological order violated)", i, page.Articles[i].URL, want)
+		}
+	}
+}
+
+// TestBuildStoryDetailPageResolverNamesEveryArticle: the resolver's display
+// names are applied to every article in the listing, not only the first
+// (issue #26, D5, T3.1).
+func TestBuildStoryDetailPageResolverNamesEveryArticle(t *testing.T) {
+	articles := []Article{
+		{ID: "a1", SourceID: "src-a", Title: "Story", URL: "https://a.com/1", PublishedAt: "2024-01-01T10:00:00Z"},
+		{ID: "a2", SourceID: "src-b", Title: "Story", URL: "https://b.com/2", PublishedAt: "2024-01-01T11:00:00Z"},
+		{ID: "a3", SourceID: "src-c", Title: "Story", URL: "https://c.com/3", PublishedAt: "2024-01-01T12:00:00Z"},
+	}
+
+	group := NewStoryGroup(articles[0])
+	group.AddArticle(articles[1])
+	group.AddArticle(articles[2])
+
+	resolver := NewStaticSourceResolver(map[string]string{
+		"src-a": "Publisher A",
+		"src-b": "Publisher B",
+		"src-c": "Publisher C",
+	})
+
+	page, err := BuildStoryDetailPage(group, resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage: %v", err)
+	}
+	want := map[string]string{
+		"https://a.com/1": "Publisher A",
+		"https://b.com/2": "Publisher B",
+		"https://c.com/3": "Publisher C",
+	}
+	for _, art := range page.Articles {
+		if want[art.URL] != art.SourceName {
+			t.Errorf("article %q SourceName = %q; want %q", art.URL, art.SourceName, want[art.URL])
+		}
+	}
+}

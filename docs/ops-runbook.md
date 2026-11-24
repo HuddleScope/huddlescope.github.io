@@ -270,6 +270,40 @@ Heartbeat staleness is visually indicated in workflow run output:
 - The heartbeat file commits to the repo; the refresh workflow does not push any data back to the default branch
 - Backup/restore code implemented in sqlite package (HS-041), not yet wired into the pipeline
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired into the pipeline
+
+## Correction rules: story lifecycle and aliases (issue #26)
+
+Correction rules are stored overrides applied after clustering. Issue #26 adds lifecycle and alias kinds alongside the existing split/merge kinds. Rules persist in the `correction_rules` table (migration 007); the `kind` column is untyped TEXT, so new kinds require **no schema migration**. Lifecycle rules reference stories by their **stable slug** (carried in the `story_id` column), not by group ID.
+
+### Rule kinds
+
+| Kind | `story_id` | `into_story_id` | `article_ids` | Effect |
+|------|-----------|----------------|--------------|--------|
+| `split` | group to split (group ID) | — | articles to remove | Re-partitions the cluster |
+| `merge` | source group (group ID) | target group (group ID) | — | Folds source into target; records an alias |
+| `archive` | story slug | — | — | Sets status to `archived` |
+| `close` | story slug | — | — | Sets status to `closed` |
+| `reactivate` | story slug | — | — | Sets status back to `active` |
+| `alias` | target story slug | alias slug to record | — | Appends an explicit alias (representative-swap escape hatch) |
+
+### Applying a lifecycle rule
+
+1. **Determine the story slug.** The slug is the stable public identity, derived from the representative article's headline. Read it from the story page's `slug:` front-matter (e.g. `/stories/{slug}/`).
+2. **Save the rule.** Use the `CorrectionRuleRepository` (`SaveRule`) with the appropriate kind. For `archive`/`close`/`reactivate`, set `StoryID` to the slug. For `alias`, set `StoryID` to the target slug and `IntoStoryID` to the alias slug.
+3. **Verify.** The next `RunStoryPages` pass applies the rule. The story page will carry `status: "archived"` (or `"closed"`) front-matter and an archive banner; alias rules append to the `aliases:` front-matter and "Merged From" section.
+
+### Slug validation
+
+Lifecycle slugs are restricted to the `[a-z0-9-]` charset (the same charset `ComputeStorySlugFromHeadline` emits). Slugs with uppercase, underscores, slashes, or whitespace are rejected at `Validate()` time — this keeps them path-safe and G306-safe.
+
+### Known limitations
+
+- **No undo of a merge.** Merging records an alias but does not re-split articles. To revert, you would need to manually re-seed the articles.
+- **No undo of an archive automatically.** A `reactivate` rule restores `active` status but does not recreate removed articles.
+- **Ambiguous slugs fail loudly.** If a lifecycle rule's slug matches more than one group's representative slug, `ApplyLifecycle` returns an error and the partition is left unmodified. This can occur after a split of a same-title group.
+- **Alias cap.** Alias lists are capped at 20 entries (front-matter and body) to keep output bounded for very large merges.
+- **Representative swap.** If a story's representative article changes (e.g. a new earlier-dated source arrives), the slug changes and the old slug is recorded as an alias automatically (via merge) or can be recorded explicitly (via `alias` rule). The merged page takes over the source's URL via Hugo-native `aliases:` front-matter.
+
 ## Team registry
 
 The team registry is now stored in `conf/teams.yaml` and loaded via `config.TeamRegistry()`. The former database tables (`teams` and `article_teams`) were orphaned and removed in migration 005 (HS-063).

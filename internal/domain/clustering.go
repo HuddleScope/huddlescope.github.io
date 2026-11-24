@@ -227,6 +227,32 @@ type JoinDecision struct {
 	At             string  `json:"at"`
 }
 
+// StoryStatus is the lifecycle state of a story group (issue #26, AC-2).
+// The zero value ("") means active, so groups produced by clustering are
+// active by default.
+type StoryStatus string
+
+const (
+	// StatusActive is the default lifecycle state.
+	StatusActive StoryStatus = "active"
+	// StatusArchived marks a story as archived (no longer tracked, page
+	// renders an archive banner).
+	StatusArchived StoryStatus = "archived"
+	// StatusClosed marks a story as closed (same rendering as archived;
+	// "closed" is the editorial term for a story that has ended).
+	StatusClosed StoryStatus = "closed"
+)
+
+// StoryAlias records the identity of a story that was merged into this one
+// (issue #26, AC-2). Slug is the stable URL slug of the merged-away story;
+// Headline is its representative headline (display text only); MergedAt is
+// the RFC3339 time the merge rule was applied in this run.
+type StoryAlias struct {
+	Slug     StorySlug
+	Headline string
+	MergedAt string
+}
+
 // StoryGroup represents a group of articles that belong to the same story.
 type StoryGroup struct {
 	ID               string
@@ -236,6 +262,12 @@ type StoryGroup struct {
 	FirstPublishedAt time.Time
 	LastPublishedAt  time.Time
 	JoinReasons      []JoinDecision
+	// Status is the story lifecycle state set by ApplyLifecycle (issue #26).
+	// Zero value = active.
+	Status StoryStatus
+	// Aliases are identities of stories merged into this group (issue #26).
+	// Deterministic: recomputed from the partition + rules on every run.
+	Aliases []StoryAlias
 }
 
 // NewStoryGroup creates a new story group from a single article.
