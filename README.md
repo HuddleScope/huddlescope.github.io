@@ -7,7 +7,7 @@ This is a non-commercial, independent news aggregator for NFL-related content. T
 ## Architecture
 The application follows a layered architecture with clear separation of concerns:
 
-- **cmd/** — CLI entry points (ingest, export, heartbeat)
+- **cmd/huddlescope/** — Unified CLI entry point (subcommands: `ingest run`, `export`, `heartbeat check`, `config`)
 - **internal/application/** — Business logic and orchestration
 - **internal/domain/** — Core domain models and interfaces (Story, Source, FeedEntry)
 - **internal/adapters/** — Pluggable implementations (RSS fetcher, storage backends, Hugo publisher)
@@ -19,9 +19,7 @@ The Go engine is independent of hosting, database, and rendering adapters. Adapt
 
 | Path | Description |
 |------|-------------|
-| `cmd/ingest` | CLI to fetch RSS feeds and store stories |
-| `cmd/export` | CLI to export stories to the configured backend |
-| `cmd/heartbeat` | CLI to publish heartbeat records |
+| `cmd/huddlescope` | Unified CLI: `ingest run` (fetch RSS feeds and store stories), `export` (export stories to Hugo data), `heartbeat check` (heartbeat health/staleness), `config` (validate config) |
 | `internal/domain` | Core domain models and interfaces |
 | `internal/application` | Application orchestration and business logic |
 | `internal/adapters/rss` | RSS feed fetching adapter |
@@ -52,7 +50,7 @@ cp .env.example .env
 ### Build Go binaries
 ```sh
 make build
-# Binaries appear in dist/ingest, dist/export, and dist/heartbeat
+# Unified binary appears in dist/huddlescope
 ```
 
 ### Build scheduler worker
@@ -95,16 +93,21 @@ npm test
 
 ### Run ingest (fetch feeds)
 ```sh
-./dist/ingest
+./dist/huddlescope ingest run
 # or with config:
-./dist/ingest -config .env
+./dist/huddlescope ingest run -config .env
 ```
 
-### Run export (process stories)
+### Run export (export stories to Hugo data)
 ```sh
-./dist/export
+./dist/huddlescope export
 # or with config:
-./dist/export -config .env
+./dist/huddlescope export -config .env
+```
+
+### Check heartbeat staleness
+```sh
+./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m
 ```
 
 ## Website (Hugo)
@@ -160,10 +163,16 @@ This repository uses a GitHub Actions workflow (`.github/workflows/refresh-news.
   - `publish` (default `true`): Set to `false` to build the site without deploying.
 - **Secrets required**: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` must be configured in repository settings for production mode.
 - **Environment**: The workflow uses the `github-pages` environment and deploys via GitHub Pages with `pages: write` and `id-token: write` permissions.
-- **Safety**: If the export pipeline produces an empty snapshot (no stories), the workflow restores the last-committed homepage.json and warns instead of publishing an empty site.
-- **Production backend**: The refresh workflow sets `HSC_STORAGE_BACKEND=turso`. The Turso backend is implemented via `libsql-client-go` (`internal/adapters/storage/turso`); production mode requires `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which are validated at startup (a missing value fails the ingest step with a clear error). Use `sqlite-file` for local runs.
+- **Publish decision (HS-056)**: After export, the workflow makes an explicit publish decision (the old "data safety guard" that restored a committed demo file was removed):
+  - exported snapshot has **≥ 1 story** → commit and deploy the snapshot;
+  - **zero stories** but the previously committed snapshot had ≥ 1 story → skip the homepage commit and the Pages deploy: the last successfully deployed (real) content is retained;
+  - **zero stories** and never a real snapshot → deploy the clearly-labelled "No stories published yet" empty state.
+  A failed ingest or export fails the build job, so the deploy job is skipped and the last-good Pages deployment is preserved. A hard "Verify no demo markers" step greps the built `web/public/` for sample-data signatures and blocks any Pages upload that would present the sample as real news. See `web/README-data.md` for the full contract.
+- **Production backend**: The refresh workflow sets `HSC_STORAGE_BACKEND=turso`. The Turso backend is implemented via `libsql-client-go` (`internal/adapters/storage/turso`); production mode requires `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which are validated at startup (a missing value fails the ingest step with a clear, redacted error). Use `sqlite-file` for local runs.
 
 See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflow.
+
+Release and operations documentation: [docs/release-checklist.md](docs/release-checklist.md) (operator release checklist and evidence rule), [docs/ops-runbook.md](docs/ops-runbook.md) (provisioning, manual refresh, failure diagnosis, cost review), [docs/release-gate.md](docs/release-gate.md) (HS-058 release gate).
 
 ## Configuration
 

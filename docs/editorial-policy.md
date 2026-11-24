@@ -53,7 +53,7 @@ If a source publisher or content owner requests removal:
 
 2. **Deletion procedure**
    - Set `stories.status = 'removed'` for affected records
-   - Re-run the export pipeline (`./dist/export`) to regenerate `web/data/homepage.json`
+   - Re-run the export pipeline (`./dist/huddlescope export`) to regenerate `web/data/homepage.json`
    - Deploy to GitHub Pages if the change should appear on the public site
 
 3. **Response time commitment**
@@ -76,8 +76,8 @@ To disable a feed source without deleting it permanently:
 
 2. **Commit and deploy**
    - Commit the change to `conf/sources.yaml`
-   - Run the ingest pipeline (`./dist/ingest`) to stop polling
-   - Re-run export (`./dist/export`) if needed
+   - The next scheduled refresh stops polling the feed (locally: `./dist/huddlescope ingest run`)
+   - Re-run export (`./dist/huddlescope export`) if needed
 
 3. **Re-enable**
    - Set `enabled: true` and re-commit
@@ -91,7 +91,7 @@ See `docs/ops-runbook.md` for detailed operational procedures:
 - **Backup/restore**: Operational Turso backup procedure (implemented in sqlite package, HS-041)
 - **Monitoring**: Turso storage usage, Actions usage, Worker requests dashboard
 - **Secret rotation**: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN (GitHub Secrets), GITHUB_TOKEN (Cloudflare Workers, 90-day)
-- **Local execution**: `make build`, `./dist/ingest`, `./dist/export`, `make site`, `make site-test`
+- **Local execution**: `make build`, `./dist/huddlescope ingest run`, `./dist/huddlescope export`, `make site`, `make site-test`
 
 ## Known limitations
 
