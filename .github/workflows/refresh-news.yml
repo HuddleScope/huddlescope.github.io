@@ -213,21 +213,27 @@ jobs:
           git checkout -b "$BRANCH"
           git commit -m "Update site-data (heartbeat, feeds, homepage) (Closes #108)"
           git push origin "$BRANCH"
-          # Open a PR and wait for the required Build check to pass (~7 min).
+          # Open a PR (gh pr create prints the URL on stdout; the runner's gh
+          # is too old for --json) and wait for the required Build check to
+          # pass (~5 min) by polling the head commit's check runs via gh api.
           PR_URL=$(gh pr create \
             --title "Update site-data (heartbeat, feeds, homepage)" \
-            --body "Automated site-data refresh by the Refresh news workflow (Closes #108)." \
-            --json url --jq .url)
+            --body "Automated site-data refresh by the Refresh news workflow (Closes #108)." </dev/null)
           PR_NUM="${PR_URL##*/}"
           echo "Opened PR $PR_NUM; waiting for the required Build check..."
+          SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
           for _ in $(seq 1 60); do
-            STATE=$(gh pr view "$PR_NUM" --json statusCheckRollup --jq '.statusCheckRollup.state')
-            case "$STATE" in
-              SUCCESS|NEUTRAL|SKIPPED|STALE) break ;;
-              FAILURE|CANCELLED|TIMED_OUT)
-                echo "::error::PR $PR_NUM checks did not pass (state=$STATE)"
-                exit 1 ;;
-            esac
+            DATA=$(gh api repos/"$GITHUB_REPOSITORY"/commits/"$SHA"/check-runs)
+            COUNT=$(printf '%s' "$DATA" | jq '.total_count')
+            INCOMPLETE=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status != "completed")] | length')
+            FAILED=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::error::PR $PR_NUM has failing checks"
+              exit 1
+            fi
+            if [ "$COUNT" -ge 1 ] && [ "$INCOMPLETE" -eq 0 ]; then
+              break
+            fi
             sleep 30
           done
           gh pr merge "$PR_NUM" --squash --delete-branch
