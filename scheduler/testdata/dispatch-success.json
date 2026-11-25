@@ -1,5 +1,5 @@
 {
-  "event": "scheduled_dispatch",
+  "event": "publication_dispatch",
   "repo": "HuddleScope/huddlescope.github.io",
   "workflow": "refresh-news.yml",
   "level": "info",

@@ -134,7 +134,7 @@ After deployment, verify that the worker is callable and the cron triggers at le
    npx wrangler tail
    ```
 
-   You’ll see structured logs including scheduled events with timestamps matching the :07/:37 UTC schedule.
+   You’ll see structured logs including publication dispatch events with timestamps matching the :07/:37 UTC schedule.
 
 ## Cron triggers and propagation delay
 
@@ -147,7 +147,7 @@ After deployment, verify that the worker is callable and the cron triggers at le
 ### Worker Logs (dashboard)
 
 - Workers & Pages → Your worker → Logs
-- Search for `scheduled_dispatch` to see cron trigger events.
+- Search for `publication_dispatch` to see cron trigger events.
 
 ### Manual dispatch (for testing)
 

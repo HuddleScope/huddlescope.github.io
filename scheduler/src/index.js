@@ -1,5 +1,7 @@
 // scheduler/src/index.js
-// HS-019: Cloudflare Worker cron dispatches GitHub workflow every 30 minutes
+// HS-019 / HS-PORT-08: Cloudflare Worker cron performs a "publication dispatch"
+// (triggers the refresh-news workflow) every 30 minutes. It never touches Turso,
+// fetches RSS, exports, or builds Hugo — publication is decided in Actions.
 // Cron: 7,37 * * * * UTC triggers workflow_dispatch on the default branch
 
 const GITHUB_API_BASE = 'https://api.github.com';
@@ -22,7 +24,7 @@ const MAX_RETRY_DELAY_MS = 30_000; // Cap exponential backoff
  */
 export async function scheduled(controller, env, ctx) {
   const startTime = Date.now();
-  const logCtx = { event: 'scheduled_dispatch', repo: `${REPO_OWNER}/${REPO_NAME}`, workflow: WORKFLOW_NAME };
+  const logCtx = { event: 'publication_dispatch', repo: `${REPO_OWNER}/${REPO_NAME}`, workflow: WORKFLOW_NAME };
 
   try {
     // Validate secret exists

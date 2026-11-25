@@ -244,6 +244,22 @@ This repository uses a GitHub Actions workflow (`.github/workflows/refresh-news.
 
 See issue #17 for Turso→Hugo JSON export and issue #18 for the refresh workflow.
 
+#### Architecture flows
+
+Two independent flows feed and publish the site. They share Turso as the store but never run inside each other.
+
+```
+Primary ingest (repo-less host):
+  Raspberry/VPS  ──►  RSS  ──►  Turso (shared store)
+
+Publication dispatch (Cloudflare Worker, cron `7,37 * * * *` UTC):
+  Worker  ──►  GitHub Actions [freshness check → optional backup ingest
+               → export → Hugo → Pages]
+```
+
+- The **primary ingest** runs on a Raspberry Pi or VPS *outside* the repo; it pulls RSS feeds and writes to Turso. See [docs/portable-deployment.md](docs/portable-deployment.md).
+- The **Cloudflare Worker** only *triggers* publication: it sends a `workflow_dispatch` to `refresh-news.yml` with `inputs.publish=true` on ref `main`. It **never touches Turso**, fetches RSS, exports, or builds Hugo — the Actions workflow makes all of those decisions. See [docs/worker-deployment.md](docs/worker-deployment.md).
+
 Release and operations documentation: [docs/release-checklist.md](docs/release-checklist.md) (operator release checklist and evidence rule), [docs/ops-runbook.md](docs/ops-runbook.md) (provisioning, manual refresh, failure diagnosis, cost review), [docs/release-gate.md](docs/release-gate.md) (HS-058 release gate).
 
 ## Configuration
