@@ -551,3 +551,117 @@ func TestBuildStoryDetailPageResolverNamesEveryArticle(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildStoryDetailPage_DisplayHeadline (#201): the page Headline carries the
+// original display casing when the group has a DisplayHeadline, while the Slug
+// and PageKey remain derived from the normalized representative title (AC-2).
+func TestBuildStoryDetailPage_DisplayHeadline(t *testing.T) {
+	art := Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook", // normalized identity
+		DisplayTitle: "Chiefs sign RB James Cook", // original casing
+		Summary:      "summary",
+		URL:          "https://example.com/chiefs-cook",
+		PublishedAt:  "2024-01-01T10:00:00Z",
+	}
+	group := NewStoryGroup(art)
+
+	resolver := NewStaticSourceResolver(map[string]string{"official-min": "Official"})
+	page, err := BuildStoryDetailPage(group, resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage: %v", err)
+	}
+
+	// Headline uses display casing.
+	if page.Headline != "Chiefs sign RB James Cook" {
+		t.Errorf("Headline = %q; want display casing %q", page.Headline, "Chiefs sign RB James Cook")
+	}
+	// Slug is derived from the normalized title (lowercased).
+	if page.Slug != StorySlug("chiefs-sign-rb-james-cook") {
+		t.Errorf("Slug = %q; want normalized slug", page.Slug)
+	}
+	// Article title uses display casing.
+	if len(page.Articles) != 1 {
+		t.Fatalf("expected 1 article, got %d", len(page.Articles))
+	}
+	if page.Articles[0].Title != "Chiefs sign RB James Cook" {
+		t.Errorf("Articles[0].Title = %q; want display casing", page.Articles[0].Title)
+	}
+}
+
+// TestBuildStoryDetailPage_DisplayHeadlineFallback (#201, AC-3): when the group
+// has no DisplayHeadline (legacy), the page Headline falls back to the group
+// Headline (normalized) and the slug/page key are unchanged.
+func TestBuildStoryDetailPage_DisplayHeadlineFallback(t *testing.T) {
+	art := Article{
+		ID:          "a1",
+		SourceID:    "official-min",
+		Title:       "chiefs sign rb james cook",
+		Summary:     "summary",
+		URL:         "https://example.com/chiefs-cook",
+		PublishedAt: "2024-01-01T10:00:00Z",
+	}
+	group := NewStoryGroup(art)
+
+	resolver := NewStaticSourceResolver(map[string]string{"official-min": "Official"})
+	page, err := BuildStoryDetailPage(group, resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage: %v", err)
+	}
+	if page.Headline != "chiefs sign rb james cook" {
+		t.Errorf("Headline = %q; want normalized fallback", page.Headline)
+	}
+	if page.Slug != StorySlug("chiefs-sign-rb-james-cook") {
+		t.Errorf("Slug = %q; want normalized slug", page.Slug)
+	}
+}
+
+// TestStoryPageSlugInvariantUnderDisplayTitle (#201, AC-2): two groups built from
+// the same normalized title but with different display casing must produce the
+// same Slug and PageKey, while their Headlines (display) may differ.
+func TestStoryPageSlugInvariantUnderDisplayTitle(t *testing.T) {
+	resolver := NewStaticSourceResolver(map[string]string{"official-min": "Official"})
+
+	mixedArt := Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs sign RB James Cook",
+		Summary:      "s",
+		URL:          "https://example.com/chiefs-cook",
+		PublishedAt:  "2024-01-01T10:00:00Z",
+	}
+	lowerArt := Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "chiefs sign rb james cook",
+		Summary:      "s",
+		URL:          "https://example.com/chiefs-cook",
+		PublishedAt:  "2024-01-01T10:00:00Z",
+	}
+
+	pageMixed, err := BuildStoryDetailPage(NewStoryGroup(mixedArt), resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage(mixed): %v", err)
+	}
+	pageLower, err := BuildStoryDetailPage(NewStoryGroup(lowerArt), resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage(lower): %v", err)
+	}
+
+	if pageMixed.Slug != pageLower.Slug {
+		t.Errorf("Slug differs under display casing: mixed=%q lower=%q", pageMixed.Slug, pageLower.Slug)
+	}
+	if pageMixed.PageKey != pageLower.PageKey {
+		t.Errorf("PageKey differs under display casing: mixed=%q lower=%q", pageMixed.PageKey, pageLower.PageKey)
+	}
+	// The display Headlines should reflect each group's display casing.
+	if pageMixed.Headline != "Chiefs sign RB James Cook" {
+		t.Errorf("mixed Headline = %q; want display casing", pageMixed.Headline)
+	}
+	if pageLower.Headline != "chiefs sign rb james cook" {
+		t.Errorf("lower Headline = %q; want normalized", pageLower.Headline)
+	}
+}

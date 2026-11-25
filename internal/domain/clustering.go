@@ -106,31 +106,42 @@ func TimeWithinWindow(t1, t2 time.Time, window time.Duration) bool {
 
 // Article represents a single article that can be grouped into stories.
 type Article struct {
-	ID          string
-	SourceID    string
-	Title       string
-	Summary     string
-	URL         string
-	GUID        string // optional feed GUID
-	PublishedAt string
-	FirstSeenAt string
-	Author      string // optional author name
-	Entities    []string
+	ID           string
+	SourceID     string
+	Title        string
+	DisplayTitle string // original feed casing for display; empty falls back to Title (#201)
+	Summary      string
+	URL          string
+	GUID         string // optional feed GUID
+	PublishedAt  string
+	FirstSeenAt  string
+	Author       string // optional author name
+	Entities     []string
+}
+
+// Display returns the display title for the article: the original feed
+// casing (DisplayTitle) when set, otherwise the normalized Title (#201).
+func (a Article) Display() string {
+	if d := strings.TrimSpace(a.DisplayTitle); d != "" {
+		return a.DisplayTitle
+	}
+	return a.Title
 }
 
 // NewArticle creates an Article from a FeedEntry.
 func NewArticle(feedEntry FeedEntry, id string, firstSeenAt string) Article {
 	return Article{
-		ID:          id,
-		SourceID:    NormalizeSourceID(feedEntry.Source),
-		Title:       NormalizeTitle(feedEntry.Title),
-		Summary:     SanitizeHTML(feedEntry.Summary, 1024),
-		URL:         CanonicalURLEntry(feedEntry.URL),
-		GUID:        feedEntry.GUID,
-		PublishedAt: feedEntry.PublishedAt.UTC().Format(time.RFC3339),
-		FirstSeenAt: firstSeenAt,
-		Author:      "",
-		Entities:    feedEntry.Entities,
+		ID:           id,
+		SourceID:     NormalizeSourceID(feedEntry.Source),
+		Title:        NormalizeTitle(feedEntry.Title),
+		DisplayTitle: DisplayNormalizeTitle(feedEntry.Title),
+		Summary:      SanitizeHTML(feedEntry.Summary, 1024),
+		URL:          CanonicalURLEntry(feedEntry.URL),
+		GUID:         feedEntry.GUID,
+		PublishedAt:  feedEntry.PublishedAt.UTC().Format(time.RFC3339),
+		FirstSeenAt:  firstSeenAt,
+		Author:       "",
+		Entities:     feedEntry.Entities,
 	}
 }
 
@@ -256,7 +267,8 @@ type StoryAlias struct {
 // StoryGroup represents a group of articles that belong to the same story.
 type StoryGroup struct {
 	ID               string
-	Headline         string
+	Headline         string // normalized headline (feeds slugs, group ID, tokenization)
+	DisplayHeadline  string // original-casing headline for display; empty falls back to Headline (#201)
 	Articles         []Article
 	CreatedAt        time.Time
 	FirstPublishedAt time.Time
@@ -275,6 +287,7 @@ func NewStoryGroup(article Article) StoryGroup {
 	return StoryGroup{
 		ID:               computeGroupID([]Article{article}),
 		Headline:         article.Title,
+		DisplayHeadline:  article.Display(),
 		Articles:         []Article{article},
 		CreatedAt:        time.Now().UTC(),
 		FirstPublishedAt: article.ParsePublishedAtOrZero(),
@@ -290,6 +303,7 @@ func (g *StoryGroup) AddArticle(article Article) {
 	if publishedAt.Before(g.FirstPublishedAt) {
 		g.FirstPublishedAt = publishedAt
 		g.Headline = article.Title
+		g.DisplayHeadline = article.Display()
 	}
 
 	if publishedAt.After(g.LastPublishedAt) {
@@ -601,6 +615,7 @@ func NewStoryFromGroup(group StoryGroup) Story {
 	return Story{
 		ID:           group.ID,
 		Title:        group.Headline,
+		DisplayTitle: group.DisplayHeadline,
 		Source:       earliest.SourceID,
 		PublishedAt:  earliest.ParsePublishedAtOrZero(),
 		Summary:      earliest.Summary,

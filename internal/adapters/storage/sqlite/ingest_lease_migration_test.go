@@ -18,8 +18,8 @@ func TestMigrate009CreatesIngestLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 9 {
-		t.Fatalf("expected 9 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 10 {
+		t.Fatalf("expected 10 migrations, got %d: %v", len(versions), versions)
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
@@ -141,13 +141,21 @@ func TestMigrate009CarryOver(t *testing.T) {
 		}
 	}
 
-	// Now run MigrateDB: only 009 is new -> rebuild + create lease table.
+	// Now run MigrateDB: 009 (under test) and 010 (additive display_title) are new.
+	// Simulating schema 8 leaves both 009 and 010 undiscovered, so both apply.
 	versions, err := MigrateDB(db)
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	if len(versions) != 1 {
-		t.Errorf("expected only migration 009 applied, got %d: %v", len(versions), versions)
+	// We expect exactly migrations 9 and 10 (009 is under test; 010 is additive).
+	if len(versions) != 2 {
+		t.Errorf("expected migrations [9 10] applied, got %d: %v", len(versions), versions)
+	}
+	wantVersions := map[int]bool{9: true, 10: true}
+	for _, v := range versions {
+		if !wantVersions[v] {
+			t.Errorf("unexpected migration version applied: %d", v)
+		}
 	}
 
 	// Verify carry-over: all 3 rows survive with their status/counters intact.

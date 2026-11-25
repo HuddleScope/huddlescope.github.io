@@ -313,6 +313,7 @@ func (s Story) Canonicalize(entry FeedEntry) Story {
 	story := Story{
 		ID:           ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt),
 		Title:        NormalizeTitle(entry.Title),
+		DisplayTitle: DisplayNormalizeTitle(entry.Title),
 		Source:       NormalizeSourceID(entry.Source),
 		PublishedAt:  NormalizeTimestamp(entry.PublishedAt),
 		Summary:      summary,
@@ -334,10 +335,19 @@ func (s Story) Canonicalize(entry FeedEntry) Story {
 }
 
 // MeaningfulFieldsChanged returns true if some meaningful fields changed.
-// Compares title, summary, canonical URL, publishedAt, GUID, and Entities (order-insensitive).
-// Ignores FirstSeenAt, UpdatedAt, and ID (identity fields).
+// Compares title, display title, summary, canonical URL, publishedAt, GUID, and
+// Entities (order-insensitive). Ignores FirstSeenAt, UpdatedAt, and ID (identity fields).
 func (s Story) MeaningfulFieldsChanged(other Story) bool {
 	if s.Title != other.Title {
+		return true
+	}
+	// Display casing is a meaningful (display) field: re-ingestion that only
+	// restores original casing counts as an update (issue #201, AC-3). We compare
+	// the fallback-aware Display() values so that an empty DisplayTitle (which
+	// falls back to Title) is treated equal to a DisplayTitle set to the same
+	// normalized Title — this keeps unchanged-detection stable across the
+	// storage layer's column-vs-JSON hydration.
+	if s.Display() != other.Display() {
 		return true
 	}
 	if s.Summary != other.Summary {

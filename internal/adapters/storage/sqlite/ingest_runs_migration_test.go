@@ -18,8 +18,8 @@ func TestMigrate008CreatesIngestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 9 {
-		t.Fatalf("expected 9 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 10 {
+		t.Fatalf("expected 10 migrations, got %d: %v", len(versions), versions)
 	}
 
 	repo, err := NewRepository(dbPath)
@@ -108,14 +108,20 @@ func TestMigrate008CarryOver(t *testing.T) {
 		}
 	}
 
-	// Now run MigrateDB: 008 and 009 are new -> carry-over + drop legacy (008),
-	// then rebuild ingest_runs + create ingest_lease (009).
+	// Now run MigrateDB: 008 and 009 are new (008 carry-over under test, 009
+	// lease rebuild), plus 010 (additive display_title). All three apply.
 	versions, err := MigrateDB(db)
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	if len(versions) != 2 {
-		t.Errorf("expected migrations 008 and 009 applied, got %d: %v", len(versions), versions)
+	wantVersions := map[int]bool{8: true, 9: true, 10: true}
+	if len(versions) != 3 {
+		t.Errorf("expected migrations [8 9 10] applied, got %d: %v", len(versions), versions)
+	}
+	for _, v := range versions {
+		if !wantVersions[v] {
+			t.Errorf("unexpected migration version applied: %d", v)
+		}
 	}
 
 	// Carry-over verification.

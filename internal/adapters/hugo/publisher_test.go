@@ -641,3 +641,92 @@ func TestRenderMarkdownClosedStatus(t *testing.T) {
 		t.Errorf("closed story should render archive-style banner:\n%s", result)
 	}
 }
+
+// TestRenderMarkdown_DisplayHeadlineCasing (#201): a story page built with an
+// original-casing display headline must render that casing in the YAML
+// front-matter title, the H1 heading, and the article entries, while the slug
+// remains the normalized (lowercased) form.
+func TestRenderMarkdown_DisplayHeadlineCasing(t *testing.T) {
+	// Build the page via the domain layer so Headline carries display casing and
+	// Slug carries the normalized form (mirrors the production path).
+	art := domain.Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook", // normalized identity
+		DisplayTitle: "Chiefs Sign RB James Cook", // original casing
+		Summary:      "summary",
+		URL:          "https://example.com/chiefs-cook",
+		PublishedAt:  "2024-01-01T10:00:00Z",
+	}
+	group := domain.NewStoryGroup(art)
+	resolver := domain.NewStaticSourceResolver(map[string]string{"official-min": "Official"})
+	page, err := domain.BuildStoryDetailPage(group, resolver, time.Now())
+	if err != nil {
+		t.Fatalf("BuildStoryDetailPage: %v", err)
+	}
+
+	markdown, err := RenderMarkdown(page, "")
+	if err != nil {
+		t.Fatalf("RenderMarkdown: %v", err)
+	}
+	result := string(markdown)
+
+	// The display headline (original casing) must appear in the YAML title,
+	// the description, and the H1 heading.
+	if !contains(result, `title: "Chiefs Sign RB James Cook"`) {
+		t.Errorf("front-matter title missing display casing:\n%s", result)
+	}
+	if !contains(result, `description: "Chiefs Sign RB James Cook"`) {
+		t.Errorf("front-matter description missing display casing:\n%s", result)
+	}
+	if !contains(result, "# Chiefs Sign RB James Cook") {
+		t.Errorf("H1 heading missing display casing:\n%s", result)
+	}
+	// The slug must remain the normalized (lowercased) form.
+	if !contains(result, `slug: "chiefs-sign-rb-james-cook"`) {
+		t.Errorf("slug not normalized:\n%s", result)
+	}
+	// Article entry title uses display casing.
+	if !contains(result, `title: "Chiefs Sign RB James Cook"`) {
+		t.Errorf("article title missing display casing:\n%s", result)
+	}
+}
+
+// TestRenderMarkdown_MixedCasePunctuation (#201): punctuation and mixed casing in
+// the display headline must be preserved verbatim in the rendered title (no
+// lowercasing, no punctuation stripping) — the slug, by contrast, is normalized.
+func TestRenderMarkdown_MixedCasePunctuation(t *testing.T) {
+	page := domain.StoryDetailPage{
+		Slug:     "nfl-playoffs-divisional-round",
+		Path:     "/stories/nfl-playoffs-divisional-round/",
+		StoryID:  "h",
+		PageKey:  "k",
+		Headline: "NFL Playoffs: Divisional Round Preview!",
+		Articles: []domain.PublisherArticle{{
+			SourceID: "s", SourceName: "ESPN",
+			Title: "Chiefs vs Eagles: What We Learned",
+			URL:   "https://x.com/a",
+		}},
+	}
+	markdown, err := RenderMarkdown(page, "")
+	if err != nil {
+		t.Fatalf("RenderMarkdown: %v", err)
+	}
+	result := string(markdown)
+
+	// The display headline must keep its casing and punctuation verbatim.
+	if !contains(result, `title: "NFL Playoffs: Divisional Round Preview!"`) {
+		t.Errorf("front-matter title did not preserve casing/punctuation:\n%s", result)
+	}
+	if !contains(result, "# NFL Playoffs: Divisional Round Preview!") {
+		t.Errorf("H1 did not preserve casing/punctuation:\n%s", result)
+	}
+	// The slug must be normalized (lowercased, no colon/exclamation).
+	if !contains(result, `slug: "nfl-playoffs-divisional-round"`) {
+		t.Errorf("slug not normalized:\n%s", result)
+	}
+	// The article title (display) must preserve casing.
+	if !contains(result, `title: "Chiefs vs Eagles: What We Learned"`) {
+		t.Errorf("article title did not preserve casing:\n%s", result)
+	}
+}

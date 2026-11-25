@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -137,5 +138,89 @@ func TestStoryCanonicalizeIdempotent(t *testing.T) {
 	}
 	if story1.URL != CanonicalURLEntry(fe.URL) {
 		t.Errorf("Canonicalize URL mismatch: %q != %q", story1.URL, CanonicalURLEntry(fe.URL))
+	}
+}
+
+// TestStory_JSONRoundTrip_DisplayTitle (#201): a Story with a DisplayTitle set
+// must round-trip through JSON while preserving the value, and the JSON output
+// must include the displayTitle key.
+func TestStory_JSONRoundTrip_DisplayTitle(t *testing.T) {
+	s := Story{
+		ID:           "id-1",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs sign RB James Cook",
+		Source:       "official-min",
+		Summary:      "summary",
+		URL:          "https://example.com/chiefs-cook",
+	}
+
+	data, err := s.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if !strings.Contains(string(data), `"displayTitle"`) {
+		t.Errorf("JSON does not include displayTitle key: %s", string(data))
+	}
+
+	var decoded Story
+	if err := decoded.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if decoded.DisplayTitle != "Chiefs sign RB James Cook" {
+		t.Errorf("round-trip DisplayTitle = %q; want %q", decoded.DisplayTitle, "Chiefs sign RB James Cook")
+	}
+	if decoded.Title != "chiefs sign rb james cook" {
+		t.Errorf("round-trip Title = %q; want %q", decoded.Title, "chiefs sign rb james cook")
+	}
+}
+
+// TestStory_UnmarshalJSON_LegacyNoDisplayTitle (#201, AC-3): a legacy story_data
+// JSON payload without the displayTitle key must decode to an empty DisplayTitle
+// so the repository can fall back to the normalized Title/Headline.
+func TestStory_UnmarshalJSON_LegacyNoDisplayTitle(t *testing.T) {
+	legacy := `{
+		"id": "id-1",
+		"title": "chiefs sign rb james cook",
+		"headline": "chiefs sign rb james cook",
+		"source": "official-min",
+		"publishedAt": "2026-01-01T10:00:00Z",
+		"firstSeenAt": "2026-01-01T09:00:00Z",
+		"updatedAt": "2026-01-01T10:00:00Z",
+		"url": "https://example.com/chiefs-cook",
+		"summary": "summary"
+	}`
+	var s Story
+	if err := s.UnmarshalJSON([]byte(legacy)); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if s.DisplayTitle != "" {
+		t.Errorf("legacy story DisplayTitle = %q; want empty", s.DisplayTitle)
+	}
+	// Display() falls back to the normalized Title.
+	if s.Display() != "chiefs sign rb james cook" {
+		t.Errorf("Display() = %q; want normalized title fallback", s.Display())
+	}
+}
+
+// TestStory_JSONRoundTrip_DisplayTitleEmpty (#201): a Story with an empty
+// DisplayTitle (legacy shape) still round-trips; the displayTitle key is present
+// (consistent with the other always-present fields) but empty, and the decoded
+// value is empty so the repository falls back to Title.
+func TestStory_JSONRoundTrip_DisplayTitleEmpty(t *testing.T) {
+	s := Story{ID: "id-1", Title: "normalized title"}
+	data, err := s.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var decoded Story
+	if err := decoded.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if decoded.DisplayTitle != "" {
+		t.Errorf("round-trip DisplayTitle = %q; want empty", decoded.DisplayTitle)
+	}
+	// Display() falls back to the normalized title.
+	if decoded.Display() != "normalized title" {
+		t.Errorf("Display() = %q; want normalized title fallback", decoded.Display())
 	}
 }

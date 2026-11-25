@@ -370,14 +370,15 @@ func (a *Application) RunGrouping(ctx context.Context) domain.GroupingResult {
 	articles := make([]domain.Article, 0, len(stories))
 	for _, story := range stories {
 		articles = append(articles, domain.Article{
-			ID:          story.ID,
-			SourceID:    story.Source,
-			Title:       story.Title,
-			Summary:     story.Summary,
-			URL:         story.URL,
-			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
-			Entities:    story.Entities,
+			ID:           story.ID,
+			SourceID:     story.Source,
+			Title:        story.Title,
+			DisplayTitle: story.DisplayTitle,
+			Summary:      story.Summary,
+			URL:          story.URL,
+			PublishedAt:  story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt:  story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:     story.Entities,
 		})
 	}
 
@@ -529,14 +530,15 @@ func (a *Application) RunScoring(ctx context.Context, now time.Time) ScoringResu
 	articles := make([]domain.Article, 0, len(stories))
 	for _, story := range stories {
 		articles = append(articles, domain.Article{
-			ID:          story.ID,
-			SourceID:    story.Source,
-			Title:       story.Title,
-			Summary:     story.Summary,
-			URL:         story.URL,
-			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
-			Entities:    story.Entities,
+			ID:           story.ID,
+			SourceID:     story.Source,
+			Title:        story.Title,
+			DisplayTitle: story.DisplayTitle,
+			Summary:      story.Summary,
+			URL:          story.URL,
+			PublishedAt:  story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt:  story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:     story.Entities,
 		})
 	}
 
@@ -769,14 +771,15 @@ func (a *Application) runGroupAndScorePipeline(ctx context.Context, record domai
 	articles := make([]domain.Article, 0, len(stories))
 	for _, story := range stories {
 		articles = append(articles, domain.Article{
-			ID:          story.ID,
-			SourceID:    story.Source,
-			Title:       story.Title,
-			Summary:     story.Summary,
-			URL:         story.URL,
-			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
-			Entities:    story.Entities,
+			ID:           story.ID,
+			SourceID:     story.Source,
+			Title:        story.Title,
+			DisplayTitle: story.DisplayTitle,
+			Summary:      story.Summary,
+			URL:          story.URL,
+			PublishedAt:  story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt:  story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:     story.Entities,
 		})
 	}
 
@@ -857,14 +860,15 @@ func (a *Application) RebuildRanking(ctx context.Context, now time.Time) domain.
 	articles := make([]domain.Article, 0, len(stories))
 	for _, story := range stories {
 		articles = append(articles, domain.Article{
-			ID:          story.ID,
-			SourceID:    story.Source,
-			Title:       story.Title,
-			Summary:     story.Summary,
-			URL:         story.URL,
-			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
-			Entities:    story.Entities,
+			ID:           story.ID,
+			SourceID:     story.Source,
+			Title:        story.Title,
+			DisplayTitle: story.DisplayTitle,
+			Summary:      story.Summary,
+			URL:          story.URL,
+			PublishedAt:  story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt:  story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:     story.Entities,
 		})
 	}
 

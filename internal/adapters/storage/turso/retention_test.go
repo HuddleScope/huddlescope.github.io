@@ -84,8 +84,8 @@ func TestTursoRetentionService_ExportApplyImportStatus(t *testing.T) {
 	if st.Backend != "turso" {
 		t.Errorf("backend: want turso, got %q", st.Backend)
 	}
-	if st.SchemaVersion != 9 {
-		t.Errorf("schema: want 9, got %d", st.SchemaVersion)
+	if st.SchemaVersion != 10 {
+		t.Errorf("schema: want 10, got %d", st.SchemaVersion)
 	}
 }
 
@@ -147,8 +147,8 @@ func TestTursoRetentionService_InitDSNBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if st.SchemaVersion != 9 {
-		t.Errorf("schema: want 9, got %d", st.SchemaVersion)
+	if st.SchemaVersion != 10 {
+		t.Errorf("schema: want 10, got %d", st.SchemaVersion)
 	}
 }
 

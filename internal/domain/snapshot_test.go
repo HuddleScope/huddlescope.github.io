@@ -694,3 +694,105 @@ func TestSnapshot_JSONEvidenceLevelIsString(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildSnapshot_DisplayTitle (#201): the snapshot story title and the
+// article title must carry the original display casing when DisplayTitle is set,
+// while the normalized identity Title/Headline is preserved on the Article.
+func TestBuildSnapshot_DisplayTitle(t *testing.T) {
+	registry := NewTeamRegistry()
+	scorer := NewScorer()
+	resolver := NewStaticSourceResolver(map[string]string{"test": "Test"})
+
+	articles := []Article{
+		{
+			ID:           "a1",
+			SourceID:     "test",
+			Title:        "chiefs sign rb james cook", // normalized identity
+			DisplayTitle: "Chiefs sign RB James Cook", // original casing
+			Summary:      "summary",
+			URL:          "http://example.com/a",
+			PublishedAt:  "2024-01-01T10:00:00Z",
+		},
+	}
+
+	groups := []StoryGroup{
+		{ID: "g1", Headline: "chiefs sign rb james cook", DisplayHeadline: "Chiefs sign RB James Cook", Articles: articles, FirstPublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC), LastPublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)},
+	}
+
+	stories := []Story{
+		{
+			ID:           "g1",
+			Title:        "chiefs sign rb james cook",
+			DisplayTitle: "Chiefs sign RB James Cook",
+			Source:       "test",
+			Summary:      "summary",
+			URL:          "http://example.com/a",
+			PublishedAt:  time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		},
+	}
+
+	snap, err := BuildSnapshot(stories, groups, scorer, time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC), resolver, registry, 10)
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+
+	// Story title uses display casing.
+	if len(snap.Stories) != 1 {
+		t.Fatalf("Stories length = %d; want 1", len(snap.Stories))
+	}
+	if snap.Stories[0].Title != "Chiefs sign RB James Cook" {
+		t.Errorf("Stories[0].Title = %q; want display casing", snap.Stories[0].Title)
+	}
+	// Latest article title uses display casing.
+	if len(snap.Latest) != 1 {
+		t.Fatalf("Latest length = %d; want 1", len(snap.Latest))
+	}
+	if snap.Latest[0].Title != "Chiefs sign RB James Cook" {
+		t.Errorf("Latest[0].Title = %q; want display casing", snap.Latest[0].Title)
+	}
+	// Render must contain the display headline and not the all-lowercase variant
+	// as the title.
+	data, err := snap.Render()
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	// The article's normalized identity title should still be present (it is the
+	// Article.Title), so the lowercased string may appear — but the Story.Title
+	// (display) must be the original casing and must be present.
+	if !strings.Contains(string(data), "Chiefs sign RB James Cook") {
+		t.Errorf("Render() does not include display headline; got %s", string(data))
+	}
+}
+
+// TestBuildSnapshot_DisplayTitleFallback (#201, AC-3): when DisplayTitle is not
+// set (legacy row), the snapshot must fall back to the normalized Title/Headline
+// and Validate must still pass.
+func TestBuildSnapshot_DisplayTitleFallback(t *testing.T) {
+	registry := NewTeamRegistry()
+	scorer := NewScorer()
+	resolver := NewStaticSourceResolver(map[string]string{"test": "Test"})
+
+	articles := []Article{
+		{ID: "a1", SourceID: "test", Title: "chiefs sign rb james cook", Summary: "summary", URL: "http://example.com/a", PublishedAt: "2024-01-01T10:00:00Z"},
+	}
+	groups := []StoryGroup{
+		{ID: "g1", Headline: "chiefs sign rb james cook", Articles: articles, FirstPublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC), LastPublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)},
+	}
+	stories := []Story{
+		{ID: "g1", Title: "chiefs sign rb james cook", Source: "test", Summary: "summary", URL: "http://example.com/a", PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)},
+	}
+
+	snap, err := BuildSnapshot(stories, groups, scorer, time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC), resolver, registry, 10)
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+	if snap.Stories[0].Title != "chiefs sign rb james cook" {
+		t.Errorf("Stories[0].Title = %q; want normalized fallback", snap.Stories[0].Title)
+	}
+	if snap.Latest[0].Title != "chiefs sign rb james cook" {
+		t.Errorf("Latest[0].Title = %q; want normalized fallback", snap.Latest[0].Title)
+	}
+	if err := snap.Validate(); err != nil {
+		t.Errorf("Validate() = %v; want nil", err)
+	}
+}

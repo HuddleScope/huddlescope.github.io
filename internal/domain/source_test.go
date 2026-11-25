@@ -322,6 +322,10 @@ func TestStory_MeaningfulFieldsChanged(t *testing.T) {
 		{"one new entity", Story{Entities: []string{"nfl", "nba"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
 		{"entities same order", Story{Entities: []string{"nfl"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, false},
 		{"entities different order", Story{Entities: []string{"nfl"}, Title: base.Title, Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, false},
+		// #201: a display-title-only change (re-ingestion restoring original
+		// casing) must count as a meaningful change (AC-3).
+		{"displayTitle changed", Story{Entities: []string{"nfl"}, Title: base.Title, DisplayTitle: "New Casing Title", Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, true},
+		{"displayTitle same (empty base, empty incoming)", Story{Entities: []string{"nfl"}, Title: base.Title, DisplayTitle: "", Source: base.Source, PublishedAt: base.PublishedAt, Summary: base.Summary, URL: base.URL, GUID: base.GUID, FirstSeenAt: base.FirstSeenAt, UpdatedAt: base.UpdatedAt}, false},
 	}
 
 	for _, tt := range tests {
@@ -356,6 +360,82 @@ func Test_sliceEqual(t *testing.T) {
 			got := sliceEqual(tt.a, tt.b)
 			if got != tt.want {
 				t.Errorf("sliceEqual(%v, %v) = %v; want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCanonicalize_DisplayTitle (#201): Canonicalize must set the normalized
+// Title (lowercased) AND the original-casing DisplayTitle from the same raw
+// feed entry, while identity primitives (ID, DedupeKey) remain case-stable.
+func TestCanonicalize_DisplayTitle(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	entry := FeedEntry{
+		Title:       "  Chiefs   sign RB James Cook  ",
+		Source:      "official-min",
+		PublishedAt: now,
+		Summary:     "<p>Chiefs sign RB James Cook.</p>",
+		URL:         "https://example.com/chiefs-cook",
+		GUID:        "guid-cook",
+	}
+
+	story := Story{}.Canonicalize(entry)
+
+	if story.Title != NormalizeTitle(entry.Title) {
+		t.Errorf("Title = %q; want normalized %q", story.Title, NormalizeTitle(entry.Title))
+	}
+	if story.Title != "chiefs sign rb james cook" {
+		t.Errorf("Title = %q; want %q", story.Title, "chiefs sign rb james cook")
+	}
+	if story.DisplayTitle != "Chiefs sign RB James Cook" {
+		t.Errorf("DisplayTitle = %q; want %q", story.DisplayTitle, "Chiefs sign RB James Cook")
+	}
+	// The Display() helper prefers DisplayTitle when set.
+	if story.Display() != "Chiefs sign RB James Cook" {
+		t.Errorf("Display() = %q; want %q", story.Display(), "Chiefs sign RB James Cook")
+	}
+
+	// Identity invariance (AC-2): the same story ID for the same normalized
+	// input regardless of casing.
+	if story.ID != ComputeStoryID(entry.Title, entry.Source, entry.PublishedAt) {
+		t.Errorf("ID changed by display title: %q", story.ID)
+	}
+	if story.DedupeKey != DedupeKey(entry.Source, entry.GUID, entry.URL) {
+		t.Errorf("DedupeKey changed by display title: %q", story.DedupeKey)
+	}
+
+	// A lowercased feed entry must produce the same ID (case-insensitive identity).
+	lowerEntry := entry
+	lowerEntry.Title = "chiefs sign rb james cook"
+	lowerStory := Story{}.Canonicalize(lowerEntry)
+	if lowerStory.ID != story.ID {
+		t.Errorf("ID differs for lowercased feed entry: %q != %q", lowerStory.ID, story.ID)
+	}
+	// Lowercased entry has no display casing to preserve.
+	if lowerStory.DisplayTitle != "chiefs sign rb james cook" {
+		t.Errorf("lowercased DisplayTitle = %q; want %q", lowerStory.DisplayTitle, "chiefs sign rb james cook")
+	}
+}
+
+// TestStory_Display_Fallback (#201): Display() returns DisplayTitle when set,
+// otherwise the normalized Title (legacy rows without display casing).
+func TestStory_Display_Fallback(t *testing.T) {
+	tests := []struct {
+		name         string
+		title        string
+		displayTitle string
+		want         string
+	}{
+		{"both set", "normalized", "Original Casing", "Original Casing"},
+		{"empty display", "normalized", "", "normalized"},
+		{"whitespace display", "normalized", "   ", "normalized"},
+		{"both empty", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Story{Title: tt.title, DisplayTitle: tt.displayTitle}
+			if got := s.Display(); got != tt.want {
+				t.Errorf("Display() = %q; want %q", got, tt.want)
 			}
 		})
 	}

@@ -32,6 +32,69 @@ func TestNormalizeTitle(t *testing.T) {
 	}
 }
 
+// TestDisplayNormalizeTitle (#201): the display normalization preserves case and
+// punctuation while trimming, collapsing whitespace and applying NFC — unlike
+// NormalizeTitle it never lowercases.
+func TestDisplayNormalizeTitle(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Chiefs sign RB James Cook", "Chiefs sign RB James Cook"},
+		{"  Hello   World  ", "Hello World"},
+		{"  multiple   spaces   here  ", "multiple spaces here"},
+		{"UPPERCASE", "UPPERCASE"},
+		{"Mixed Case", "Mixed Case"},
+		{"\tTabs\nand Newlines", "Tabs and Newlines"},
+		{"", ""},
+		{"single", "single"},
+		{"  Leading and trailing   ", "Leading and trailing"},
+		{"Tab\there", "Tab here"},
+		{"Caf\u00e9", "Caf\u00e9"},                 // pre-composed
+		{"Cafe\u0301", "Caf\u00e9"},                // decomposed -> NFC composes
+		{"re\u0301sume\u0301", "r\u00e9sum\u00e9"}, // decomposed -> NFC
+		{"Hello, World!", "Hello, World!"},         // punctuation preserved
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := DisplayNormalizeTitle(tt.input)
+			if got != tt.expected {
+				t.Errorf("DisplayNormalizeTitle(%q) = %q; want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestDisplayNormalizeTitleKeepsCase (#201): a headline whose identity title is
+// lowercase must retain its original feed casing in the display value.
+func TestDisplayNormalizeTitleKeepsCase(t *testing.T) {
+	feed := "  Chiefs   sign RB James Cook  "
+	display := DisplayNormalizeTitle(feed)
+	normalized := NormalizeTitle(feed)
+	if display != "Chiefs sign RB James Cook" {
+		t.Errorf("display = %q; want %q", display, "Chiefs sign RB James Cook")
+	}
+	if normalized != "chiefs sign rb james cook" {
+		t.Errorf("normalized = %q; want %q", normalized, "chiefs sign rb james cook")
+	}
+	// The two must differ (display keeps case, identity lowercases)
+	if display == normalized {
+		t.Errorf("display and normalized unexpectedly equal: %q", display)
+	}
+}
+
+// TestDisplayNormalizeTitleIdempotent: normalizing an already-normalized display
+// title must be stable.
+func TestDisplayNormalizeTitleIdempotent(t *testing.T) {
+	title := "  Test   Title  "
+	once := DisplayNormalizeTitle(title)
+	twice := DisplayNormalizeTitle(once)
+	if once != twice {
+		t.Errorf("DisplayNormalizeTitle not idempotent: %q != %q", once, twice)
+	}
+}
+
 func TestNormalizeTitleIdempotent(t *testing.T) {
 	title := "  Test   Title  "
 	normalized := NormalizeTitle(title)

@@ -75,14 +75,15 @@ func (a *Application) RunStoryPages(ctx context.Context, now time.Time, publishe
 	articles := make([]domain.Article, 0, len(stories))
 	for _, story := range stories {
 		articles = append(articles, domain.Article{
-			ID:          story.ID,
-			SourceID:    story.Source,
-			Title:       story.Title,
-			Summary:     story.Summary,
-			URL:         story.URL,
-			PublishedAt: story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			FirstSeenAt: story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
-			Entities:    story.Entities,
+			ID:           story.ID,
+			SourceID:     story.Source,
+			Title:        story.Title,
+			DisplayTitle: story.DisplayTitle,
+			Summary:      story.Summary,
+			URL:          story.URL,
+			PublishedAt:  story.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			FirstSeenAt:  story.FirstSeenAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Entities:     story.Entities,
 		})
 	}
 

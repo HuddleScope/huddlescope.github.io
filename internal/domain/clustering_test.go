@@ -748,3 +748,188 @@ func TestClusterer_URLDifferentNoEntity(t *testing.T) {
 		t.Errorf("Cluster(same URL, no entities) returned %d groups; want 1", len(result))
 	}
 }
+
+// TestNewArticle_DisplayTitle (#201): NewArticle sets the normalized Title
+// (lowercased) and the original-casing DisplayTitle from the same feed entry.
+func TestNewArticle_DisplayTitle(t *testing.T) {
+	fe := FeedEntry{
+		Title:       "  Chiefs   sign RB James Cook  ",
+		Source:      "official-min",
+		PublishedAt: time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC),
+		Summary:     "<p>Chiefs sign RB James Cook.</p>",
+		URL:         "https://example.com/chiefs-cook",
+	}
+	a := NewArticle(fe, "a1", time.Now().UTC().Format(time.RFC3339))
+	if a.Title != NormalizeTitle(fe.Title) {
+		t.Errorf("Title = %q; want normalized %q", a.Title, NormalizeTitle(fe.Title))
+	}
+	if a.Title != "chiefs sign rb james cook" {
+		t.Errorf("Title = %q; want %q", a.Title, "chiefs sign rb james cook")
+	}
+	if a.DisplayTitle != "Chiefs sign RB James Cook" {
+		t.Errorf("DisplayTitle = %q; want %q", a.DisplayTitle, "Chiefs sign RB James Cook")
+	}
+	if a.Display() != "Chiefs sign RB James Cook" {
+		t.Errorf("Display() = %q; want %q", a.Display(), "Chiefs sign RB James Cook")
+	}
+}
+
+// TestArticle_Display_Fallback (#201): Article.Display() returns DisplayTitle
+// when set, otherwise the normalized Title.
+func TestArticle_Display_Fallback(t *testing.T) {
+	both := Article{Title: "normalized", DisplayTitle: "Original Casing"}
+	if both.Display() != "Original Casing" {
+		t.Errorf("both set: Display() = %q; want %q", both.Display(), "Original Casing")
+	}
+	empty := Article{Title: "normalized"}
+	if empty.Display() != "normalized" {
+		t.Errorf("empty display: Display() = %q; want %q", empty.Display(), "normalized")
+	}
+	ws := Article{Title: "normalized", DisplayTitle: "   "}
+	if ws.Display() != "normalized" {
+		t.Errorf("whitespace display: Display() = %q; want %q", ws.Display(), "normalized")
+	}
+}
+
+// TestNewStoryGroup_DisplayHeadline (#201): NewStoryGroup propagates the
+// article's display headline, and AddArticle updates it when a new earliest
+// article is added.
+func TestNewStoryGroup_DisplayHeadline(t *testing.T) {
+	fe := FeedEntry{
+		Title:       "Chiefs Sign RB James Cook",
+		Source:      "official-min",
+		PublishedAt: time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC),
+		URL:         "https://example.com/chiefs-cook",
+	}
+	a := NewArticle(fe, "a1", time.Now().UTC().Format(time.RFC3339))
+	g := NewStoryGroup(a)
+	if g.Headline != "chiefs sign rb james cook" {
+		t.Errorf("Headline = %q; want normalized", g.Headline)
+	}
+	if g.DisplayHeadline != "Chiefs Sign RB James Cook" {
+		t.Errorf("DisplayHeadline = %q; want %q", g.DisplayHeadline, "Chiefs Sign RB James Cook")
+	}
+}
+
+// TestNewStoryFromGroup_DisplayTitle (#201): NewStoryFromGroup sets
+// Story.DisplayTitle from the group's display headline, with the normalized
+// Story.Title/Headline unchanged.
+func TestNewStoryFromGroup_DisplayTitle(t *testing.T) {
+	fe := FeedEntry{
+		Title:       "Chiefs Sign RB James Cook",
+		Source:      "official-min",
+		PublishedAt: time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC),
+		URL:         "https://example.com/chiefs-cook",
+	}
+	a := NewArticle(fe, "a1", time.Now().UTC().Format(time.RFC3339))
+	g := NewStoryGroup(a)
+	s := NewStoryFromGroup(g)
+	if s.Title != "chiefs sign rb james cook" {
+		t.Errorf("Story.Title = %q; want normalized", s.Title)
+	}
+	if s.Headline != "chiefs sign rb james cook" {
+		t.Errorf("Story.Headline = %q; want normalized", s.Headline)
+	}
+	if s.DisplayTitle != "Chiefs Sign RB James Cook" {
+		t.Errorf("Story.DisplayTitle = %q; want %q", s.DisplayTitle, "Chiefs Sign RB James Cook")
+	}
+}
+
+// TestComputeGroupID_InvariantUnderDisplayTitle (#201, AC-2): display casing
+// must not leak into the group ID. Two groups built from the same normalized
+// title (different casing / display headline) must produce the same group ID.
+func TestComputeGroupID_InvariantUnderDisplayTitle(t *testing.T) {
+	a1 := Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs Sign RB James Cook",
+		PublishedAt:  "2026-11-17T12:00:00Z",
+	}
+	a2 := Article{
+		ID:           "a1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "chiefs sign rb james cook",
+		PublishedAt:  "2026-11-17T12:00:00Z",
+	}
+	id1 := computeGroupID([]Article{a1})
+	id2 := computeGroupID([]Article{a2})
+	if id1 != id2 {
+		t.Errorf("computeGroupID changed with display casing: %q != %q", id1, id2)
+	}
+}
+
+// TestClusterer_DisplayTitleDoesNotAffectClustering (#201, AC-2): clustering
+// and Jaccard tokenization operate on the normalized Title, so display casing
+// must not change clustering decisions or group IDs.
+func TestClusterer_DisplayTitleDoesNotAffectClustering(t *testing.T) {
+	c := NewClusterer()
+
+	fe1 := FeedEntry{
+		Title:       "Chiefs Sign RB James Cook",
+		Source:      "espn",
+		PublishedAt: time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC),
+		Summary:     "ESPN report",
+		URL:         "https://espn.com/article?id=1",
+		Entities:    []string{"chiefs"},
+	}
+	fe2 := FeedEntry{
+		Title:       "chiefs sign rb james cook", // all-lowercase variant
+		Source:      "cbs-sports",
+		PublishedAt: time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC),
+		Summary:     "CBS Sports report",
+		URL:         "https://cbssports.com/article?id=1",
+		Entities:    []string{"chiefs"},
+	}
+
+	mixed := []Article{
+		NewArticle(fe1, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+	groupsMixed := c.Cluster(mixed)
+
+	// Same feed entries but all-lowercase titles (no display casing).
+	fe1l := fe1
+	fe1l.Title = "chiefs sign rb james cook"
+	fe2l := fe2
+	fe2l.Title = "chiefs sign rb james cook"
+	lower := []Article{
+		NewArticle(fe1l, "a1", time.Now().UTC().Format(time.RFC3339)),
+		NewArticle(fe2l, "a2", time.Now().UTC().Format(time.RFC3339)),
+	}
+	groupsLower := c.Cluster(lower)
+
+	if len(groupsMixed) != len(groupsLower) {
+		t.Fatalf("group count differs: mixed=%d lower=%d", len(groupsMixed), len(groupsLower))
+	}
+	for i := range groupsMixed {
+		if groupsMixed[i].ID != groupsLower[i].ID {
+			t.Errorf("group %d ID differs: mixed=%q lower=%q", i, groupsMixed[i].ID, groupsLower[i].ID)
+		}
+		if groupsMixed[i].Headline != groupsLower[i].Headline {
+			t.Errorf("group %d Headline differs: mixed=%q lower=%q", i, groupsMixed[i].Headline, groupsLower[i].Headline)
+		}
+	}
+	// The mixed-case group must carry a display headline with original casing.
+	if len(groupsMixed) == 1 {
+		if groupsMixed[0].DisplayHeadline == "" {
+			t.Errorf("mixed group DisplayHeadline is empty; want original casing")
+		}
+	}
+}
+
+// TestTokenizeTitle_LowercasesInternally (#201, AC-2): TokenizeTitle lowercases
+// internally, so mixed-case vs lowercase inputs produce identical tokens.
+func TestTokenizeTitle_LowercasesInternally(t *testing.T) {
+	mixed := TokenizeTitle("Chiefs Sign RB James Cook")
+	lower := TokenizeTitle("chiefs sign rb james cook")
+	if len(mixed) != len(lower) {
+		t.Fatalf("token count differs: mixed=%d lower=%d", len(mixed), len(lower))
+	}
+	for i := range mixed {
+		if mixed[i] != lower[i] {
+			t.Errorf("token %d differs: mixed=%q lower=%q", i, mixed[i], lower[i])
+		}
+	}
+}

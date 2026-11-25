@@ -403,3 +403,88 @@ func TestRunSnapshot_EmptySummaryRowStored(t *testing.T) {
 		}
 	}
 }
+
+// TestRunSnapshot_DisplayTitleEndToEnd (#201, AC-1): a story upserted with a
+// display title (original casing) must flow through RunSnapshot into the
+// snapshot story title and the latest article title, while the identity remains
+// case-stable.
+func TestRunSnapshot_DisplayTitleEndToEnd(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+	teamReg := domain.NewTeamRegistry()
+	clustering := domain.NewClusterer()
+	scorer := domain.NewScorer().WithTime(time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC))
+
+	// A story whose normalized Title is lowercase and whose DisplayTitle keeps
+	// the original feed casing.
+	story := domain.Story{
+		ID:           "display-e2e-1",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs sign RB James Cook",
+		Source:       "official-min",
+		PublishedAt:  time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC),
+		Summary:      "Chiefs sign RB James Cook.",
+		URL:          "https://example.com/chiefs-cook",
+	}
+	if _, err := repo.Upsert(story); err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	app := New(
+		WithRepository(repo),
+		WithTeamRegistry(teamReg),
+		WithClusterer(clustering),
+		WithScorer(scorer),
+	)
+
+	now := time.Date(2026, 11, 17, 13, 0, 0, 0, time.UTC)
+	result := app.RunSnapshot(context.Background(), now)
+
+	if len(result.Errors) > 0 {
+		t.Fatalf("RunSnapshot failed: %v", result.Errors)
+	}
+	if err := result.Snapshot.Validate(); err != nil {
+		t.Fatalf("snapshot must validate: %v", err)
+	}
+
+	// Find the story in the snapshot and verify the display casing.
+	found := false
+	for _, s := range result.Snapshot.Stories {
+		if s.Title == "Chiefs sign RB James Cook" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("snapshot story title missing display casing; got stories: %v", titlesOfStories(result.Snapshot.Stories))
+	}
+
+	// The latest article must also carry the display casing.
+	articleFound := false
+	for _, a := range result.Snapshot.Latest {
+		if a.Title == "Chiefs sign RB James Cook" {
+			articleFound = true
+			break
+		}
+	}
+	if !articleFound {
+		t.Errorf("snapshot latest article title missing display casing; got articles: %v", titlesOfArticles(result.Snapshot.Latest))
+	}
+}
+
+// titlesOfStories is a test helper extracting story titles.
+func titlesOfStories(stories []domain.SnapshotStory) []string {
+	out := make([]string, 0, len(stories))
+	for _, s := range stories {
+		out = append(out, s.Title)
+	}
+	return out
+}
+
+// titlesOfArticles is a test helper extracting article titles.
+func titlesOfArticles(articles []domain.SnapshotArticle) []string {
+	out := make([]string, 0, len(articles))
+	for _, a := range articles {
+		out = append(out, a.Title)
+	}
+	return out
+}
