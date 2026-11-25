@@ -68,6 +68,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+      # gh pr create/merge in the site-data step (GITHUB_TOKEN as GH_TOKEN)
+      pull-requests: write
     environment:
       name: github-pages
     outputs:
