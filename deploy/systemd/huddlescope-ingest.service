@@ -1,0 +1,41 @@
+[Unit]
+Description=HuddleScope RSS ingest (one-shot, Turso-backed)
+Documentation=https://github.com/HuddleScope/huddlescope.github.io/blob/main/docs/systemd-deployment.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=huddlescope
+Group=huddlescope
+WorkingDirectory=/var/lib/huddlescope
+EnvironmentFile=/etc/huddlescope/huddlescope.env
+ExecStart=/usr/local/bin/huddlescope ingest run --mode primary
+# Kill a hung run before the next 30-min tick. systemd will not start a
+# still-active oneshot, so runs cannot overlap; the Turso lease (#160)
+# additionally guards against a second host.
+TimeoutStartSec=1500
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=huddlescope-ingest
+# Moderate hardening (non-root; binary needs no privileges).
+# MemoryDenyWriteExecute is deliberately omitted: the Go runtime's W^X
+# mprotect pattern can break under it on some kernels.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target
