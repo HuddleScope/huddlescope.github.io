@@ -17,8 +17,10 @@
 # stale (>75 min). A `should-run` decision step (fail-closed on DB error)
 # gates the ingest step; export and site-data re-projection always run so the
 # committed web/data files stay coherent with Turso even when ingest is
-# skipped. The site-data commit+push is a single step gated on export
-# success, with [skip ci] to avoid recursive CI.
+# skipped. The site-data commit is a single step gated on export success that
+# commits to a short-lived branch, opens a PR, waits for the required Build
+# check, and squash-merges (the "Require CI before merging to main" ruleset
+# rejects direct pushes to main).
 
 name: Refresh news
 
@@ -180,9 +182,15 @@ jobs:
           echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
 
       # Issue #163 / HS-PORT-07 (AC-7): exactly one commit+push step, gated on
-      # export success, limited to the three site-data files, with [skip ci]
-      # to avoid recursive CI. contents:write is granted at job level on
-      # `build` (step-level permissions are not supported by GitHub Actions).
+      # export success, limited to the three site-data files. contents:write is
+      # granted at job level on `build` (step-level permissions are not
+      # supported by GitHub Actions).
+      #
+      # The ruleset "Require CI before merging to main" requires the `Build`
+      # status check on every commit to main, which a direct push cannot
+      # satisfy (CI is triggered by the push itself). So the step commits to a
+      # short-lived branch, opens a PR, waits for the Build check, and
+      # squash-merges. No [skip ci]: the check must run.
       - name: Commit and push site-data files
         id: commit-and-push-site-data
         if: steps.export.conclusion == 'success'
@@ -195,13 +203,35 @@ jobs:
           if [ "${{ steps.publish-decision.outputs.deploy }}" = "true" ]; then
             git add web/data/homepage.json
           fi
-          if [ -n "$(git status --porcelain web/data/)" ]; then
-            git commit -m "Update site-data (heartbeat, feeds, homepage) [skip ci] (Closes #108)"
-            git push
-            echo "Site-data committed and pushed"
-          else
+          if [ -z "$(git status --porcelain web/data/)" ]; then
             echo "Site-data unchanged, skipping commit"
+            exit 0
           fi
+          # Commit to a short-lived branch: direct pushes to main are rejected
+          # by the "Require CI before merging to main" ruleset (GH013).
+          BRANCH="ci/site-data-$(git rev-parse --short HEAD)-$$"
+          git checkout -b "$BRANCH"
+          git commit -m "Update site-data (heartbeat, feeds, homepage) (Closes #108)"
+          git push origin "$BRANCH"
+          # Open a PR and wait for the required Build check to pass (~7 min).
+          PR_URL=$(gh pr create \
+            --title "Update site-data (heartbeat, feeds, homepage)" \
+            --body "Automated site-data refresh by the Refresh news workflow (Closes #108)." \
+            --json url --jq .url)
+          PR_NUM="${PR_URL##*/}"
+          echo "Opened PR $PR_NUM; waiting for the required Build check..."
+          for _ in $(seq 1 60); do
+            STATE=$(gh pr view "$PR_NUM" --json statusCheckRollup --jq '.statusCheckRollup.state')
+            case "$STATE" in
+              SUCCESS|NEUTRAL|SKIPPED|STALE) break ;;
+              FAILURE|CANCELLED|TIMED_OUT)
+                echo "::error::PR $PR_NUM checks did not pass (state=$STATE)"
+                exit 1 ;;
+            esac
+            sleep 30
+          done
+          gh pr merge "$PR_NUM" --squash --delete-branch
+          echo "Site-data committed and merged to main via PR $PR_NUM"
 
       # Site verification first (soft): site-test overlay(s) fixture data and
       # rebuilds web/public/, so the real-data `make site` build below must
