@@ -204,6 +204,17 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 		return result
 	}
 
+	// issue #165 / AC-1: resolve the effective clock once. A doctored clock in
+	// production (HSC_FAKE_NOW set) fails closed here — never silently used.
+	// When HSC_FAKE_NOW is unset this is just r.now() (behavior unchanged).
+	effNow, eerr := cfg.EffectiveNow(r.now())
+	if eerr != nil {
+		result.ExitCode = 1
+		result.Error = fmt.Errorf("resolve effective clock: %w", eerr)
+		return result
+	}
+	nowFn := func() time.Time { return effNow }
+
 	// Build publisher
 	publisher := r.newPublisher()
 
@@ -331,11 +342,11 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 			return
 		}
 		runID := domain.NewRunID()
-		fin := r.now().UTC()
+		fin := nowFn().UTC()
 		skip := domain.IngestRun{
 			RunID:      runID.String(),
 			Origin:     cfg.RunnerOrigin,
-			StartedAt:  r.now().UTC(),
+			StartedAt:  nowFn().UTC(),
 			FinishedAt: &fin,
 			Status:     status,
 		}
@@ -395,7 +406,7 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 			result.Error = fmt.Errorf("failed to read last successful ingest: %w", serr)
 			return result
 		}
-		decision := domain.DecideShouldRun(lastSuccess, r.now(), staleAfter)
+		decision := domain.DecideShouldRun(lastSuccess, nowFn(), staleAfter)
 		if !decision.ShouldRun {
 			_, _ = fmt.Fprintf(r.out, "Ingest skipped (backup): last successful ingest is fresh (age %s <= threshold %s)\n", decision.Age, staleAfter)
 			result.ExitCode = 0
@@ -447,7 +458,7 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 				result.Error = fmt.Errorf("failed to re-check freshness in lock: %w", serr)
 				return result // deferred releaseLease runs
 			}
-			decision := domain.DecideShouldRun(lastSuccess, r.now(), staleAfter)
+			decision := domain.DecideShouldRun(lastSuccess, nowFn(), staleAfter)
 			if !decision.ShouldRun {
 				registerSkip(domain.IngestRunSkippedFresh)
 				_, _ = fmt.Fprintf(r.out, "Ingest skipped (fresh in lock): another host already refreshed (age %s <= threshold %s); releasing lease\n", decision.Age, staleAfter)
@@ -468,7 +479,7 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 		startedRun = domain.IngestRun{
 			RunID:     runID.String(),
 			Origin:    cfg.RunnerOrigin,
-			StartedAt: r.now().UTC(),
+			StartedAt: nowFn().UTC(),
 			Status:    domain.IngestRunRunning,
 		}
 		if cerr := runsRepo.Create(context.Background(), startedRun); cerr != nil {
@@ -485,7 +496,7 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	app := application.New(appOpts...)
 
 	// Build timestamp for pipeline
-	now := r.now()
+	now := nowFn()
 
 	// Run pipeline under a cancellable context.
 	runCtx, cancel := context.WithCancel(ctx)
@@ -999,6 +1010,22 @@ type CheckHeartbeatResult struct {
 func (r *Runner) CheckHeartbeat(ctx context.Context, heartbeatFile string, staleAfter time.Duration) *CheckHeartbeatResult {
 	result := &CheckHeartbeatResult{}
 
+	// issue #165 / AC-1: resolve the effective clock so HSC_FAKE_NOW pins the
+	// staleness decision in dev and fails closed in production. The config load
+	// is best-effort: if it fails we fall back to the injected r.now() (the
+	// operator's own config check will surface the real error). A doctored clock
+	// with a loadable config still fails closed via EffectiveNow.
+	nowFn := func() time.Time { return r.now() }
+	if cfg, cerr := r.loadConfig("", config.Overrides{}); cerr == nil {
+		if eff, eerr := cfg.EffectiveNow(r.now()); eerr == nil {
+			nowFn = func() time.Time { return eff }
+		} else {
+			result.ExitCode = 1
+			result.Error = fmt.Errorf("resolve effective clock: %w", eerr)
+			return result
+		}
+	}
+
 	hb, ok, err := r.loadHeartbeat(heartbeatFile)
 	if err != nil {
 		result.ExitCode = 1
@@ -1044,7 +1071,7 @@ func (r *Runner) CheckHeartbeat(ctx context.Context, heartbeatFile string, stale
 	}
 
 	// Check staleness
-	now := r.now()
+	now := nowFn()
 	isStale := hb.IsStale(now, staleAfter)
 
 	_, _ = fmt.Fprintf(r.out, "  Stale threshold: %v\n", staleAfter)

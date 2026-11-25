@@ -153,5 +153,13 @@ site-watch: ## Run Hugo in watch mode for local development
 release-gate: ## Run the end-to-end release gate script
 	@bash scripts/release-gate.sh
 
+# e2e runs the offline end-to-end matrix (issue #165 / HS-PORT-09 / AC-1, AC-2):
+# the binary-level suite + the failover suite (8 scenarios) against the real
+# sqlite-file backend. Gated behind the `e2e` build tag so it does NOT run under
+# `make test` / `go test ./...`. Purely offline: the fixture server binds
+# 127.0.0.1, DBs live in temp dirs, no TURSO_* / GITHUB_* env.
+e2e: ## Run the offline e2e matrix (binary + failover suites; make test does not run this)
+	@bash scripts/e2e-matrix.sh
+
 # Phony targets
-.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch release-gate retention cross-build docker-build
+.PHONY: help fmt lint test coverage check-coverage security build check clean site site-check-hugo site-test site-seed site-watch release-gate e2e retention cross-build docker-build

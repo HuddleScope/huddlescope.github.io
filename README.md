@@ -108,6 +108,7 @@ npm test
 - `make build` — Build binaries to dist/ (stamped, static, -trimpath)
 - `make cross-build` — Build the release matrix (linux amd64/arm64/armv7l + darwin/arm64)
 - `make docker-build` — Build the huddlescope runtime image locally
+- `make e2e` — Run the offline end-to-end matrix (binary + failover suites; `make test` does NOT run this)
 - `make clean` — Remove build artifacts
 - `make check` — Run fmt, lint, test, coverage, security
 
@@ -134,6 +135,27 @@ npm test
 ```sh
 ./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m
 ```
+
+### Check freshness (cron-ready)
+```sh
+./dist/huddlescope ingest should-run --stale-after 75m --output json
+# -> {"should_run": true|false, "reason": "never_succeeded"|"stale"|"fresh", ...}
+```
+
+### Run the offline e2e matrix
+```sh
+make e2e   # builds the binary + runs the binary suite and the 8 failover
+           # scenarios against the real sqlite-file backend (build tag `e2e`).
+           # Offline: 127.0.0.1 fixture server, temp-dir DBs, no web/data writes.
+```
+
+### Migrating from the legacy cron scripts / recovery
+
+Issue #165 (HS-PORT-09) consolidates the legacy cron pipeline into the unified
+CLI. The full **migration guide** (legacy-step → CLI-command mapping) and the
+**controlled cut + rollback procedure** (with an evidence template) live in
+[`docs/ops-runbook.md`](docs/ops-runbook.md) — see the “Migrating from the
+legacy cron scripts” and “Recovery: controlled cut and rollback” sections.
 
 ## Releases
 

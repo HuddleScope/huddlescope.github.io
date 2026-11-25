@@ -1501,3 +1501,136 @@ func validBaseConfig() Config {
 		StoragePath:         "data/story.db",
 	}
 }
+
+// --- issue #165 / HS-PORT-09: HSC_FAKE_NOW test-only clock hook ---
+
+// TestEffectiveNowHonorsDevFakeNow verifies that a valid HSC_FAKE_NOW is
+// honored in dev, returning the fixed injected time.
+func TestEffectiveNowHonorsDevFakeNow(t *testing.T) {
+	real := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := validBaseConfig()
+	cfg.Env = "dev"
+	cfg.FakeNow = "2024-07-31T14:00:00Z"
+	got, err := cfg.EffectiveNow(real)
+	if err != nil {
+		t.Fatalf("EffectiveNow() error = %v, want nil", err)
+	}
+	want := time.Date(2024, 7, 31, 14, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("EffectiveNow() = %v, want %v", got, want)
+	}
+}
+
+// TestEffectiveNowHonorsFakeNowWhenEnvUnset verifies that an empty Env (unset)
+// is treated like dev: the injected clock is honored.
+func TestEffectiveNowHonorsFakeNowWhenEnvUnset(t *testing.T) {
+	real := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := validBaseConfig()
+	cfg.Env = ""
+	cfg.FakeNow = "2024-07-31T14:00:00Z"
+	got, err := cfg.EffectiveNow(real)
+	if err != nil {
+		t.Fatalf("EffectiveNow() error = %v, want nil", err)
+	}
+	if got.Year() != 2024 {
+		t.Errorf("EffectiveNow().Year = %d, want 2024 (injected clock honored when env unset)", got.Year())
+	}
+}
+
+// TestEffectiveNowProductionRejectsFakeNow verifies that a doctored clock in
+// production fails closed (non-zero), never silently used.
+func TestEffectiveNowProductionRejectsFakeNow(t *testing.T) {
+	real := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := validBaseConfig()
+	cfg.Env = "production"
+	cfg.FakeNow = "2024-07-31T14:00:00Z"
+	_, err := cfg.EffectiveNow(real)
+	if err == nil {
+		t.Fatal("EffectiveNow() in production with HSC_FAKE_NOW set = nil, want error (fail closed)")
+	}
+	if !strings.Contains(err.Error(), "test-only") {
+		t.Errorf("error %q should explain the override is test-only", err)
+	}
+}
+
+// TestEffectiveNowProductionWithoutFakeNowUsesRealClock verifies that production
+// with no HSC_FAKE_NOW set returns the real clock unchanged.
+func TestEffectiveNowProductionWithoutFakeNowUsesRealClock(t *testing.T) {
+	real := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := validBaseConfig()
+	cfg.Env = "production"
+	cfg.FakeNow = ""
+	got, err := cfg.EffectiveNow(real)
+	if err != nil {
+		t.Fatalf("EffectiveNow() error = %v, want nil", err)
+	}
+	if !got.Equal(real) {
+		t.Errorf("EffectiveNow() = %v, want real clock %v", got, real)
+	}
+}
+
+// TestEffectiveNowInvalidFakeNowRejected verifies that a syntactically invalid
+// HSC_FAKE_NOW is always an error (dev included) — a typo'd clock must surface
+// loudly, never be silently ignored.
+func TestEffectiveNowInvalidFakeNowRejected(t *testing.T) {
+	real := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, env := range []string{"dev", "", "production"} {
+		cfg := validBaseConfig()
+		cfg.Env = env
+		cfg.FakeNow = "not-a-timestamp"
+		if _, err := cfg.EffectiveNow(real); err == nil {
+			t.Errorf("EffectiveNow(env=%q, bad HSC_FAKE_NOW) = nil, want error", env)
+		}
+	}
+}
+
+// TestLoadFromEnvFakeNow verifies HSC_FAKE_NOW is parsed from the environment.
+func TestLoadFromEnvFakeNow(t *testing.T) {
+	t.Setenv("HSC_FAKE_NOW", "2024-07-31T14:00:00Z")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.FakeNow != "2024-07-31T14:00:00Z" {
+		t.Errorf("FakeNow = %q, want %q", cfg.FakeNow, "2024-07-31T14:00:00Z")
+	}
+}
+
+// TestLoadEnvFileFakeNow verifies HSC_FAKE_NOW is parsed from a --config file.
+func TestLoadEnvFileFakeNow(t *testing.T) {
+	path := writeConfigFile(t, "HSC_FAKE_NOW=2024-07-31T14:00:00Z\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.FakeNow != "2024-07-31T14:00:00Z" {
+		t.Errorf("FakeNow = %q, want %q", cfg.FakeNow, "2024-07-31T14:00:00Z")
+	}
+}
+
+// TestRedactedKeepsFakeNow verifies HSC_FAKE_NOW is non-secret and appears in
+// the redacted/marshaled output as a flag marker (the operator can see the
+// clock was doctored, but no secret is exposed).
+func TestRedactedKeepsFakeNow(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.FakeNow = "2024-07-31T14:00:00Z"
+	cfg.TursoAuthToken = "super-secret"
+	r := cfg.Redacted()
+	if r.FakeNow != "2024-07-31T14:00:00Z" {
+		t.Errorf("Redacted().FakeNow = %q, want the clock preserved (non-secret)", r.FakeNow)
+	}
+	if r.TursoAuthToken != "***" {
+		t.Errorf("Redacted().TursoAuthToken = %q, want ***", r.TursoAuthToken)
+	}
+	// MarshalJSON must include the FakeNow flag marker.
+	b, err := cfg.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON() error = %v", err)
+	}
+	if !strings.Contains(string(b), "FakeNow") {
+		t.Errorf("MarshalJSON() = %s, want to contain FakeNow flag marker", string(b))
+	}
+	if !strings.Contains(string(b), "2024-07-31T14:00:00Z") {
+		t.Errorf("MarshalJSON() = %s, want to contain the injected clock value", string(b))
+	}
+}

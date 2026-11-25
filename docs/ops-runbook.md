@@ -115,6 +115,153 @@ The committed `web/data/homepage.json` and `web/data/feeds.json` are likewise
 only updated by manual commits; the live site is updated from run artifacts,
 not from the committed files.
 
+## Migrating from the legacy cron scripts (HS-PORT-09)
+
+HuddleScope used to run news ingestion as a series of shell/cron steps
+(`refresh-news.yml` dispatching ad-hoc scripts, per-feed curl fetches, a
+separate score/rank script, and a hand-rolled "is it fresh?" check). Issue #165
+(HS-PORT-09) consolidates all of that into the unified `huddlescope` CLI. The
+legacy steps map onto CLI commands as follows;
+
+| Legacy step (cron script)                        | Unified CLI command                              | Notes |
+| ------------------------------------------------ | ------------------------------------------------ | ----- |
+| Fetch all RSS feeds (per-feed `curl` + parse)    | `huddlescope ingest run --mode primary`          | The runner fetches every enabled source through the registry; a per-feed failure is non-fatal (the run is `partial`, not `failed`). |
+| "Is the data fresh yet?" ad-hoc check            | `huddlescope ingest should-run --output json`    | Prints `{should_run, reason, last_successful_ingest_at}`; the reason is `never_succeeded`, `stale`, or `fresh`. Exit 0 either way; non-zero only on a DB query error (fail closed). |
+| Record the run outcome / last success            | (automatic during `ingest run`) + `huddlescope ingest status` | Every run is recorded in the shared `ingest_runs` table; `ingest status` reads the last attempt/success from the shared source of truth. |
+| Score + rank stories                             | (inside `ingest run`)                            | Scoring/ranking is part of the pipeline, not a separate script. |
+| Export homepage.json + story pages               | `huddlescope export run`                         | Reads the stored snapshot and publishes `web/data/homepage.json` + story pages. `--dry-run` previews without committing. |
+| Write heartbeat.json                             | (automatic during `ingest run`)                  | `heartbeat.json` + `feeds.json` are published as site-data when `HSC_PUBLISH_SITE_DATA=true` (GitHub Actions sets this; a repo-less VPS leaves it unset). |
+| Heartbeat staleness gate (`heartbeat-check.yml`) | `huddlescope heartbeat check --file … --stale-after 90m` | Exit 1 if stale; a missing file is a clean exit 0 (first run). |
+| Distributed mutual exclusion (one ingester)      | (automatic during `ingest run`)                  | The runner holds a shared `ingest_lease` (fenced, server-side time). `--mode backup` re-checks freshness before AND after acquiring the lease (TOCTOU-safe). |
+| Validate config                                  | `huddlescope config check`                       | Validates and prints the resolved config (no network). |
+
+### Command reference
+
+```bash
+# Ingest (primary host, e.g. the Raspberry Pi):
+huddlescope ingest run --mode primary            # fetch + group + score + rank + commit
+huddlescope ingest run --mode backup             # re-check freshness; skip if fresh (no fetch)
+
+# Freshness decision (cron-ready; parse the JSON):
+huddlescope ingest should-run --stale-after 75m --output json
+
+# Run history (from the shared DB):
+huddlescope ingest status --output json
+
+# Export to Hugo (homepage.json + story pages):
+huddlescope export run                # or --dry-run to preview
+
+# Heartbeat staleness:
+huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m
+
+# Validate config (no network):
+huddlescope config check
+```
+
+**Configuration.** All settings come from environment variables (`HSC_*`), a
+`.env`-format file via `--config`, or CLI flags (precedence: flags > env >
+file > defaults). The storage backend is the single source of truth for run
+history and the lease: `HSC_STORAGE_BACKEND=turso` (shared, remote) or
+`sqlite-file` (a shared file for single-host/failover tests). In production the
+backend must be non-memory.
+
+**Offline test clock (dev only).** `HSC_FAKE_NOW=<RFC3339>` pins the freshness
+decisions deterministically in `dev` (never honored in `production` — setting
+it there fails closed). The e2e matrix uses it to test `should-run` freshness
+without waiting real time. It is a test-only override and must never appear in a
+production `.env`.
+
+## Recovery: controlled cut and rollback (HS-PORT-09)
+
+This is the procedure for switching the production host from the legacy cron
+pipeline to the unified CLI (the "cut"), and the rollback if the cut goes
+wrong. The cut is **controlled**: the legacy pipeline keeps running (read-only)
+until the CLI's first run is verified healthy, and rollback is a one-line cron
+change plus a heartbeat check.
+
+### Pre-cut checklist
+
+1. **Snapshot the legacy state.** Record the last successful legacy run and the
+   current committed `web/data/heartbeat.json`:
+   ```bash
+   cp web/data/heartbeat.json /tmp/heartbeat.before-cut.json
+   gh run list -R HuddleScope/huddlescope.github.io --workflow refresh-news.yml --limit 1 --json databaseId,url
+   ```
+2. **Verify the CLI against the same config.** Build and smoke the binary with
+   the production `.env` (no network side effects from `config check`):
+   ```bash
+   make build
+   ./dist/huddlescope config check     # must exit 0 against the production config
+   ```
+3. **Run the offline e2e matrix** to confirm the binary + failover paths are
+   green on this build:
+   ```bash
+   make e2e                            # binary suite + 8 failover scenarios, offline
+   ```
+4. **Confirm the storage backend is shared and non-memory** (`turso` in
+   production): `HSC_STORAGE_BACKEND` must be `turso` (or `sqlite-file` for a
+   single shared file), and `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` present.
+   `huddlescope config check` fails closed otherwise.
+5. **Stakeholder sign-off** (the "two-host cut" needs an operator on the
+   standby host): confirm who holds the production `.env` and the Turso tokens.
+
+### The cut (steps a–i)
+
+The cut is a sequence of controlled steps. Each step is independently
+verifiable; stop and roll back (below) if any step fails.
+
+| Step | Action | Verification |
+| ---- | ------ | ------------ |
+| **a** | On the primary host, **disable the legacy cron** (do not delete it yet — keep it for rollback): `sudo systemctl stop huddlescope-cron && sudo systemctl disable huddlescope-cron` (or comment out the crontab entries). | `systemctl is-active huddlescope-cron` reports `inactive`. |
+| **b** | Install the unified binary: `make build` (or copy `dist/huddlescope` from a release). | `./dist/huddlescope version` prints the stamped version + revision. |
+| **c** | Point the host's config at the shared storage backend: set `HSC_STORAGE_BACKEND=turso`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `HSC_ENV=production`, `HSC_RUNNER_ORIGIN=<raspberry\|vps>`. | `./dist/huddlescope config check` exits 0 and shows `turso`. |
+| **d** | Do a **dry-run freshness read** to confirm the CLI sees the shared run history: `./dist/huddlescope ingest status --output json`. | The `state` is `healthy`/`degraded`/`unknown` (not a DB error). |
+| **e** | Run the **first CLI ingest**: `./dist/huddlescope ingest run --mode primary`. | Exit 0; `Homepage committed successfully`; a new `ingest_runs` row appears. |
+| **f** | Verify the **heartbeat + site-data** were published: `cat web/data/heartbeat.json` (GitHub Actions) or the run log. | `status` is `ok` (or `partial` with a known failing feed); `published_at` is fresh. |
+| **g** | Run the **heartbeat gate**: `./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m`. | Exit 0 (not stale). |
+| **h** | (If two hosts) On the **standby host**, run `./dist/huddlescope ingest run --mode backup` to confirm it correctly **skips** when the primary is fresh: it must print "Ingest skipped" and exit 0 without fetching. | Exit 0; `ingest status` shows a `skipped_fresh` row from the standby origin. |
+| **i** | **Enable the new cron** for the CLI: schedule `./dist/huddlescope ingest run --mode primary` (primary host) and `--mode backup` (standby) at the same cadence the legacy cron used. | `systemctl is-active huddlescope-unified` (or the new crontab entry) reports `active`; a `should-run` check confirms the cadence. |
+
+### Rollback
+
+Rollback is the inverse of the cut and is safe at any point before the legacy
+cron is deleted:
+
+1. **Disable the new CLI cron** (stop the unified service / remove the crontab
+   entry).
+2. **Re-enable the legacy cron** (the one disabled in step a): `sudo systemctl
+   enable huddlescope-cron && sudo systemctl start huddlescope-cron`.
+3. **Verify the legacy pipeline resumed**: dispatch a legacy refresh and confirm
+   the committed `web/data/heartbeat.json` updates and the heartbeat gate passes:
+   `./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m`.
+4. **Compare against the pre-cut snapshot** (`/tmp/heartbeat.before-cut.json`) to
+   confirm the rollback restored the expected state.
+5. Only after the rollback is verified **and** the root cause of the cut failure
+   is understood, re-attempt the cut (or keep the legacy pipeline indefinitely —
+   the CLI is additive; nothing is lost by rolling back).
+
+**What is NOT lost on rollback.** The unified CLI writes to the *same* shared
+storage (Turso / `ingest_runs` / `ingest_lease`) the legacy pipeline reads, and
+it never mutates the committed site files outside the normal publish path. A
+rollback therefore reverts to the legacy pipeline's behavior without data loss;
+the only divergence is that the CLI's run-history rows remain in the shared DB
+(visible via `ingest status`) — harmless.
+
+### Evidence template (fill in after each cut attempt)
+
+```
+Cut date (UTC): 2026-11-25T15:00:00Z
+Operator: <name>
+Build: huddlescope version <v> (commit <sha>)
+Primary host: <raspberry|vps>  Standby host: <raspberry|vps>
+Step a–i results: PASS / FAIL (list any FAIL)
+First CLI ingest run_id: <run-id>   status: ok|partial|failed
+Heartbeat gate: exit 0 (not stale) / exit 1 (stale)
+Standby backup skip: skipped_fresh confirmed / not confirmed
+Outcome: CUT COMPLETE / ROLLED BACK
+Rollback reason (if any): <root cause>
+```
+
 ## Deciding staleness
 
 A heartbeat is stale when `published_at` is missing, unparseable, or older than

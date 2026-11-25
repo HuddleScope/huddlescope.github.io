@@ -90,6 +90,9 @@ func (r *MemoryRepository) List() ([]domain.Story, error) {
 	for _, s := range r.stories {
 		result = append(result, s)
 	}
+	// Map iteration order is randomized; sort by ID so callers always see a
+	// deterministic order (downstream snapshot/cluster tie-breaks depend on it).
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
 }
 

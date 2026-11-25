@@ -73,7 +73,12 @@ func runIngestStatus(cmd *cobra.Command, d *Deps, output string) error {
 		return fmt.Errorf("query last success: %w", serr)
 	}
 
-	now := d.Now()
+	// issue #165 / AC-1: use the effective clock (HSC_FAKE_NOW honored in dev,
+	// failing closed in production) rather than the raw injected clock.
+	now, eerr := cfg.EffectiveNow(d.Now())
+	if eerr != nil {
+		return fmt.Errorf("resolve effective clock: %w", eerr)
+	}
 	state := "unknown"
 	var age time.Duration
 	if lastSuccess != nil && lastSuccess.FinishedAt != nil {
@@ -161,18 +166,25 @@ type shouldRunJSON struct {
 // of the true/false decision on a correct query; non-zero (no verdict) on DB
 // errors so callers fail closed.
 func runIngestShouldRun(cmd *cobra.Command, d *Deps, staleAfter time.Duration, output string) error {
-	repo, _, err := openIngestRuns(cmd, d)
+	repo, cfg, err := openIngestRuns(cmd, d)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = repo.Close() }() //nolint:errcheck
+
+	// issue #165 / AC-1: use the effective clock (HSC_FAKE_NOW honored in dev,
+	// failing closed in production) for the freshness decision.
+	now, eerr := cfg.EffectiveNow(d.Now())
+	if eerr != nil {
+		return fmt.Errorf("resolve effective clock: %w", eerr)
+	}
 
 	lastSuccess, _, serr := repo.LastSuccess(cmd.Context())
 	if serr != nil {
 		return fmt.Errorf("query last success: %w", serr)
 	}
 
-	decision := domain.DecideShouldRun(lastSuccess, d.Now(), staleAfter)
+	decision := domain.DecideShouldRun(lastSuccess, now, staleAfter)
 
 	if output == "json" {
 		payload := shouldRunJSON{ShouldRun: decision.ShouldRun, Reason: decision.Reason}
