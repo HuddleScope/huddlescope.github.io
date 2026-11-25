@@ -243,13 +243,18 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	if _, hasCOE := commitPushStep["continue-on-error"]; hasCOE {
 		t.Error("commit-and-push-site-data step must NOT have continue-on-error")
 	}
-	// Step-level permissions: contents: write
-	perms, ok := commitPushStep["permissions"].(map[string]any)
+	// Job-level permissions on build: contents: write. GitHub Actions does
+	// not support step-level permissions (a workflow with them is rejected as
+	// "Invalid workflow file"), so the AC-7 write grant lives on the build job.
+	jobPerms, ok := buildJob["permissions"].(map[string]any)
 	if !ok {
-		t.Fatal("commit-and-push-site-data step must have step-level permissions")
+		t.Fatal("build job must have job-level permissions")
 	}
-	if contents, ok := perms["contents"].(string); !ok || contents != "write" {
-		t.Errorf("commit-and-push-site-data permissions.contents = %v, want \"write\"", perms["contents"])
+	if contents, ok := jobPerms["contents"].(string); !ok || contents != "write" {
+		t.Errorf("build job permissions.contents = %v, want \"write\"", jobPerms["contents"])
+	}
+	if _, hasStepPerms := commitPushStep["permissions"]; hasStepPerms {
+		t.Error("commit-and-push-site-data step must NOT have step-level permissions (unsupported by GitHub Actions)")
 	}
 	// Commit message must contain [skip ci]
 	cpsScript := stepRunScript(commitPushStep)
