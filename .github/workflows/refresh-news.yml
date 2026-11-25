@@ -73,6 +73,9 @@ jobs:
     outputs:
       deploy: ${{ steps.publish-decision.outputs.deploy }}
     env:
+      # gh (pr create/view/api/merge in the site-data step) requires GH_TOKEN
+      # inside GitHub Actions; GITHUB_TOKEN alone is not enough.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       HSC_ENV: production
       HSC_STORAGE_BACKEND: turso
       HSC_RUNNER_ORIGIN: github-backup
