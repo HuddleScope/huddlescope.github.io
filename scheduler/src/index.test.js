@@ -112,6 +112,35 @@ describe('dispatchWorkflow', () => {
     strictEqual(body.inputs?.publish, 'true');
   });
 
+  // Issue #163 / HS-PORT-07 (AC-6): the Cloudflare Worker dispatch body must
+  // NEVER contain a force_ingest key — force_ingest is a maintenance-only
+  // operator input, not something the automated scheduler activates.
+  it('should NOT include force_ingest in dispatch body', async () => {
+    let capturedBody = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options) => {
+      capturedBody = options?.body || '';
+      return {
+        status: 204,
+        statusText: 'No Content',
+        headers: {},
+        text: async () => ''
+      };
+    };
+
+    const { dispatchWorkflow } = await import('./index.js');
+    await dispatchWorkflow('fake-token', { sleep: async () => {} });
+
+    globalThis.fetch = originalFetch;
+
+    const body = JSON.parse(capturedBody);
+    strictEqual(body.inputs?.force_ingest, undefined,
+      'force_ingest must NOT be present in the worker dispatch body');
+    // The inputs object should only carry publish
+    strictEqual(Object.keys(body.inputs).sort().join(','), 'publish',
+      'worker dispatch inputs must contain only publish');
+  });
+
   it('should throw fatal error on 401 (unauthorized)', async () => {
     mockResponses = [{ status: 401, statusText: 'Unauthorized', body: '{"message":"Bad credentials"}' }];
 

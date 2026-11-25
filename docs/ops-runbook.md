@@ -199,7 +199,7 @@ curl -s https://huddlescope.github.io/sitemap.xml | grep -c '<loc>'
 | Turso storage | 900 MB | Turso Cloud console / `turso db info` |
 | Cloudflare Worker requests | 90k/day | Cloudflare dashboard |
 | GitHub Actions artifact storage | 400 MB of the 500 MB free allowance | GitHub billing dashboard |
-| Data freshness | Heartbeat > 90 minutes stale | `./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m` |
+| Data freshness | Ingest: Turso `ingest should-run --stale-after 90m`; Publication: HTTP fetch of deployed `data/heartbeat.json` `published_at` > 90 min | `heartbeat-check.yml` (Turso-backed + HTTP fetch, not checkout files) |
 
 **Response to warnings**:
 - Turso near limit: archive old data (HS-041, implemented in sqlite package) or review sources for trimming
@@ -444,13 +444,13 @@ account, token creation, `wrangler login`, verification).
 - Trigger: `workflow_dispatch` (manual or via Cloudflare Worker cron)
 - Parameters:
   - `publish` (boolean, default true): Deploy to Pages after successful build
+  - `run-retention` (boolean, default true): Run retention after build
+  - `force_ingest` (boolean, default false): Force backup ingest even if Turso is fresh (maintenance only; still respects the distributed lease)
 - Jobs:
-  - `build`: checkout → setup Go → build → ingest → export → commit heartbeat → publish decision → commit homepage (gated) → commit feed health → install Hugo → site verification → build site → demo-marker gate → upload artifacts → Pages upload (gated)
+  - `build`: checkout → setup Go → build → **Decide should-run** (Turso freshness) → **Backup ingest** (gated on should_run || force_ingest) → **Export** (always; re-publishes site-data from DB) → **Publish decision** (gated on export success) → **Commit+push site-data** (gated on export success; `[skip ci]`; `contents: write` at step level) → install Hugo → site verification → build site → demo-marker gate → retention → upload artifacts → Pages upload (gated)
   - `deploy`: configure Pages → upload artifact → deploy (only if `publish=true` **and** the publish decision is `true`)
-- Permissions: least privilege; deploy job requires `pages: write` and `id-token: write`
-- **Known gap:** the commit steps (heartbeat/homepage/feeds) create local
-  commits but the workflow has no `git push` step, so they never reach `main`.
-  See Known issues and the diagnosis table above.
+- Permissions: least privilege; default `contents: read`; the site-data push step gets `contents: write` at step level; deploy job requires `pages: write` and `id-token: write`
+- **Fixed (issue #163):** the single `commit-and-push-site-data` step stages `web/data/{heartbeat,feeds,homepage}.json`, commits with `[skip ci]`, and pushes. The commit is gated on `steps.export.conclusion == 'success'`.
 
 ### Publish decision step (HS-056)
 After export, the workflow compares the freshly exported story count with the
@@ -478,14 +478,64 @@ Heartbeat staleness is visually indicated in the `heartbeat-check` workflow run
 output (it fails the run when the committed heartbeat is missing,
 unparseable, or older than 90 minutes).
 
+## Backup ingest procedure (issue #163 / HS-PORT-07)
+
+The GitHub Actions backup ingest runs only when Turso is stale (>75 min). The
+`should-run` decision step queries Turso and gates the ingest step. When
+`force_ingest=true` is set, the staleness pre-check is skipped but the
+distributed lease is still enforced (a held lease produces `skipped_locked`).
+
+### Manual forced ingest (maintenance)
+
+1. Dispatch the workflow with `force_ingest=true`:
+   ```bash
+   gh workflow run refresh-news.yml -R HuddleScope/huddlescope.github.io \
+     -f publish=false -f force_ingest=true
+   ```
+2. Monitor the run: `gh run watch` or check the Actions log.
+3. The ingest step will run `ingest run --mode backup --stale-after 75m --force`.
+   If another host holds the lease, it will be skipped (`skipped_locked`) and
+   exit 0 — this is expected, not an error.
+4. The export step always runs and re-publishes site-data from the DB.
+
+### Verifying ingest freshness from Turso
+
+```bash
+# From a host with Turso credentials:
+HSC_STORAGE_BACKEND=turso \
+HSC_TURSO_DATABASE_URL=$TURSO_DATABASE_URL \
+HSC_TURSO_AUTH_TOKEN=$TURSO_AUTH_TOKEN \
+./dist/huddlescope ingest should-run --stale-after 75m --output json
+
+# Expected output:
+# {
+#   "should_run": false,
+#   "reason": "last successful ingest is fresh (age 12m0s <= threshold 1h15m0s)",
+#   "last_successful_ingest_at": "2026-01-15T11:48:00Z"
+# }
+```
+
+## Heartbeat health check (issue #163 / AC-9)
+
+The `heartbeat-check.yml` workflow is split into two independent checks:
+
+1. **Ingest freshness (Turso)** — `huddlescope ingest should-run --stale-after 90m --output json`.
+   Fail-closed on DB error. Answers "did any host successfully ingest recently?"
+2. **Publication freshness (deployed site)** — HTTP `curl` of
+   `https://huddlescope.github.io/data/heartbeat.json`, parse `published_at`,
+   compare to 90-minute threshold. Answers "is the live site fresh?"
+
+Neither check reads the checkout's `web/data/heartbeat.json` (a historical
+repo file) as a remote signal.
+
 ## Known issues
 
-- **Missing push step (verified 2026-11-24):** `refresh-news.yml` commits
-  `web/data/heartbeat.json`, `homepage.json`, and `feeds.json` locally but
-  never pushes them, so the committed data files are stale and the
-  `heartbeat-check` workflow fails on staleness while `refresh-news` stays
-  green. Follow-up issue required. Evidence:
-  https://github.com/HuddleScope/huddlescope.github.io/actions/runs/45410553677
+- **Fixed (issue #163):** The missing push step is now the single
+  `commit-and-push-site-data` step, gated on export success, with `[skip ci]`
+  and step-level `contents: write`.
+- **Fixed (issue #163):** The heartbeat check no longer reads checkout files;
+  it uses Turso-backed `ingest should-run` and an HTTP fetch of the deployed
+  site's `data/heartbeat.json`.
 - **Empty production export (verified 2026-11-24):** the export writes 0
   stories to `homepage.json` while Turso holds 3017 ranked stories older than
   the 24 h lookback; the live site shows the labelled empty state (correct
