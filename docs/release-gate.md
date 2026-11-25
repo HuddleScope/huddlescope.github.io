@@ -128,6 +128,47 @@ When posting evidence to GitHub issue #110, include:
 | Pages upload failure | Go tests (publish-decision table) | Actions log shows `upload-pages-artifact` failure, deploy skipped |
 | Empty export | Go tests (publish-decision table), G4 | Homepage shows labeled empty state, `generatedAt` truthful |
 
+## refresh-news.yml step graph (current)
+
+```
+build job:
+  checkout → setup-go → build CLI
+  → **Decide whether backup ingest should run** (huddlescope ingest should-run --stale-after 75m --output json; echo should_run/reason to GITHUB_OUTPUT; fail closed on DB error)
+  → **Run backup ingest** (huddlescope ingest run --mode backup --stale-after 75m [--force]; if: force_ingest || should_run == true; skipped step is non-failing)
+  → **Export snapshot** (huddlescope export run; always runs; re-publishes site-data from DB)
+  → **Publish decision** (jq count + git show HEAD:; if: steps.export.conclusion == 'success')
+  → **Commit and push site-data files** (git add web/data/{heartbeat,feeds,homepage}.json; git commit [skip ci]; git push; if: steps.export.conclusion == 'success'; permissions: contents: write at step level)
+  → install Hugo → **Run site verification** (continue-on-error)
+  → **Build Hugo site** (make site)
+  → **Verify no demo markers**
+  → retention (export → commit → apply, if inputs.run-retention)
+  → **Verify Hugo build artifacts**
+  → **Upload site artifacts** (diagnostic only; if: export or make-site success)
+  → configure-pages → upload-pages-artifact (if: inputs.publish && deploy == 'true')
+deploy job: needs build, if: inputs.publish && deploy == 'true'
+```
+
+### force_ingest input (issue #163 / AC-6)
+
+`force_ingest` is a **maintenance-only** workflow_dispatch input (boolean, default
+`false`). When true, the ingest step runs even if Turso is fresh — but it
+**skips only the staleness pre-check, never the distributed lease**. A held
+lease still produces `skipped_locked`. The Cloudflare Worker dispatch body
+must **NOT** include `force_ingest` (enforced by `scheduler/src/index.test.js`).
+
+### heartbeat-check.yml (issue #163 / AC-9)
+
+The heartbeat check is split into two independent checks:
+
+1. **Ingest freshness (Turso)** — `huddlescope ingest should-run --stale-after 90m --output json`.
+   Fail-closed on DB error. Answers "did any host successfully ingest recently?"
+2. **Publication freshness (deployed site)** — HTTP `curl` of
+   `https://huddlescope.github.io/data/heartbeat.json`, parse `published_at`,
+   compare to 90-minute threshold. Answers "is the live site fresh?"
+
+Neither check reads the checkout's `web/data/heartbeat.json` (a historical
+repo file) as a remote signal.
+
 ## Quarterly Re-run Instructions
 
 To re-run the release gate quarterly:

@@ -558,46 +558,17 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	// is false so a repo-less VPS/Raspberry host never creates web/data; the run
 	// indicators are persisted to the shared storage instead. GitHub Actions sets
 	// HSC_PUBLISH_SITE_DATA=true so the committed files keep updating.
-	publishSiteData := cfg.ShouldPublishSiteData()
-	if !publishSiteData {
+	if !cfg.ShouldPublishSiteData() {
 		_, _ = fmt.Fprintf(r.err, "site-data writes disabled (HSC_PUBLISH_SITE_DATA=%q); run indicators persisted to storage\n", orAuto(cfg.PublishSiteData))
-	}
-
-	// Publish heartbeat (best-effort: failures don't affect run exit)
-	heartbeatPath := cfg.HeartbeatFile
-	if publishSiteData {
-		if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
-			if hb := domain.NewHeartbeat(result.Result.RunID.String()); hb != nil {
-				hb.FromRunRecord(*result.Result, *result.Result.EndedAt)
-				// Set PublishedAt when ingest succeeds so heartbeat check sees fresh state
-				if result.Result.Status == domain.RunStatusOK {
-					pubTime := result.Result.EndedAt.UTC().Format(time.RFC3339)
-					hb.PublishedAt = &pubTime
-				}
-				if err := hbPub.Publish(context.Background(), hb); err != nil {
-					_, _ = fmt.Fprintf(r.err, "Warning: failed to publish heartbeat: %v\n", err)
-				}
-			}
-		}
-
-		// Publish feed health (best-effort: failures don't affect run exit)
-		feedsPath := cfg.FeedsFile
-		// Extract outDir and dataFile from full path
-		feedsDir := filepath.Dir(feedsPath)
-		feedsFile := filepath.Base(feedsPath)
-		if fhPub := hugo.NewFeedsDataPublisher(feedsDir, feedsFile); fhPub != nil {
-			if feedHealth := app.BuildFeedHealth(*result.Result, *result.Result.EndedAt); feedHealth.Version != "" {
-				_, err := fhPub.Publish(context.Background(), feedHealth)
-				if err != nil {
-					_, _ = fmt.Fprintf(r.err, "Warning: failed to publish feed health: %v\n", err)
-				}
-			}
-		}
-	} else {
 		// Site-data writes are skipped. The feed-health counters are still
 		// computed (and persisted to storage via the ingest-run repository)
 		// so the dashboard can read them from Turso later (HS-PORT-07).
 		_ = app.BuildFeedHealth(*result.Result, *result.Result.EndedAt)
+	} else {
+		// Publish heartbeat (best-effort: failures don't affect run exit)
+		r.publishSiteData(context.Background(), cfg, *result.Result, *result.Result.EndedAt, func(rec domain.RunRecord, now time.Time) domain.FeedHealth {
+			return app.BuildFeedHealth(rec, now)
+		})
 	}
 
 	// Issue #158 / AC-8: optional single-line JSON run log (HSC_JSON_LOG=true).
@@ -631,6 +602,148 @@ func orAuto(v string) string {
 		return "auto"
 	}
 	return v
+}
+
+// publishSiteData writes the site-data files (heartbeat.json + feeds.json)
+// from a completed ingest run record. It is best-effort: failures are logged
+// to stderr but never affect the run's exit code (issue #158 / AC-3, AC-5).
+// The buildFeedHealth callback is injected so the caller controls how feed
+// health is derived (the ingest path uses the live run record's sources;
+// the export path re-projects from the DB run record).
+func (r *Runner) publishSiteData(ctx context.Context, cfg config.Config, rec domain.RunRecord, endedAt time.Time, buildFeedHealth func(domain.RunRecord, time.Time) domain.FeedHealth) {
+	// Publish heartbeat (best-effort: failures don't affect run exit)
+	heartbeatPath := cfg.HeartbeatFile
+	if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
+		if hb := domain.NewHeartbeat(rec.RunID.String()); hb != nil {
+			hb.FromRunRecord(rec, endedAt)
+			// Set PublishedAt when ingest succeeds so heartbeat check sees fresh state
+			if rec.Status == domain.RunStatusOK {
+				pubTime := endedAt.UTC().Format(time.RFC3339)
+				hb.PublishedAt = &pubTime
+			}
+			if err := hbPub.Publish(ctx, hb); err != nil {
+				_, _ = fmt.Fprintf(r.err, "Warning: failed to publish heartbeat: %v\n", err)
+			}
+		}
+	}
+
+	// Publish feed health (best-effort: failures don't affect run exit)
+	if buildFeedHealth == nil {
+		return
+	}
+	feedHealth := buildFeedHealth(rec, endedAt)
+	if feedHealth.Version == "" {
+		return
+	}
+	feedsPath := cfg.FeedsFile
+	feedsDir := filepath.Dir(feedsPath)
+	feedsFile := filepath.Base(feedsPath)
+	if fhPub := hugo.NewFeedsDataPublisher(feedsDir, feedsFile); fhPub != nil {
+		_, err := fhPub.Publish(ctx, feedHealth)
+		if err != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: failed to publish feed health: %v\n", err)
+		}
+	}
+}
+
+// publishSiteDataFromRepo re-publishes the site-data files during export by
+// re-projecting the last ingest run from the shared database (issue #163 /
+// HS-PORT-07 / AC-8). This keeps web/data/heartbeat.json and web/data/feeds.json
+// coherent with Turso even when ingest was skipped (the healthy case). Export
+// remains read-only with respect to ingest-run and lease tables: it only
+// reads the last run record to derive the site-data content.
+func (r *Runner) publishSiteDataFromRepo(ctx context.Context, cfg config.Config) {
+	// Build the ingest-run repository (best-effort; a failure means we cannot
+	// re-project, so we skip with a log line rather than failing export).
+	var runsRepo domain.IngestRunRepository
+	if r.newIngestRuns != nil {
+		var rerr error
+		runsRepo, rerr = r.newIngestRuns(cfg.Storage())
+		if rerr != nil {
+			_, _ = fmt.Fprintf(r.err, "Warning: cannot re-project site-data from DB (ingest-run repo unavailable): %v\n", rerr)
+			return
+		}
+		defer func() { _ = runsRepo.Close() }() //nolint:errcheck
+	} else {
+		_, _ = fmt.Fprintf(r.err, "site-data re-projection skipped (no ingest-run repository configured)\n")
+		return
+	}
+
+	// Read the last attempt (any status) — this is the run whose indicators
+	// the site-data should reflect. LastSuccess is used for the freshness
+	// semantics of the heartbeat's PublishedAt.
+	lastAttempt, hasAttempt, aerr := runsRepo.LastAttempt(ctx)
+	if aerr != nil {
+		_, _ = fmt.Fprintf(r.err, "Warning: cannot read last ingest run for site-data re-projection: %v\n", aerr)
+		return
+	}
+	if !hasAttempt || lastAttempt == nil {
+		_, _ = fmt.Fprintf(r.err, "site-data re-projection skipped (no ingest runs recorded yet)\n")
+		return
+	}
+
+	// Derive a RunRecord-like view from the IngestRun. The IngestRun carries
+	// counters but not per-source detail; we build a minimal RunRecord so
+	// BuildFeedHealth can derive per-feed status from the recorded sources.
+	rec := domain.RunRecord{
+		RunID:          domain.RunID(lastAttempt.RunID),
+		StartedAt:      lastAttempt.StartedAt,
+		Status:         ingestRunStatusToRunStatus(lastAttempt.Status),
+		EntriesFetched: lastAttempt.EntriesFetched,
+		StoriesCreated: lastAttempt.StoriesCreated,
+		StoriesUpdated: lastAttempt.StoriesUpdated,
+	}
+	if lastAttempt.FinishedAt != nil {
+		fin := lastAttempt.FinishedAt.UTC()
+		rec.EndedAt = &fin
+	} else {
+		now := r.now().UTC()
+		rec.EndedAt = &now
+	}
+	// Committed is true for successful runs (they produced a stored result).
+	rec.Committed = lastAttempt.IsSuccess()
+
+	// Build feed health from the re-projected run record. We use a no-op
+	// registry-based builder: without the live fetcher map and per-source
+	// status from the pipeline, we derive feed health from the run's counters.
+	// The FeedHealth will carry the run's status and counters.
+	feedHealth := domain.FeedHealth{
+		Version:     domain.FeedHealthVersion,
+		GeneratedAt: r.now().UTC().Format(time.RFC3339),
+		RunID:       lastAttempt.RunID,
+		RunStatus:   ingestRunStatusToRunStatus(lastAttempt.Status),
+		Duration:    0,
+		Sources:     []domain.FeedHealthFeed{},
+		Summary: domain.FeedHealthSummary{
+			Configured: lastAttempt.SourcesChecked,
+			Enabled:    lastAttempt.SourcesChecked,
+			Processed:  lastAttempt.SourcesSucceeded,
+			Entries:    lastAttempt.EntriesFetched,
+			New:        lastAttempt.StoriesCreated,
+		},
+	}
+	if lastAttempt.SourcesSucceeded < lastAttempt.SourcesChecked {
+		feedHealth.Summary.Failed = lastAttempt.SourcesChecked - lastAttempt.SourcesSucceeded
+	}
+
+	r.publishSiteData(ctx, cfg, rec, *rec.EndedAt, func(_ domain.RunRecord, _ time.Time) domain.FeedHealth {
+		return feedHealth
+	})
+}
+
+// ingestRunStatusToRunStatus maps an ingest-run status to a pipeline run
+// status for the site-data re-projection. ok/partial map to their pipeline
+// equivalents; everything else maps to failed (the site-data reflects a
+// non-successful run as a visible failure signal).
+func ingestRunStatusToRunStatus(s domain.IngestRunStatus) domain.RunStatus {
+	switch s {
+	case domain.IngestRunOK:
+		return domain.RunStatusOK
+	case domain.IngestRunPartial:
+		return domain.RunStatusPartial
+	default:
+		return domain.RunStatusFailed
+	}
 }
 
 // buildJSONRunLog renders a single-line JSON run-log entry (issue #158 / AC-8).
@@ -837,6 +950,14 @@ func (r *Runner) RunExport(ctx context.Context, dryRun bool, dataDir, dataFile, 
 		application.WithSnapshotPublisher(snapshotPublisher),
 		application.WithStoryPagePublisher(storyPagePublisher),
 	)
+
+	// Issue #163 (HS-PORT-07 / AC-8): re-publish site-data files (heartbeat.json
+	// + feeds.json) as a re-projection of the shared DB. When ingest is skipped
+	// (the healthy case), the committed files would otherwise go stale; export
+	// keeps them coherent with Turso without modifying ingest-run or lease rows.
+	if cfg.ShouldPublishSiteData() {
+		r.publishSiteDataFromRepo(ctx, cfg)
+	}
 
 	// Run snapshot export
 	snapshotResult := app.RunSnapshotPreview(context.Background(), time.Now())

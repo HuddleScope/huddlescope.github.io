@@ -1,5 +1,12 @@
 # GitHub Actions workflow for heartbeat health checks — HS-021
-# Never blocks merges; only monitoring
+# Issue #163 / HS-PORT-07 (AC-9): split into two checks:
+#   1. Ingest freshness — Turso-backed `ingest should-run` (fail-closed on DB
+#      error), answering "did any host successfully ingest recently?"
+#   2. Publication freshness — HTTP fetch of the deployed site's
+#      data/heartbeat.json, answering "is the live site fresh?"
+# Never blocks merges; only monitoring. Never reads checkout files as a
+# remote signal (the checkout's web/data/heartbeat.json is a historical repo
+# file, not the deployed site).
 
 name: Heartbeat health
 
@@ -16,7 +23,12 @@ jobs:
   check:
     name: Heartbeat health
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      HSC_ENV: production
+      HSC_STORAGE_BACKEND: turso
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -29,10 +41,58 @@ jobs:
       - name: Build unified CLI
         run: make build-huddlescope
 
-      - name: Run heartbeat check
+      # AC-9: ingest freshness from Turso (fail-closed). `ingest should-run`
+      # exits 0 on a correct query regardless of the verdict; non-zero on a DB
+      # error, which we surface as a warning (this workflow is non-blocking).
+      - name: Check ingest freshness (Turso)
         run: |
-          ./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m || {
-            echo "::error::Heartbeat is stale or invalid"
+          set -uo pipefail
+          echo "Checking ingest freshness from Turso (should-run --stale-after 90m)..."
+          JSON=$(./dist/huddlescope ingest should-run --stale-after 90m --output json) || {
+            echo "::warning::Ingest freshness check failed (cannot reach Turso or invalid schema); failing closed — no verdict"
             exit 1
           }
-        continue-on-error: false
+          echo "$JSON"
+          SHOULD_RUN=$(echo "$JSON" | jq -r '.should_run')
+          REASON=$(echo "$JSON" | jq -r '.reason')
+          if [ "$SHOULD_RUN" = "true" ]; then
+            echo "::warning::Ingest is stale or never succeeded (reason: $REASON); backup ingest should run"
+          else
+            echo "Ingest is fresh (reason: $REASON)"
+          fi
+
+      # AC-9: publication freshness by HTTP-fetching the deployed site's
+      # data/heartbeat.json. Never reads the checkout's web/data/heartbeat.json
+      # (a historical repo file) as a remote signal.
+      - name: Check publication freshness (deployed site)
+        run: |
+          set -uo pipefail
+          BASE_URL="https://huddlescope.github.io"
+          HB_URL="${BASE_URL}/data/heartbeat.json"
+          echo "Fetching deployed heartbeat from ${HB_URL}..."
+          HTTP_CODE=$(curl -s -o /tmp/heartbeat.json -w '%{http_code}' "${HB_URL}" || echo "000")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Deployed heartbeat fetch failed (HTTP ${HTTP_CODE}); publication may be down or not yet deployed"
+            exit 1
+          fi
+          echo "Fetched heartbeat.json (HTTP ${HTTP_CODE})"
+          cat /tmp/heartbeat.json
+          # Parse published_at and check staleness (90-minute threshold)
+          PUBLISHED_AT=$(jq -r '.published_at // empty' /tmp/heartbeat.json)
+          if [ -z "$PUBLISHED_AT" ]; then
+            echo "::warning::Deployed heartbeat has no published_at; publication is not fresh"
+            exit 1
+          fi
+          NOW_EPOCH=$(date +%s)
+          PUB_EPOCH=$(date -d "$PUBLISHED_AT" +%s 2>/dev/null || echo "0")
+          if [ "$PUB_EPOCH" = "0" ]; then
+            echo "::warning::Cannot parse published_at ${PUBLISHED_AT}; publication freshness unknown"
+            exit 1
+          fi
+          AGE_SECONDS=$((NOW_EPOCH - PUB_EPOCH))
+          THRESHOLD_SECONDS=5400  # 90 minutes
+          if [ "$AGE_SECONDS" -gt "$THRESHOLD_SECONDS" ]; then
+            echo "::warning::Deployed heartbeat is stale (age ${AGE_SECONDS}s > threshold ${THRESHOLD_SECONDS}s)"
+            exit 1
+          fi
+          echo "Publication is fresh (age ${AGE_SECONDS}s <= threshold ${THRESHOLD_SECONDS}s)"

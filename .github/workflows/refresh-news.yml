@@ -12,6 +12,13 @@
 #     "No stories published yet" empty state (truthful generatedAt)
 # A failed ingest/export fails the build job, so the deploy job is skipped and
 # the last successfully deployed Pages content is preserved.
+#
+# HS-PORT-07 (issue #163): ingest is a BACKUP that runs only when Turso is
+# stale (>75 min). A `should-run` decision step (fail-closed on DB error)
+# gates the ingest step; export and site-data re-projection always run so the
+# committed web/data files stay coherent with Turso even when ingest is
+# skipped. The site-data commit+push is a single step gated on export
+# success, with [skip ci] to avoid recursive CI.
 
 name: Refresh news
 
@@ -29,6 +36,11 @@ on:
         required: true
         default: 'true'
         type: boolean
+      force_ingest:
+        description: 'Force backup ingest even if Turso is fresh (maintenance only; still respects the distributed lease)'
+        required: false
+        default: 'false'
+        type: boolean
 
 # Cancel in-progress runs of this workflow on new dispatches
 # Safe-state: build job is cancelled if a new dispatch starts; deploy only runs
@@ -39,7 +51,8 @@ concurrency:
   group: refresh-news-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege: default read access; only deploy job requires write
+# Least privilege: default read access; only deploy job requires write, and the
+# site-data push step is granted contents:write at step level (issue #163 / AC-7).
 permissions:
   contents: read
 
@@ -86,18 +99,45 @@ jobs:
       - name: Build unified CLI
         run: make build-huddlescope
 
-      - name: Run ingest pipeline
-        id: ingest
+      # Issue #163 / HS-PORT-07 (AC-1, AC-2, AC-5): freshness decision step.
+      # `ingest should-run` exits 0 on a correct query regardless of the
+      # true/false verdict; it exits non-zero (no verdict) on a DB error, which
+      # fails this step and the whole job (fail closed — never assume staleness
+      # when we cannot reach Turso). The JSON contract is secret-free.
+      - name: Decide whether backup ingest should run
+        id: decision
         run: |
-          echo "Running ingestion pipeline..."
-          # Issue #160 (HS-PORT-04): this Actions host runs as BACKUP. It first
-          # checks freshness (already fresh -> visible skip, exit 0, no RSS work),
-          # then acquires the distributed lease; if the lease is held it registers
-          # a skipped_locked run and exits 0. --stale-after 75m is the issue's
-          # stated backup contract.
-          ./dist/huddlescope ingest run --mode backup --stale-after 75m
-          echo "Ingestion completed"
+          set -euo pipefail
+          echo "Querying Turso for ingest freshness (should-run)..."
+          JSON=$(./dist/huddlescope ingest should-run --stale-after 75m --output json)
+          echo "$JSON"
+          SHOULD_RUN=$(echo "$JSON" | jq -r '.should_run')
+          REASON=$(echo "$JSON" | jq -r '.reason')
+          echo "Decision: should_run=$SHOULD_RUN reason=$REASON"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
 
+      # Issue #163 / HS-PORT-07 (AC-1, AC-2, AC-6): backup ingest runs only
+      # when the decision says should_run=true or the operator forced it.
+      # A skipped step is non-failing, so a false decision flows into export.
+      # --mode backup re-validates under the distributed lease; --stale-after
+      # 75m is the issue's stated backup contract. --force (when
+      # force_ingest=true) skips only the staleness pre-check, NEVER the lease.
+      - name: Run backup ingest (when stale or forced)
+        id: ingest
+        if: inputs.force_ingest == 'true' || steps.decision.outputs.should_run == 'true'
+        run: |
+          echo "Running backup ingestion pipeline..."
+          if [ "${{ inputs.force_ingest }}" = "true" ]; then
+            ./dist/huddlescope ingest run --mode backup --stale-after 75m --force
+          else
+            ./dist/huddlescope ingest run --mode backup --stale-after 75m
+          fi
+          echo "Ingestion step completed (or skipped under lease)"
+
+      # Export always runs (the healthy case: ingest skipped, export + Hugo
+      # proceed and may deploy). Export re-publishes site-data files as a
+      # re-projection of the shared DB (issue #163 / AC-8).
       - name: Export snapshot to Hugo data
         id: export
         run: |
@@ -105,23 +145,12 @@ jobs:
           ./dist/huddlescope export run
           echo "Export completed"
 
-      - name: Commit heartbeat
-        id: commit-hb
-        if: always()
-        run: |
-          # Always commit heartbeat (best-effort; failure logged but not blocking)
-          git add web/data/heartbeat.json
-          if [ -n "$(git status --porcelain web/data/heartbeat.json)" ]; then
-            git commit -m "Update heartbeat.json [skip ci] (Closes #21)"
-            echo "Heartbeat committed"
-          else
-            echo "Heartbeat unchanged, skipping commit"
-          fi
-        continue-on-error: true
-
+      # HS-056 publish decision: compare the freshly exported story count with
+      # the pre-export committed state (git show HEAD:). Gated on export
+      # success (no if: always() on a decision that drives commit/deploy).
       - name: Publish decision
         id: publish-decision
-        if: always()
+        if: steps.export.conclusion == 'success'
         run: |
           # Decide whether to commit/deploy the freshly exported snapshot.
           # STORY_COUNT reads the working tree (the new export); PREV_STORY_COUNT
@@ -145,35 +174,30 @@ jobs:
           fi
           echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
 
-      - name: Commit homepage snapshot
-        id: commit-hp
-        if: always() && steps.publish-decision.outputs.deploy == 'true'
+      # Issue #163 / HS-PORT-07 (AC-7): exactly one commit+push step, gated on
+      # export success, limited to the three site-data files, with [skip ci]
+      # to avoid recursive CI. contents:write is granted at step level only.
+      - name: Commit and push site-data files
+        id: commit-and-push-site-data
+        if: steps.export.conclusion == 'success'
+        permissions:
+          contents: write
         run: |
-          # Commit homepage.json so CI builds can read it.
-          # Skipped when the publish decision is "no" so the committed file
-          # (and the next run's PREV detection) stays the last real snapshot.
-          git add web/data/homepage.json
-          if [ -n "$(git status --porcelain web/data/homepage.json)" ]; then
-            git commit -m "Update homepage.json (Closes #108)"
-            echo "Homepage committed"
-          else
-            echo "Homepage unchanged, skipping commit"
+          set -euo pipefail
+          # Stage the site-data files. homepage.json is committed only when the
+          # publish decision is deploy=true (so a zero-story export with a prior
+          # real snapshot does not clobber the last-good committed snapshot).
+          git add web/data/heartbeat.json web/data/feeds.json
+          if [ "${{ steps.publish-decision.outputs.deploy }}" = "true" ]; then
+            git add web/data/homepage.json
           fi
-        continue-on-error: true
-
-      - name: Commit feed health
-        id: commit-feeds
-        if: always()
-        run: |
-          # Always commit the feed health dashboard data (best-effort).
-          git add web/data/feeds.json
-          if [ -n "$(git status --porcelain web/data/feeds.json)" ]; then
-            git commit -m "Update feeds.json (Closes #108)"
-            echo "Feed health committed"
+          if [ -n "$(git status --porcelain web/data/)" ]; then
+            git commit -m "Update site-data (heartbeat, feeds, homepage) [skip ci] (Closes #108)"
+            git push
+            echo "Site-data committed and pushed"
           else
-            echo "Feed health unchanged, skipping commit"
+            echo "Site-data unchanged, skipping commit"
           fi
-        continue-on-error: true
 
       # Site verification first (soft): site-test overlay(s) fixture data and
       # rebuilds web/public/, so the real-data `make site` build below must
@@ -194,6 +218,7 @@ jobs:
           bash scripts/site-test.sh
 
       - name: Build Hugo site
+        id: make-site
         run: |
           # The site-test step above rebuilt web/public from fixtures; Hugo
           # does not delete stale outputs, so start from a clean public dir
@@ -236,7 +261,7 @@ jobs:
           # skip. Any failure here fails the job; apply is skipped.
           if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
             git add archive/retention
-            git commit -m "Retention package: archive rows expiring outside window (Closes #120)"
+            git commit -m "Retention package: archive rows expiring outside window (Closes #120) [skip ci]"
             echo "Retention package committed"
           else
             echo "No retention package to commit (no expiring rows), skipping"
@@ -262,18 +287,10 @@ jobs:
           file_count=$(find web/public/ -type f | wc -l)
           echo "Total files in web/public/: $file_count"
 
-      - name: Verify site artifacts exist
-        if: always()
-        run: |
-          if [ ! -d web/public/ ]; then
-            echo "::error::web/public/ directory not found"
-            exit 1
-          fi
-          file_count=$(find web/public/ -type f | wc -l)
-          echo "Verified: web/public/ contains $file_count files"
-
+      # Diagnostic artifact upload: gated on the build succeeding (no
+      # if: always() so a failed build never uploads a corrupt artifact).
       - name: Upload site artifacts
-        if: always()
+        if: steps.export.conclusion == 'success' || steps.make-site.conclusion == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: site-build
