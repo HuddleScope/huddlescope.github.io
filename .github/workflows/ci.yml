@@ -33,12 +33,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Detect Go changes
+        # Lint and security steps only run when the change touches Go sources
+        # (PR file list via API; for pushes to main, compare the push range).
+        # Site-data PRs (web/data/*.json only) pass Build without the ~4 min
+        # linter/gosec/govulncheck pass.
+        id: go-changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename')
+          else
+            BEFORE="${{ github.event.before }}"
+            if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              echo "has_go=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            FILES=$(gh api "repos/${{ github.repository }}/compare/${BEFORE}...${{ github.sha }}" --jq '.files[].filename')
+          fi
+          if printf '%s\n' "$FILES" | grep -qE '\.go$|^go\.(mod|sum)$'; then
+            echo "has_go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_go=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: Install linters
+        if: steps.go-changes.outputs.has_go == 'true'
         # The Makefile expects golangci-lint, gosec and govulncheck on PATH
         # (it documents local Homebrew installs). On a clean runner they are
         # absent, so install them here.
@@ -52,6 +79,7 @@ jobs:
 
       - name: Format (gofmt)
         run: |
+          # shellcheck disable=SC2046  # gofmt needs one argument per file
           files=$(gofmt -l $(find . -name '*.go' -not -path './vendor/*' -not -path './dist/*'))
           if [ -n "$files" ]; then
             echo "Error: gofmt found files that need formatting:"
@@ -60,9 +88,11 @@ jobs:
           fi
 
       - name: Lint
+        if: steps.go-changes.outputs.has_go == 'true'
         run: make lint
 
       - name: Security (gosec, govulncheck)
+        if: steps.go-changes.outputs.has_go == 'true'
         run: make security
 
       - name: Coverage gate (>= 80% on internal packages)
