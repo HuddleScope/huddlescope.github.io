@@ -256,10 +256,19 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	if _, hasStepPerms := commitPushStep["permissions"]; hasStepPerms {
 		t.Error("commit-and-push-site-data step must NOT have step-level permissions (unsupported by GitHub Actions)")
 	}
-	// Commit message must contain [skip ci]
+	// The main branch requires the `Build` status check (ruleset "Require CI
+	// before merging to main"), so the step must not push directly to main
+	// with [skip ci]: it commits to a short-lived branch, opens a PR, waits
+	// for the Build check, and squash-merges.
 	cpsScript := stepRunScript(commitPushStep)
-	if !strings.Contains(cpsScript, "[skip ci]") {
-		t.Error("commit-and-push-site-data commit message must contain [skip ci]")
+	if strings.Contains(cpsScript, "[skip ci]") {
+		t.Error("commit-and-push-site-data must NOT use [skip ci]: the Build check is required by the main ruleset")
+	}
+	if !strings.Contains(cpsScript, "git checkout -b") || !strings.Contains(cpsScript, "gh pr create") {
+		t.Error("commit-and-push-site-data must commit to a short-lived branch and open a PR")
+	}
+	if !strings.Contains(cpsScript, "gh pr merge") {
+		t.Error("commit-and-push-site-data must squash-merge the PR after the Build check passes")
 	}
 
 	// --- Build job: no if: always() on any commit/deploy step (AC-7) ---
