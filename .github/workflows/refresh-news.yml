@@ -75,9 +75,6 @@ jobs:
     outputs:
       deploy: ${{ steps.publish-decision.outputs.deploy }}
     env:
-      # gh (pr create/view/api/merge in the site-data step) requires GH_TOKEN
-      # inside GitHub Actions; GITHUB_TOKEN alone is not enough.
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       HSC_ENV: production
       HSC_STORAGE_BACKEND: turso
       HSC_RUNNER_ORIGIN: github-backup
@@ -196,9 +193,16 @@ jobs:
       # satisfy (CI is triggered by the push itself). So the step commits to a
       # short-lived branch, opens a PR, waits for the Build check, and
       # squash-merges. No [skip ci]: the check must run.
+      #
+      # The org disables the "Actions may create PRs" toggle, so GITHUB_TOKEN
+      # cannot create PRs here; gh authenticates with the fine-grained PAT in
+      # secret SITE_DATA_PAT (repo access: this repository; permissions:
+      # Contents read/write, Pull requests read/write).
       - name: Commit and push site-data files
         id: commit-and-push-site-data
         if: steps.export.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
         run: |
           set -euo pipefail
           # Stage the site-data files. homepage.json is committed only when the
