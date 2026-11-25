@@ -34,10 +34,11 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Detect Go changes
-        # Lint and security steps only run when the change touches Go sources
-        # (PR file list via API; for pushes to main, compare the push range).
-        # Site-data PRs (web/data/*.json only) pass Build without the ~4 min
-        # linter/gosec/govulncheck pass.
+        # Test, lint and security steps only run when the change touches Go
+        # sources (PR file list via API; for pushes to main, compare the push
+        # range). Site-data PRs (web/data/*.json only) pass Build with just
+        # checkout + gofmt + build + smoke, skipping the slow race tests and
+        # the ~4 min linter/gosec/govulncheck pass.
         id: go-changes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -75,6 +76,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 
       - name: Test (race, vet)
+        if: steps.go-changes.outputs.has_go == 'true'
         run: make test
 
       - name: Format (gofmt)
@@ -96,6 +98,7 @@ jobs:
         run: make security
 
       - name: Coverage gate (>= 80% on internal packages)
+        if: steps.go-changes.outputs.has_go == 'true'
         run: make check-coverage
 
       - name: Build binaries
