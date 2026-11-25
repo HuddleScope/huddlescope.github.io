@@ -220,14 +220,14 @@ jobs:
           # by the "Require CI before merging to main" ruleset (GH013).
           BRANCH="ci/site-data-$(git rev-parse --short HEAD)-$$"
           git checkout -b "$BRANCH"
-          git commit -m "Update site-data (heartbeat, feeds, homepage) (Closes #108)"
+          git commit -m "Update site-data (heartbeat, feeds, homepage)"
           git push origin "$BRANCH"
           # Open a PR (gh pr create prints the URL on stdout; the runner's gh
           # is too old for --json) and wait for the required Build check to
           # pass (~5 min) by polling the head commit's check runs via gh api.
           PR_URL=$(gh pr create \
             --title "Update site-data (heartbeat, feeds, homepage)" \
-            --body "Automated site-data refresh by the Refresh news workflow (Closes #108)." </dev/null)
+            --body "Automated site-data refresh by the Refresh news workflow." </dev/null)
           PR_NUM="${PR_URL##*/}"
           echo "Opened PR $PR_NUM; waiting for the required Build check..."
           SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
@@ -310,7 +310,7 @@ jobs:
           # skip. Any failure here fails the job; apply is skipped.
           if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
             git add archive/retention
-            git commit -m "Retention package: archive rows expiring outside window (Closes #120) [skip ci]"
+            git commit -m "Retention package: archive rows expiring outside window"
             echo "Retention package committed"
           else
             echo "No retention package to commit (no expiring rows), skipping"
