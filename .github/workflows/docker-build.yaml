@@ -1,0 +1,135 @@
+# Docker image workflow (issue #204)
+#
+# Builds the distroless image from the repo-root Dockerfile on every push to
+# main and publishes it to ghcr.io under the tags `latest`, `v{semver}`, and
+# `sha-{short}`. Version resolution is delegated to scripts/resolve-version.sh
+# — the same script build-and-release.yaml (issue #203) uses — so the
+# published image tag and the release binary version always come from the
+# same source revision (AC-4 / AC-13).
+#
+# The ghcr package name matches the repository name
+# (HuddleScope/huddlescope.github.io); a GITHUB_TOKEN push is only accepted
+# for packages created from this repository.
+#
+# Design notes:
+#   - Job-level `packages: write` (no repo-wide token upgrade); the token is
+#     run-scoped and expires with the run (AC-11).
+#   - The image is also loaded (`load: true`) so the size, non-root, and
+#     entrypoint gates below can inspect it locally before the run ends.
+#   - Image publication happens only from this workflow; see
+#     TestNoImagePushWorkflow for the allowlist keeping every other workflow
+#     free of registry credentials.
+
+name: Docker
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # fetch-depth: 0 so `git describe` (used by resolve-version.sh) can
+          # see the full tag history.
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve version
+        id: version
+        run: echo "version=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Compute build stamp
+        id: stamp
+        # COMMIT and BUILT_AT mirror build-and-release.yaml: BUILT_AT is the
+        # UTC commit timestamp, so re-runs of the same commit produce the same
+        # stamp (deterministic/reproducible, AC-2 / AC-13).
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          COMMIT_TS="$(git log -1 --format=%ct)"
+          BUILT_AT="$(date -u -d "@${COMMIT_TS}" +%Y-%m-%dT%H:%M:%SZ)"
+          echo "short=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          load: true
+          tags: |
+            ghcr.io/huddlescope/huddlescope.github.io:latest
+            ghcr.io/huddlescope/huddlescope.github.io:v${{ steps.version.outputs.version }}
+            ghcr.io/huddlescope/huddlescope.github.io:sha-${{ steps.stamp.outputs.short }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT=${{ steps.stamp.outputs.short }}
+            BUILT_AT=${{ steps.stamp.outputs.built_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image size gate (< 15 MiB)
+        # AC-3: distroless (~2 MB) + static binary must stay well under 15 MiB.
+        run: |
+          IMAGE="ghcr.io/huddlescope/huddlescope.github.io:latest"
+          SIZE_BYTES="$(docker image inspect --format '{{.Size}}' "$IMAGE")"
+          SIZE_KB=$((SIZE_BYTES / 1024))
+          echo "Image size: ${SIZE_KB} KiB (${SIZE_BYTES} bytes)"
+          if [ "$SIZE_BYTES" -ge 15728640 ]; then
+            echo "FAIL: image size ${SIZE_BYTES} bytes >= 15 MiB budget" >&2
+            exit 1
+          fi
+          echo "OK: image under 15 MiB budget"
+
+      - name: Container smoke (version + config check)
+        # AC-5: mirrors the native CI smoke; the binary runs without a shell
+        # (distroless) and reports its stamped version.
+        run: |
+          IMAGE="ghcr.io/huddlescope/huddlescope.github.io:latest"
+          out="$(docker run --rm --entrypoint /usr/local/bin/huddlescope "$IMAGE" version)"
+          echo "$out"
+          if ! printf '%s\n' "$out" | grep -q "${{ steps.version.outputs.version }}"; then
+            echo "FAIL: stamped version not found in container `huddlescope version` output" >&2
+            exit 1
+          fi
+          docker run --rm --entrypoint /usr/local/bin/huddlescope "$IMAGE" config check
+
+      - name: Non-root and entrypoint gates
+        # AC-5: runtime user must be 65534:65534 (nobody) and the entrypoint
+        # must be the installed binary, not a shell.
+        run: |
+          IMAGE="ghcr.io/huddlescope/huddlescope.github.io:latest"
+          USER_VALUE="$(docker image inspect --format '{{.Config.User}}' "$IMAGE")"
+          echo "Image USER: ${USER_VALUE}"
+          if [ "$USER_VALUE" != "65534:65534" ]; then
+            echo "FAIL: image USER must be 65534:65534, got ${USER_VALUE}" >&2
+            exit 1
+          fi
+          ENTRYPOINT="$(docker image inspect --format '{{.Config.Entrypoint}}' "$IMAGE")"
+          echo "Image Entrypoint: ${ENTRYPOINT}"
+          case "$ENTRYPOINT" in
+            *"/usr/local/bin/huddlescope"*) echo "OK: entrypoint is the installed binary" ;;
+            *) echo "FAIL: entrypoint must be /usr/local/bin/huddlescope, got ${ENTRYPOINT}" >&2; exit 1 ;;
+          esac

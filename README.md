@@ -181,16 +181,21 @@ embedded in the binaries.
 ## Docker
 
 A multi-stage `Dockerfile` at the repo root yields a minimal runtime image:
-the static binary at `/usr/local/bin/huddlescope`, CA certs present, and a
-non-root user. No `.env` or credentials are baked into the image — runtime
-config is supplied as environment variables at `docker run` time, identical to
-the native binary's precedence chain (flags > env > file > defaults), so the
+the static binary at `/usr/local/bin/huddlescope` on a `gcr.io/distroless/static`
+base (no shell, no package manager, ships CA certs), running as a non-root
+user. No `.env` or credentials are baked into the image — runtime config is
+supplied as environment variables at `docker run` time, identical to the
+native binary's precedence chain (flags > env > file > defaults), so the
 container and native binary share the same execution model.
 
+The image is published to GitHub Container Registry on every merge to `main`
+by `.github/workflows/docker-build.yaml` (issue #204), tagged `latest`,
+`v{semver}`, and `sha-{short}` — the semver tag always matches the release
+binary version from #203 (both call `scripts/resolve-version.sh`):
+
 ```sh
-# Build the image locally (not published automatically — image publishing is
-# the separate, unapproved #204 scope):
-make docker-build
+# Pull the published image (any of the tags):
+docker pull ghcr.io/huddlescope/huddlescope.github.io:latest
 
 # Run it, supplying config as env (matches native):
 docker run --rm \
@@ -198,11 +203,14 @@ docker run --rm \
   -e HSC_STORAGE_BACKEND=turso \
   -e TURSO_DATABASE_URL=... \
   -e TURSO_AUTH_TOKEN=... \
-  huddlescope:$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//') version
+  ghcr.io/huddlescope/huddlescope.github.io:latest version
+
+# Build the image locally (equivalent to what CI publishes):
+make docker-build
 ```
 
-No images or tags are published automatically by any workflow; building and
-publishing images remains a manual, reviewed operation.
+See `deploy/docker/README.md` for oneshot usage and external scheduling
+options (system cron or a systemd timer).
 
 ## Website (Hugo)
 

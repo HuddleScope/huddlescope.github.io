@@ -207,11 +207,16 @@ The committed `compose.yaml` at the repo root:
   only and is never referenced by compose).
 - `command: ["ingest", "run", "--mode", "primary"]`.
 
-Build the image (no workflow publishes it — image publication is the separate,
-unapproved #204 scope):
+Build the image locally, or pull the published image (issue #204 publishes
+`ghcr.io/huddlescope/huddlescope.github.io` on every merge to `main`; see
+`deploy/docker/README.md`):
 
 ```bash
+# Local build:
 make docker-build
+# Or pull the published image:
+# docker pull ghcr.io/huddlescope/huddlescope.github.io:latest
+
 # Create ./huddlescope.env from deploy/examples/huddlescope.env.example,
 # filling in the real Turso credentials (mode 0600).
 docker compose run --rm ingest
