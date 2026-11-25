@@ -23,8 +23,8 @@
 name: Refresh news
 
 on:
+  # Manually trigger a news refresh and optional Pages deployment
   workflow_dispatch:
-    description: 'Manually trigger a news refresh and optional Pages deployment'
     inputs:
       publish:
         description: 'Deploy to Pages after successful build'
@@ -51,8 +51,11 @@ concurrency:
   group: refresh-news-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege: default read access; only deploy job requires write, and the
-# site-data push step is granted contents:write at step level (issue #163 / AC-7).
+# Least privilege: default read access. The build job needs contents:write for
+# the single site-data commit+push step (issue #163 / AC-7). GitHub Actions
+# only honors permissions at workflow and job level (never step level), so it
+# is granted on the whole build job; the deploy job additionally needs
+# pages:write + id-token:write for its OIDC Pages deploy.
 permissions:
   contents: read
 
@@ -61,6 +64,8 @@ jobs:
     name: Refresh and build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     environment:
       name: github-pages
     outputs:
@@ -176,12 +181,11 @@ jobs:
 
       # Issue #163 / HS-PORT-07 (AC-7): exactly one commit+push step, gated on
       # export success, limited to the three site-data files, with [skip ci]
-      # to avoid recursive CI. contents:write is granted at step level only.
+      # to avoid recursive CI. contents:write is granted at job level on
+      # `build` (step-level permissions are not supported by GitHub Actions).
       - name: Commit and push site-data files
         id: commit-and-push-site-data
         if: steps.export.conclusion == 'success'
-        permissions:
-          contents: write
         run: |
           set -euo pipefail
           # Stage the site-data files. homepage.json is committed only when the
