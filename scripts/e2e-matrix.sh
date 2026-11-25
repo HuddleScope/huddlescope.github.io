@@ -12,37 +12,49 @@
 #
 # Offline invariants (AC-9):
 #   - DBs live in t.TempDir(); the fixture server binds 127.0.0.1 only.
-#   - No TURSO_* / GITHUB_* env is present (the binary tests run the CLI in a
-#     hermetic env that excludes every HSC_* / TURSO_* / GITHUB_* variable).
+#   - No TURSO_* / GITHUB_* env reaches the tested binary (the binary tests run
+#     the CLI in a hermetic env that excludes every HSC_* / TURSO_* / GITHUB_*
+#     variable).
 #   - The published site-data directory is a temp dir (HSC_DATA_DIR), never
 #     web/data. No external feeds: sources point exclusively at the fixture server.
 #
-# The matrix is offline by construction; this script makes that explicit and
-# refuses to run with any accidental TURSO/GITHUB env present.
+# The matrix is offline by construction; this script makes that explicit by
+# scrubbing any accidental TURSO/GITHUB env from the matrix environment.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Guard: the e2e matrix must run offline. If a host TURSO_* or GITHUB_* env var
-# is present, fail loudly rather than risk a test leaking a real credential or
-# hitting a real service. The matrix itself isolates the binary process env, but
-# this guard catches operator misconfiguration (e.g., running make e2e on a host
-# with TURSO_* exported).
-leaked=""
-while IFS= read -r var; do
+# Offline invariant: the matrix environment must be free of credentials and of
+# GitHub context. GitHub Actions sets GITHUB_REPOSITORY (and friends) on every
+# job as non-secret repo context, so the guard SCRUBS these vars instead of
+# failing — failing on GITHUB_REPOSITORY broke the required "Build" check for
+# any run hosted on GitHub Actions. Safety is preserved two ways: this scrub
+# removes the vars from the matrix process env, and the suites themselves exec
+# the CLI in a fully hermetic env (no HSC_*/TURSO_*/GITHUB_* variables) against
+# t.TempDir()-scoped sqlite DBs and a 127.0.0.1-only fixture server, so no
+# external service or real credential is reachable regardless of the host env.
+scrubbed=""
+for var in TURSO_DATABASE_URL TURSO_AUTH_TOKEN GITHUB_TOKEN GITHUB_REPOSITORY; do
   if [ -n "${!var:-}" ]; then
-    leaked="$leaked $var"
+    scrubbed="$scrubbed $var"
+    unset "$var"
   fi
-done <<'ENV'
-TURSO_DATABASE_URL
-TURSO_AUTH_TOKEN
-GITHUB_TOKEN
-GITHUB_REPOSITORY
-ENV
-if [ -n "$leaked" ]; then
-  echo "ERROR: e2e matrix must run offline, but host env vars are set:$leaked" >&2
-  echo "       Unset them (or run in a clean shell) and retry." >&2
-  exit 1
+done
+if [ -n "$scrubbed" ]; then
+  echo "    scrubbed from matrix env:$scrubbed"
+fi
+
+# Self-test mode: verify the offline guard (env scrubbing) without running the
+# suites. Exercised by internal/e2e/matrix_script_test.go.
+if [ "${E2E_MATRIX_SELFTEST:-}" = "1" ]; then
+  for var in TURSO_DATABASE_URL TURSO_AUTH_TOKEN GITHUB_TOKEN GITHUB_REPOSITORY; do
+    if [ -n "${!var:-}" ]; then
+      echo "ERROR: self-test failed, $var still set after scrub" >&2
+      exit 1
+    fi
+  done
+  echo "e2e-matrix self-test: PASS (env scrubbed)"
+  exit 0
 fi
 
 echo "==> e2e matrix: building ./cmd/huddlescope (offline)"
