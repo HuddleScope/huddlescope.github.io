@@ -270,6 +270,59 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	if !strings.Contains(cpsScript, "gh pr merge") {
 		t.Error("commit-and-push-site-data must squash-merge the PR after the Build check passes")
 	}
+	// The retention package (issue #120 / HS-065) ships in the same PR as the
+	// site-data files, and the PR/branch are recorded for the cleanup step.
+	if !strings.Contains(cpsScript, "archive/retention") {
+		t.Error("commit-and-push-site-data must stage archive/retention in the same PR as the site-data files")
+	}
+	if !strings.Contains(cpsScript, "pr_num=") || !strings.Contains(cpsScript, "branch=") {
+		t.Error("commit-and-push-site-data must write pr_num and branch to GITHUB_OUTPUT for the cleanup step")
+	}
+	// Conflict recovery: after the Build check, verify mergeability and
+	// re-base onto origin/main when main moved (bounded re-base attempts).
+	if !strings.Contains(cpsScript, "mergeable") || !strings.Contains(cpsScript, "git reset --hard origin/main") {
+		t.Error("commit-and-push-site-data must check mergeability and re-base onto origin/main when main moved")
+	}
+
+	// --- Build job: retention steps (issue #120 / HS-065) ---
+	retExport := findStepByID(t, wf, "build", "retention-export")
+	if ri, ok := retExport["if"].(string); !ok || !strings.Contains(ri, "inputs.run-retention") {
+		t.Error("retention-export must be gated on inputs.run-retention")
+	}
+	retApply := findStepByID(t, wf, "build", "retention-apply")
+	ai, ok := retApply["if"].(string)
+	if !ok || !strings.Contains(ai, "inputs.run-retention") || !strings.Contains(ai, "steps.commit-and-push-site-data.conclusion == 'success'") {
+		t.Errorf("retention-apply if = %q, must gate on run-retention AND the site-data step success (package persisted before apply)", ai)
+	}
+	// The package must ship in the site-data PR: export before the commit step.
+	stepIdx := func(stepID string) int {
+		for i, s := range steps {
+			st, ok := s.(map[string]any)
+			if ok {
+				if id, ok := st["id"].(string); ok && id == stepID {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+	if ei, ci := stepIdx("retention-export"), stepIdx("commit-and-push-site-data"); ei < 0 || ci < 0 || ei >= ci {
+		t.Error("retention-export must run before commit-and-push-site-data so the package ships in the same PR")
+	}
+	if stepIdx("retention-commit") >= 0 {
+		t.Error("retention-commit must not exist: the retention package ships in the site-data PR (exactly one commit+push step)")
+	}
+	// Cleanup step: closes the PR and deletes the branch when the run did not
+	// merge (cancelled or failed), so no orphaned PR conflicts with later runs.
+	cleanup := findStepByID(t, wf, "build", "cleanup-site-data-pr")
+	ciCond, ok := cleanup["if"].(string)
+	if !ok || !strings.Contains(ciCond, "always()") || !strings.Contains(ciCond, "steps.commit-and-push-site-data.outcome != 'success'") || !strings.Contains(ciCond, "pr_num") {
+		t.Errorf("cleanup-site-data-pr if = %q, must run on always() when the site-data step did not succeed and a PR was opened", ciCond)
+	}
+	cr := stepRunScript(cleanup)
+	if !strings.Contains(cr, "gh pr close") {
+		t.Error("cleanup-site-data-pr must close the orphaned PR")
+	}
 
 	// --- Build job: no if: always() on any commit/deploy step (AC-7) ---
 	for _, s := range steps {

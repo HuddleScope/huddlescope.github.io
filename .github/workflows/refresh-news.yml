@@ -34,7 +34,7 @@ on:
         default: 'true'
         type: boolean
       run-retention:
-        description: 'Run retention (export package, commit, archive) after build verification'
+        description: 'Run retention (export package, ship it in the site-data PR, archive rows)'
         required: true
         default: 'true'
         type: boolean
@@ -183,16 +183,36 @@ jobs:
           fi
           echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
 
-      # Issue #163 / HS-PORT-07 (AC-7): exactly one commit+push step, gated on
-      # export success, limited to the three site-data files. contents:write is
-      # granted at job level on `build` (step-level permissions are not
-      # supported by GitHub Actions).
+      # Retention export (issue #120 / HS-065): runs after ingest + export
+      # (all DB reads) and BEFORE the commit step so the exported package
+      # ships in the same branch/PR as the site-data files: one commit, one
+      # Build wait, one merge per run. The package is persisted in Git via
+      # that PR merge, which happens before 'retention apply' deletes rows
+      # (AC-2: export -> commit -> apply).
+      - name: Retention export
+        id: retention-export
+        if: inputs.run-retention
+        run: |
+          echo "Exporting rows older than the retention window..."
+          ./dist/huddlescope retention export --output archive/retention
+          echo "Retention export completed"
+
+      # Issue #163 / HS-PORT-07 (AC-7): exactly one commit+push step, gated
+      # on export success, limited to the site-data files plus the retention
+      # package. contents:write is granted at job level on `build` (step-level
+      # permissions are not supported by GitHub Actions).
       #
       # The ruleset "Require CI before merging to main" requires the `Build`
       # status check on every commit to main, which a direct push cannot
       # satisfy (CI is triggered by the push itself). So the step commits to a
       # short-lived branch, opens a PR, waits for the Build check, and
       # squash-merges. No [skip ci]: the check must run.
+      #
+      # If main moves while the PR waits (a parallel run's PR merged first),
+      # the PR conflicts: the step resets the branch onto origin/main and
+      # re-checks-out the changed paths from the old commit (generated files
+      # overwrite cleanly, no merge conflict), pushes, and waits again
+      # (bounded to 3 re-base attempts).
       #
       # The org disables the "Actions may create PRs" toggle, so GITHUB_TOKEN
       # cannot create PRs here; gh authenticates with the fine-grained PAT in
@@ -212,41 +232,103 @@ jobs:
           if [ "${{ steps.publish-decision.outputs.deploy }}" = "true" ]; then
             git add web/data/homepage.json
           fi
-          if [ -z "$(git status --porcelain web/data/)" ]; then
-            echo "Site-data unchanged, skipping commit"
+          CHANGED_DATA=0
+          if [ -n "$(git status --porcelain web/data/)" ]; then
+            CHANGED_DATA=1
+          fi
+          # The retention package (retention-export step) ships in this same
+          # PR. A no-op export (no expiring rows) leaves nothing to stage.
+          CHANGED_RET=0
+          if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
+            git add archive/retention
+            CHANGED_RET=1
+          fi
+          if [ "$CHANGED_DATA" -eq 0 ] && [ "$CHANGED_RET" -eq 0 ]; then
+            echo "Site-data and retention unchanged, skipping commit"
             exit 0
+          fi
+          if [ "$CHANGED_DATA" -eq 1 ] && [ "$CHANGED_RET" -eq 1 ]; then
+            COMMIT_MSG="Update site-data and retention archive"
+            PR_BODY="Automated refresh by the Refresh news workflow: site-data (heartbeat, feeds, homepage) + retention package."
+          elif [ "$CHANGED_DATA" -eq 1 ]; then
+            COMMIT_MSG="Update site-data (heartbeat, feeds, homepage)"
+            PR_BODY="Automated site-data refresh by the Refresh news workflow."
+          else
+            COMMIT_MSG="Update retention archive"
+            PR_BODY="Automated retention refresh by the Refresh news workflow."
           fi
           # Commit to a short-lived branch: direct pushes to main are rejected
           # by the "Require CI before merging to main" ruleset (GH013).
           BRANCH="ci/site-data-$(git rev-parse --short HEAD)-$$"
           git checkout -b "$BRANCH"
-          git commit -m "Update site-data (heartbeat, feeds, homepage)"
+          git commit -m "$COMMIT_MSG"
           git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           # Open a PR (gh pr create prints the URL on stdout; the runner's gh
-          # is too old for --json) and wait for the required Build check to
-          # pass (~5 min) by polling the head commit's check runs via gh api.
-          PR_URL=$(gh pr create \
-            --title "Update site-data (heartbeat, feeds, homepage)" \
-            --body "Automated site-data refresh by the Refresh news workflow." </dev/null)
+          # is too old for --json).
+          PR_URL=$(gh pr create --title "$COMMIT_MSG" --body "$PR_BODY" </dev/null)
           PR_NUM="${PR_URL##*/}"
+          echo "pr_num=$PR_NUM" >> "$GITHUB_OUTPUT"
           echo "Opened PR $PR_NUM; waiting for the required Build check..."
-          SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
-          for _ in $(seq 1 60); do
-            DATA=$(gh api repos/"$GITHUB_REPOSITORY"/commits/"$SHA"/check-runs)
-            COUNT=$(printf '%s' "$DATA" | jq '.total_count')
-            INCOMPLETE=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status != "completed")] | length')
-            FAILED=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')
-            if [ "$FAILED" -gt 0 ]; then
-              echo "::error::PR $PR_NUM has failing checks"
-              exit 1
-            fi
-            if [ "$COUNT" -ge 1 ] && [ "$INCOMPLETE" -eq 0 ]; then
+          # Wait for the Build check to pass, then verify the PR is still
+          # mergeable. If main moved meanwhile (a parallel run's PR merged
+          # first) the PR conflicts: reset the branch onto origin/main,
+          # re-check-out the changed paths from the old commit (generated
+          # files overwrite cleanly), push, and wait again. Bounded to 3
+          # re-base attempts; the cleanup step closes the PR if the run dies.
+          REBASES=0
+          while :; do
+            SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
+            for _ in $(seq 1 60); do
+              DATA=$(gh api repos/"$GITHUB_REPOSITORY"/commits/"$SHA"/check-runs)
+              COUNT=$(printf '%s' "$DATA" | jq '.total_count')
+              INCOMPLETE=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status != "completed")] | length')
+              FAILED=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')
+              if [ "$FAILED" -gt 0 ]; then
+                echo "::error::PR $PR_NUM has failing checks"
+                exit 1
+              fi
+              if [ "$COUNT" -ge 1 ] && [ "$INCOMPLETE" -eq 0 ]; then
+                break
+              fi
+              sleep 30
+            done
+            MERGEABLE=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .mergeable)
+            if [ "$MERGEABLE" = "true" ]; then
               break
             fi
-            sleep 30
+            if [ "$REBASES" -ge 3 ]; then
+              echo "::error::PR $PR_NUM is not mergeable after $REBASES re-base attempts"
+              exit 1
+            fi
+            REBASES=$((REBASES + 1))
+            OLD_SHA=$(git rev-parse HEAD)
+            echo "PR $PR_NUM not mergeable (main moved); re-basing $BRANCH onto origin/main (attempt $REBASES)..."
+            git fetch origin main
+            git reset --hard origin/main
+            git diff --name-only origin/main "$OLD_SHA" | xargs -r git checkout "$OLD_SHA" --
+            git commit -m "$COMMIT_MSG"
+            git push --force-with-lease origin "$BRANCH"
           done
           gh pr merge "$PR_NUM" --squash --delete-branch
           echo "Site-data committed and merged to main via PR $PR_NUM"
+
+      - name: Clean up site-data PR if the run did not merge
+        id: cleanup-site-data-pr
+        # A cancelled or failed run can leave its PR open (the run died before
+        # merging). Close it and delete the branch so the next run's PR does
+        # not conflict with stale changes. Runs on always() precisely because
+        # it must act when the run did NOT succeed; it commits nothing.
+        if: always() && steps.commit-and-push-site-data.outcome != 'success' && steps.commit-and-push-site-data.outputs.pr_num != ''
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
+        run: |
+          set -euo pipefail
+          PR_NUM="${{ steps.commit-and-push-site-data.outputs.pr_num }}"
+          BRANCH="${{ steps.commit-and-push-site-data.outputs.branch }}"
+          echo "Run did not merge PR $PR_NUM; closing it and deleting branch $BRANCH."
+          gh pr close "$PR_NUM" || true
+          gh api -X DELETE repos/"$GITHUB_REPOSITORY"/git/refs/heads/"$BRANCH" || true
 
       # Site verification first (soft): site-test overlay(s) fixture data and
       # rebuilds web/public/, so the real-data `make site` build below must
@@ -288,37 +370,14 @@ jobs:
           fi
           echo "No demo markers in web/public/"
 
-      # Retention (issue #120 / HS-065): runs after all DB reads (ingest,
-      # export, site build) so the deployed snapshot is unaffected. The
-      # ordering is load-bearing: export -> commit -> apply. A failed export
-      # or commit fails the build job (no continue-on-error), so apply never
-      # runs without a persisted package in Git (AC-2).
-      - name: Retention export
-        id: retention-export
-        if: inputs.run-retention
-        run: |
-          echo "Exporting rows older than the retention window..."
-          ./dist/huddlescope retention export --output archive/retention
-          echo "Retention export completed"
-
-      - name: Commit retention package
-        id: retention-commit
-        if: inputs.run-retention
-        run: |
-          # Persist the exported package in Git BEFORE the delete commits.
-          # A no-op export (no expiring rows) leaves nothing staged: a valid
-          # skip. Any failure here fails the job; apply is skipped.
-          if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
-            git add archive/retention
-            git commit -m "Retention package: archive rows expiring outside window"
-            echo "Retention package committed"
-          else
-            echo "No retention package to commit (no expiring rows), skipping"
-          fi
-
+      # Retention apply (issue #120 / HS-065): the delete commits run only
+      # after the package is persisted in main (the site-data PR merged) and
+      # after every DB read of this run (ingest, export, site build). The
+      # export runs before the commit step so the package ships in the same
+      # PR (AC-2: export -> commit -> apply).
       - name: Retention apply
         id: retention-apply
-        if: inputs.run-retention
+        if: inputs.run-retention && steps.commit-and-push-site-data.conclusion == 'success'
         run: |
           echo "Archiving rows older than the retention window..."
           ./dist/huddlescope retention apply
