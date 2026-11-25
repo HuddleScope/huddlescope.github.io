@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,8 +388,16 @@ func TestCliVersionIsOverridableVar(t *testing.T) {
 	cmd.SetArgs([]string{})
 	assert.NoError(t, cmd.Execute())
 
-	assert.Equal(t, "huddlescope version 9.9.9-overridable\n", out.String(),
-		"version command must render the (mutable) cliVersion value")
+	// Line 1 must keep the stable `huddlescope version <v>` grep shape that
+	// build-and-release.yaml depends on, and must render the overridden value.
+	assert.True(t,
+		strings.HasPrefix(out.String(), "huddlescope version 9.9.9-overridable\n"),
+		"version command must render the (mutable) cliVersion value on line 1, got %q", out.String())
+	// The multi-line output contract from #161 AC-2 (revision/built/GOOS-GOARCH)
+	// must be retained.
+	assert.Contains(t, out.String(), "revision ")
+	assert.Contains(t, out.String(), "built ")
+	assert.Contains(t, out.String(), runtime.GOOS+"/"+runtime.GOARCH)
 }
 
 // TestCliVersionDefault is a regression test for issue #203: the default

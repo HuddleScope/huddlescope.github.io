@@ -196,3 +196,49 @@ GOARCH=amd64 GOOS=linux go build -o dist/huddlescope-vps ./cmd/huddlescope
 
 The binary is fully static and portable; no repo or web-data is required at
 runtime when using the turso backend with absolute paths.
+
+## Container deployment
+
+The same binary runs inside a container with **identical configuration** to the
+native (VPS/RPi) deployment — the container and native binary share the same
+precedence chain (flags > env > `--config` file > defaults) and execution model.
+No repo, web-data, or `.env` is baked into the image; config is supplied as
+environment variables at `docker run` time.
+
+Build the image locally (no workflow publishes it automatically — image
+publishing is the separate, unapproved #204 scope):
+
+```bash
+make docker-build
+# tags huddlescope:<version>
+```
+
+Run it, mirroring the native production config (`HSC_ENV=production`,
+`HSC_STORAGE_BACKEND=turso`): pass the Turso DSN and token, and the absolute
+sources/teams paths, as env:
+
+```bash
+docker run --rm \
+  -e HSC_ENV=production \
+  -e HSC_STORAGE_BACKEND=turso \
+  -e TURSO_DATABASE_URL=... \
+  -e TURSO_AUTH_TOKEN=... \
+  -e HSC_SOURCES_FILE=/abs/path/sources.yaml \
+  -e HSC_TEAMS_FILE=/abs/path/teams.yaml \
+  -e HSC_RUNNER_ORIGIN=docker \
+  huddlescope:$(git describe --tags --abbrev=0 | sed 's/^v//') ingest run
+```
+
+Image invariants (enforced by `TestDockerfileSafeguards` / `TestNoImagePushWorkflow`):
+
+- multi-stage build; build stage sets `CGO_ENABLED=0` and uses `-trimpath`;
+- runtime stage installs `ca-certificates` and runs as a non-root `USER`;
+- the binary is installed at `/usr/local/bin/huddlescope` and set as the
+  `ENTRYPOINT`;
+- no `COPY` of `.env` or credentials into any layer;
+- no workflow `docker push`/`docker login` (no automatic publication).
+
+Because the container uses env for config exactly like the native binary, the
+fail-fast production checks (Turso URL/token required, non-memory backend,
+absolute paths) apply unchanged inside the container, and `config check`
+redacts secrets the same way.

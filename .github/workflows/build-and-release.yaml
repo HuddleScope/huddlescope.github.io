@@ -34,16 +34,20 @@ permissions:
 
 jobs:
   build:
-    name: Build linux/${{ matrix.goarch }}
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        goarch: [amd64, arm64, armv7l]
+        # linux targets are release assets; darwin/arm64 is a dev-only artifact
+        # (uploaded as a GitHub artifact, never attached to the release —
+        # releases stay Linux-only per issue #161 AC-4).
         include:
-          - goarch: armv7l
-            goarm: 7
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+          - { goos: linux,  goarch: arm,   goarm: '7' }
+          - { goos: darwin, goarch: arm64 }
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -66,28 +70,42 @@ jobs:
       - name: Build static binary
         env:
           CGO_ENABLED: '0'
-          GOOS: linux
+          GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
         run: |
+          # BUILT_AT is deterministic (commit timestamp) so re-runs of the same
+          # commit+version produce byte-identical artifacts (issue #161 AC-3).
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILT_AT="$(git log -1 --format=%ct | { read -r ts; date -u -d "@$$ts" +%Y-%m-%dT%H:%M:%SZ; })"
           go build -trimpath \
-            -ldflags="-s -w -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliVersion=${{ steps.version.outputs.version }}" \
-            -o "huddlescope_${{ steps.version.outputs.version }}_linux_${{ matrix.goarch }}" \
+            -ldflags="-s -w \
+              -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliVersion=${{ steps.version.outputs.version }} \
+              -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliCommit=${COMMIT} \
+              -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliBuiltAt=${BUILT_AT}" \
+            -o "huddlescope_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}" \
             ./cmd/huddlescope
 
       - name: Verify static linking
         run: |
-          BIN="huddlescope_${{ steps.version.outputs.version }}_linux_${{ matrix.goarch }}"
+          BIN="huddlescope_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
           if readelf -d "$BIN" 2>/dev/null | grep -q NEEDED; then
             echo "FAIL: $BIN has a dynamic (NEEDED) section" >&2
             exit 1
           fi
           echo "OK: $BIN is statically linked"
+          # armv7l (linux/arm) cannot be executed natively on the runner; verify
+          # its ELF arch field instead (AC-4: each artifact reports its own arch).
+          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "arm" ]; then
+            arch="$(readelf -h "$BIN" 2>/dev/null | awk -F: '/Machine/ {print $2}' | tr -d ' ')"
+            echo "ELF Machine: $arch"
+            case "$arch" in *ARM*) echo "OK: arm target" ;; *) echo "FAIL: unexpected ELF machine $arch" >&2; exit 1 ;; esac
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: huddlescope-${{ steps.version.outputs.version }}-linux-${{ matrix.goarch }}
+          name: huddlescope-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: huddlescope_*
           retention-days: 1
 
@@ -115,9 +133,6 @@ jobs:
           pattern: huddlescope-*
           merge-multiple: true
 
-      - name: Generate checksums
-        run: sha256sum huddlescope_* > checksums.txt
-
       - name: Verify stamp (amd64 runs natively on the runner)
         run: |
           out="$(./huddlescope_${{ steps.version.outputs.version }}_linux_amd64 version)"
@@ -127,15 +142,36 @@ jobs:
             exit 1
           fi
 
+      - name: Verify stamp + arch (arm64/armv7l cannot run natively — check ELF)
+        run: |
+          # The runner (linux/amd64) cannot execute the arm64/armv7l binaries,
+          # so verify their architecture via the ELF header instead (AC-4).
+          for arch in arm64 arm; do
+            BIN="huddlescope_${{ steps.version.outputs.version }}_linux_${arch}"
+            if [ -f "$BIN" ]; then
+              machine="$(readelf -h "$BIN" 2>/dev/null | awk -F: '/Machine/ {print $2}' | tr -d ' ')"
+              echo "$BIN -> ELF Machine: $machine"
+            fi
+          done
+
+      - name: Generate checksums
+        # SHA256SUMS is the canonical checksum manifest name (issue #161 AC-4);
+        # operators verify with `sha256sum -c SHA256SUMS`.
+        run: sha256sum huddlescope_* > SHA256SUMS
+
       - name: Create or update release
         run: |
           TAG="v${{ steps.version.outputs.version }}"
+          # Release assets are Linux-only (issue #161 AC-4); the darwin/arm64
+          # dev artifact is excluded from the release and stays a GitHub
+          # artifact only.
+          LINUX_ASSETS=$(ls huddlescope_*_linux_* 2>/dev/null || true)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" --clobber huddlescope_* checksums.txt
+            gh release upload "$TAG" --clobber $LINUX_ASSETS SHA256SUMS
           else
             gh release create "$TAG" \
               --title "$TAG" \
               --target main \
               --notes "huddlescope ${{ steps.version.outputs.version }} (commit ${{ github.sha }})" \
-              huddlescope_* checksums.txt
+              $LINUX_ASSETS SHA256SUMS
           fi

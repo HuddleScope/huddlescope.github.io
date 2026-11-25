@@ -53,6 +53,29 @@ make build
 # Unified binary appears in dist/huddlescope
 ```
 
+The binary is built static (`CGO_ENABLED=0`) with `-trimpath` and stamped at
+build time with the version, commit, and a deterministic build-time stamp, so
+`huddlescope version` reports exactly where it came from:
+
+```sh
+$ ./dist/huddlescope version
+huddlescope version 0.3.0
+revision 8ccf026
+built 2026-11-25T10:53:29Z
+linux/amd64
+```
+
+The stamp is overridable (useful for reproducible builds and cross-compiles):
+
+```sh
+# Override any of these; defaults resolve from the repo (tag -> git describe
+# -> sha-<short>) and the HEAD commit timestamp (honoring SOURCE_DATE_EPOCH).
+make build VERSION=0.3.0 COMMIT=8ccf026 BUILT_AT=2026-11-25T00:00:00Z GOOS=linux GOARCH=arm64
+
+# Build the full release matrix (linux amd64/arm64/armv7l + darwin/arm64) into dist/
+make cross-build
+```
+
 ### Build scheduler worker
 ```sh
 cd scheduler
@@ -82,7 +105,9 @@ npm test
 - `make test` — Run vet and tests with race detector
 - `make coverage` — Run tests with coverage report
 - `make security` — Run gosec security scanner
-- `make build` — Build binaries to dist/
+- `make build` — Build binaries to dist/ (stamped, static, -trimpath)
+- `make cross-build` — Build the release matrix (linux amd64/arm64/armv7l + darwin/arm64)
+- `make docker-build` — Build the huddlescope runtime image locally
 - `make clean` — Remove build artifacts
 - `make check` — Run fmt, lint, test, coverage, security
 
@@ -109,6 +134,53 @@ npm test
 ```sh
 ./dist/huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m
 ```
+
+## Releases
+
+Release binaries are built and uploaded as assets of a GitHub Release by the
+`build-and-release.yaml` workflow (on `v*` tag push or manual dispatch).
+Releases are **Linux-only** (amd64, arm64, armv7l); a `darwin/arm64` dev
+artifact is also built but kept as a GitHub artifact, never attached to the
+release.
+
+Each release includes a `SHA256SUMS` manifest. Verify an artifact before use:
+
+```sh
+# Download huddlescope_<version>_linux_<arch> and SHA256SUMS from the release,
+# then:
+sha256sum -c SHA256SUMS
+```
+
+Artifacts are built with `CGO_ENABLED=0 -trimpath` and a deterministic build
+stamp, are statically linked (verified with `readelf` in CI), and embed only
+non-secret build metadata (version, commit, time). No secrets are ever
+embedded in the binaries.
+
+## Docker
+
+A multi-stage `Dockerfile` at the repo root yields a minimal runtime image:
+the static binary at `/usr/local/bin/huddlescope`, CA certs present, and a
+non-root user. No `.env` or credentials are baked into the image — runtime
+config is supplied as environment variables at `docker run` time, identical to
+the native binary's precedence chain (flags > env > file > defaults), so the
+container and native binary share the same execution model.
+
+```sh
+# Build the image locally (not published automatically — image publishing is
+# the separate, unapproved #204 scope):
+make docker-build
+
+# Run it, supplying config as env (matches native):
+docker run --rm \
+  -e HSC_ENV=production \
+  -e HSC_STORAGE_BACKEND=turso \
+  -e TURSO_DATABASE_URL=... \
+  -e TURSO_AUTH_TOKEN=... \
+  huddlescope:$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//') version
+```
+
+No images or tags are published automatically by any workflow; building and
+publishing images remains a manual, reviewed operation.
 
 ## Website (Hugo)
 
