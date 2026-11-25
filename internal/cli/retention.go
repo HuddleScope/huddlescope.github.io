@@ -68,9 +68,10 @@ func (f *retentionFlags) register(cmd *cobra.Command) {
 }
 
 // loadRetentionConfig loads configuration and resolves the retention policy.
+// issue #158: resolved through the persistent flags so --config, --sources-file,
+// --teams-file, --log-level, --timeout are honored.
 func loadRetentionConfig(cmd *cobra.Command, d *Deps) (config.Config, domain.RetentionPolicy, error) {
-	cfgPath, _ := cmd.Flags().GetString("config")
-	cfg, err := d.LoadConfig(cfgPath)
+	cfg, err := loadConfigFromFlags(cmd, d)("", config.Overrides{})
 	if err != nil {
 		return config.Config{}, domain.RetentionPolicy{}, fmt.Errorf("load config: %w", err)
 	}

@@ -28,7 +28,7 @@ func TestRunIngestWithNoSources(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -57,7 +57,7 @@ func TestRunIngestConfigValidationError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("invalid config")
 		}),
 	)
@@ -74,7 +74,7 @@ func TestRunIngestRepositoryError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -94,7 +94,7 @@ func TestRunIngestTeamsError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				Sources: []config.Source{},
 			}, nil
@@ -125,7 +125,7 @@ func TestRunExportWithNoSources(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				Sources: []config.Source{},
 			}, nil
@@ -155,7 +155,7 @@ func TestRunExportConfigValidationError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("invalid config")
 		}),
 	)
@@ -172,7 +172,7 @@ func TestRunExportDryRunValidationFailure(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("invalid config")
 		}),
 	)
@@ -189,7 +189,7 @@ func TestRunExportRunFailure(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("load config error")
 		}),
 	)
@@ -206,7 +206,7 @@ func TestRunExportRepositoryError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				Sources: []config.Source{},
 			}, nil
@@ -390,7 +390,7 @@ func TestCheckConfigTextOutput(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				UserAgent:           "test-agent/1.0",
 				RequestTimeout:      30 * time.Second,
@@ -418,7 +418,7 @@ func TestCheckConfigJSONOutput(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				UserAgent:           "test-agent/1.0",
 				RequestTimeout:      30 * time.Second,
@@ -451,7 +451,7 @@ func TestCheckConfigValidationError(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("invalid config")
 		}),
 	)
@@ -667,7 +667,7 @@ func TestRunIngestContextCancelled(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -698,7 +698,7 @@ func TestRunExportContextCancelled(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -730,7 +730,7 @@ func TestRunnerWithAllOptions(t *testing.T) {
 	r := NewRunner(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {

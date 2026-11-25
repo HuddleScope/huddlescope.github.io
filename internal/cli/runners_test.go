@@ -25,7 +25,7 @@ func TestRunIngest(t *testing.T) {
 	d := NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -88,7 +88,7 @@ func TestRunIngestWithSources(t *testing.T) {
 	err := runIngest(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return cfg, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -124,7 +124,7 @@ func TestRunExport(t *testing.T) {
 	err := runExport(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -161,7 +161,7 @@ func TestRunHeartbeatCheck(t *testing.T) {
 	err := runHeartbeatCheck(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -212,7 +212,7 @@ func TestRunHeartbeatCheckWithValid(t *testing.T) {
 	err := runHeartbeatCheck(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -264,7 +264,7 @@ func TestRunConfigCheck(t *testing.T) {
 	err := runConfigCheck(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return cfg, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
@@ -305,7 +305,7 @@ func TestRunConfigCheckWithInvalid(t *testing.T) {
 	err := runConfigCheck(cmd, NewDeps(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, fmt.Errorf("invalid config")
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {

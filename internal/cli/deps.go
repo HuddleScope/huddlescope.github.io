@@ -44,9 +44,10 @@ func DefaultDeps() *Deps {
 	return types.DefaultDeps()
 }
 
-// DefaultLoadConfig is the default configuration loader.
-func DefaultLoadConfig(path string) (config.Config, error) {
-	return config.Load(path)
+// DefaultLoadConfig is the default configuration loader (issue #158: accepts
+// flag overrides that win over env/file).
+func DefaultLoadConfig(path string, o config.Overrides) (config.Config, error) {
+	return config.LoadWith(path, o)
 }
 
 // DefaultNewRepository is the default repository constructor.

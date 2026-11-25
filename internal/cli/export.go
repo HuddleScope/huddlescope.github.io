@@ -67,7 +67,7 @@ func runExport(cmd *cobra.Command, d *Deps) error {
 	r := runner.NewRunner(
 		runner.WithOutput(cmd.OutOrStdout()),
 		runner.WithErrorOutput(cmd.ErrOrStderr()),
-		runner.WithLoadConfig(d.LoadConfig),
+		runner.WithLoadConfig(loadConfigFromFlags(cmd, d)),
 		runner.WithNewRepository(d.NewRepository),
 		runner.WithNewApp(d.NewApp),
 		runner.WithNewPublisher(d.NewPublisher),

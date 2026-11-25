@@ -1245,3 +1245,259 @@ func TestConfig_RunnerOrigin_FileKey(t *testing.T) {
 		t.Errorf("origin = %q, want github-backup", cfg.RunnerOrigin)
 	}
 }
+
+// --- issue #158 (HS-PORT-02) tests ---
+
+func TestLoadWithFlagOverridesWinOverEnv(t *testing.T) {
+	t.Setenv("HSC_SOURCES_FILE", "/env/sources.yaml")
+	t.Setenv("HSC_TEAMS_FILE", "/env/teams.yaml")
+
+	cfg, err := LoadWith("", Overrides{
+		SourcesFile: "/flag/sources.yaml",
+		TeamsFile:   "/flag/teams.yaml",
+	})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.SourcesFile != "/flag/sources.yaml" {
+		t.Errorf("SourcesFile = %q, want /flag/sources.yaml", cfg.SourcesFile)
+	}
+	if cfg.TeamsFile != "/flag/teams.yaml" {
+		t.Errorf("TeamsFile = %q, want /flag/teams.yaml", cfg.TeamsFile)
+	}
+}
+
+func TestLoadWithEnvWinsOverFile(t *testing.T) {
+	f := writeConfigFile(t, "HSC_SOURCES_FILE=/file/sources.yaml\n")
+	t.Setenv("HSC_SOURCES_FILE", "/env/sources.yaml")
+
+	cfg, err := LoadWith(f, Overrides{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.SourcesFile != "/env/sources.yaml" {
+		t.Errorf("SourcesFile = %q, want /env/sources.yaml", cfg.SourcesFile)
+	}
+}
+
+func TestLoadWithFileWinsOverDefault(t *testing.T) {
+	f := writeConfigFile(t, "HSC_SOURCES_FILE=/file/sources.yaml\n")
+	cfg, err := LoadWith(f, Overrides{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.SourcesFile != "/file/sources.yaml" {
+		t.Errorf("SourcesFile = %q, want /file/sources.yaml", cfg.SourcesFile)
+	}
+}
+
+func TestLoadWithTimeoutAndLogLevelOverrides(t *testing.T) {
+	t.Setenv("HSC_TIMEOUT", "10s")
+	t.Setenv("HSC_LOG_LEVEL", "debug")
+
+	cfg, err := LoadWith("", Overrides{
+		Timeout:  30 * time.Second,
+		LogLevel: "warn",
+	})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.RequestTimeout != 30*time.Second {
+		t.Errorf("RequestTimeout = %v, want 30s", cfg.RequestTimeout)
+	}
+	if cfg.LogLevel != "warn" {
+		t.Errorf("LogLevel = %q, want warn", cfg.LogLevel)
+	}
+}
+
+func TestLoadWithZeroOverridesFallThrough(t *testing.T) {
+	t.Setenv("HSC_SOURCES_FILE", "/env/sources.yaml")
+	cfg, err := LoadWith("", Overrides{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.SourcesFile != "/env/sources.yaml" {
+		t.Errorf("SourcesFile = %q, want /env/sources.yaml", cfg.SourcesFile)
+	}
+}
+
+func TestLoadEnvFileSourcesTeamsPublishJSONLog(t *testing.T) {
+	f := writeConfigFile(t, `HSC_SOURCES_FILE=/abs/sources.yaml
+HSC_TEAMS_FILE=/abs/teams.yaml
+HSC_PUBLISH_SITE_DATA=true
+HSC_JSON_LOG=true
+`)
+	cfg, err := LoadWith(f, Overrides{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if cfg.SourcesFile != "/abs/sources.yaml" {
+		t.Errorf("SourcesFile = %q, want /abs/sources.yaml", cfg.SourcesFile)
+	}
+	if cfg.TeamsFile != "/abs/teams.yaml" {
+		t.Errorf("TeamsFile = %q, want /abs/teams.yaml", cfg.TeamsFile)
+	}
+	if cfg.PublishSiteData != "true" {
+		t.Errorf("PublishSiteData = %q, want true", cfg.PublishSiteData)
+	}
+	if cfg.JSONLog != "true" {
+		t.Errorf("JSONLog = %q, want true", cfg.JSONLog)
+	}
+}
+
+func TestShouldPublishSiteData(t *testing.T) {
+	cases := []struct {
+		publish string
+		env     string
+		want    bool
+	}{
+		{"", "development", true},
+		{"auto", "development", true},
+		{"", "production", false},
+		{"auto", "production", false},
+		{"true", "production", true},
+		{"true", "development", true},
+		{"false", "development", false},
+		{"false", "production", false},
+		{"TRUE", "production", true},
+	}
+	for _, c := range cases {
+		cfg := Config{Env: c.env, PublishSiteData: c.publish}
+		if got := cfg.ShouldPublishSiteData(); got != c.want {
+			t.Errorf("ShouldPublishSiteData(publish=%q, env=%q) = %v, want %v", c.publish, c.env, got, c.want)
+		}
+	}
+}
+
+func TestShouldJSONLog(t *testing.T) {
+	cases := []struct {
+		jsonLog string
+		want    bool
+	}{
+		{"", false},
+		{"false", false},
+		{"true", true},
+		{"1", true},
+		{"yes", true},
+		{"on", true},
+	}
+	for _, c := range cases {
+		cfg := Config{JSONLog: c.jsonLog}
+		if got := cfg.ShouldJSONLog(); got != c.want {
+			t.Errorf("ShouldJSONLog(JSONLog=%q) = %v, want %v", c.jsonLog, got, c.want)
+		}
+	}
+}
+
+func TestValidateRejectsRelativeSourcesFile(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SourcesFile = "conf/relative.yaml"
+	errs := cfg.Validate()
+	if errs == nil {
+		t.Fatal("Validate() = nil, want error for relative sources file")
+	}
+	if !contains(errs.Error(), "HSC_SOURCES_FILE") {
+		t.Errorf("error = %q, want mention of HSC_SOURCES_FILE", errs.Error())
+	}
+}
+
+func TestValidateRejectsRelativeTeamsFile(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.TeamsFile = "relative/teams.yaml"
+	errs := cfg.Validate()
+	if errs == nil {
+		t.Fatal("Validate() = nil, want error for relative teams file")
+	}
+	if !contains(errs.Error(), "HSC_TEAMS_FILE") {
+		t.Errorf("error = %q, want mention of HSC_TEAMS_FILE", errs.Error())
+	}
+}
+
+func TestValidateAcceptsDefaultRelativeSourcesFile(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SourcesFile = "conf/sources.yaml" // exactly the default
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with default sources file = %v, want nil", err)
+	}
+}
+
+func TestValidateAcceptsAbsoluteSourcesFile(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.SourcesFile = "/etc/huddlescope/sources.yaml"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with absolute sources file = %v, want nil", err)
+	}
+}
+
+func TestValidateProductionRejectsRelativeOutputPaths(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.Env = "production"
+	cfg.StorageBackend = "turso"
+	cfg.TursoDatabaseURL = "libsql://example.com"
+	cfg.TursoAuthToken = "token"
+	cfg.HeartbeatFile = "relative/heartbeat.json"
+	cfg.FeedsFile = "relative/feeds.json"
+	cfg.DataDir = "relative/data"
+	cfg.HugoContentDir = "relative/content"
+	cfg.StoragePath = "relative/storage.db"
+	errs := cfg.Validate()
+	if errs == nil {
+		t.Fatal("Validate() = nil, want errors for relative output paths in production")
+	}
+	msg := errs.Error()
+	for _, key := range []string{"HSC_HEARTBEAT_FILE", "HSC_FEEDS_FILE", "HSC_DATA_DIR", "HSC_HUGO_CONTENT_DIR", "HSC_STORAGE_PATH"} {
+		if !contains(msg, key) {
+			t.Errorf("error = %q, want mention of %s", msg, key)
+		}
+	}
+}
+
+func TestValidateProductionAcceptsAbsoluteOutputPaths(t *testing.T) {
+	cfg := validBaseConfig()
+	cfg.Env = "production"
+	cfg.StorageBackend = "turso"
+	cfg.TursoDatabaseURL = "libsql://example.com"
+	cfg.TursoAuthToken = "token"
+	cfg.SourcesFile = "/etc/huddlescope/sources.yaml"
+	cfg.TeamsFile = "/etc/huddlescope/teams.yaml"
+	cfg.HeartbeatFile = "/var/lib/huddlescope/web/data/heartbeat.json"
+	cfg.FeedsFile = "/var/lib/huddlescope/web/data/feeds.json"
+	cfg.DataDir = "/var/lib/huddlescope/data"
+	cfg.HugoContentDir = "/var/lib/huddlescope/site/content"
+	cfg.StoragePath = "/var/lib/huddlescope/storage.db"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with absolute output paths in production = %v, want nil", err)
+	}
+}
+
+// writeConfigFile writes the given content to a temp .env file and returns its path.
+func writeConfigFile(t *testing.T, content string) string {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	return f
+}
+
+// validBaseConfig returns a Config that passes validation in dev (no storage
+// backend required), with the default sources/teams paths and the fields that
+// Validate requires (similarity threshold, temporal window, data file, user
+// agent, request timeout).
+func validBaseConfig() Config {
+	return Config{
+		Env:                 "dev",
+		UserAgent:           "huddlescope-test",
+		SimilarityThreshold: 0.8,
+		TemporalWindow:      24 * time.Hour,
+		RequestTimeout:      30 * time.Second,
+		DataFile:            "data/huddlescope-data.json",
+		SourcesFile:         "conf/sources.yaml",
+		TeamsFile:           "conf/teams.yaml",
+		HeartbeatFile:       "web/data/heartbeat.json",
+		FeedsFile:           "web/data/feeds.json",
+		DataDir:             "data",
+		HugoContentDir:      "site/content",
+		StoragePath:         "data/story.db",
+	}
+}

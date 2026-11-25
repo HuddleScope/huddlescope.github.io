@@ -28,7 +28,7 @@ func depsForIngestCLI(out, errOut *bytes.Buffer) *Deps {
 	return NewDeps(
 		WithOutput(out),
 		WithErrorOutput(errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			// Empty config: validation fails after mode/stale parse, which is
 			// all we need to assert on the parse errors.
 			return config.Config{}, nil

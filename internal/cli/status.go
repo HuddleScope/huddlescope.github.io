@@ -14,8 +14,10 @@ import (
 // openIngestRuns loads config and constructs the ingest-run repository for
 // the freshness commands. The memory backend is rejected: a per-host volatile
 // store cannot make a cross-host freshness decision (plan §1.8, AC-3).
-func openIngestRuns(d *Deps, cfgPath string) (domain.IngestRunRepository, config.Config, error) {
-	cfg, err := d.LoadConfig(cfgPath)
+// issue #158: config is resolved through the persistent flags so --config,
+// --sources-file, etc. are honored.
+func openIngestRuns(cmd *cobra.Command, d *Deps) (domain.IngestRunRepository, config.Config, error) {
+	cfg, err := loadConfigFromFlags(cmd, d)("", config.Overrides{})
 	if err != nil {
 		return nil, config.Config{}, fmt.Errorf("load config: %w", err)
 	}
@@ -55,7 +57,7 @@ func formatRunJSON(run domain.IngestRun) map[string]any {
 // runIngestStatus implements `ingest status` (AC-4). Exit 0 on a correct
 // query (including zero runs); non-zero on DB errors with NO verdict printed.
 func runIngestStatus(cmd *cobra.Command, d *Deps, output string) error {
-	repo, cfg, err := openIngestRuns(d, "")
+	repo, cfg, err := openIngestRuns(cmd, d)
 	if err != nil {
 		return err
 	}
@@ -159,7 +161,7 @@ type shouldRunJSON struct {
 // of the true/false decision on a correct query; non-zero (no verdict) on DB
 // errors so callers fail closed.
 func runIngestShouldRun(cmd *cobra.Command, d *Deps, staleAfter time.Duration, output string) error {
-	repo, _, err := openIngestRuns(d, "")
+	repo, _, err := openIngestRuns(cmd, d)
 	if err != nil {
 		return err
 	}

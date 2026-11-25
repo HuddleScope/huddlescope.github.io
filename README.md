@@ -176,6 +176,28 @@ Release and operations documentation: [docs/release-checklist.md](docs/release-c
 
 ## Configuration
 
+### Portable Deployment
+
+The `huddlescope` binary is fully portable. It can run on a VPS or Raspberry Pi
+that does **not** sit inside the huddlescope repo, using Turso as the shared
+store. See [docs/portable-deployment.md](docs/portable-deployment.md) for the
+detailed guide.
+
+- **Config precedence**: CLI flags (`--config`, `--sources-file`, `--teams-file`,
+  `--log-level`, `--timeout`) > environment variables > `--config` file > defaults.
+- **`HSC_PUBLISH_SITE_DATA`**: `auto` (default) skips `web/data` writes in
+  production (repo-less hosts); `true` always writes (GitHub Actions); `false`
+  never writes.
+- **Absolute paths**: explicitly-set input paths (`HSC_SOURCES_FILE`,
+  `HSC_TEAMS_FILE`) must be absolute in all envs; output paths must be absolute
+  in production.
+- **`scripts/install-config.sh`**: installs a deployment config with `0600`
+  permissions (`deploy` → `/etc/huddlescope/deploy.env`, `rpi` →
+  `/opt/huddlescope/huddlescope.env`).
+- **Fail-fast**: production requires `HSC_STORAGE_BACKEND=turso`,
+  `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN`; missing values fail clearly
+  without partial writes.
+
 ### Environment Variables
 
 | Variable | Default | Production | Description |
@@ -192,6 +214,9 @@ Release and operations documentation: [docs/release-checklist.md](docs/release-c
 | `HSC_ENV` | `dev` | Yes | Environment: dev, production |
 | `TURSO_DATABASE_URL` | (none) | Yes | Turso database URL |
 | `TURSO_AUTH_TOKEN` | (none) | Yes | Turso authentication token |
+| `HSC_RUNNER_ORIGIN` | `local` | No | Execution origin recorded on ingest run rows (e.g., `vps`, `raspberry`, `github-backup`) |
+| `HSC_PUBLISH_SITE_DATA` | `auto` | No | Site-data writes: `auto` (dev writes, production skips), `true` (always), `false` (never) |
+| `HSC_JSON_LOG` | `false` | No | Opt-in single-line JSON run log (no secrets) |
 
 ### Source Configuration
 

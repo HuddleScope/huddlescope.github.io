@@ -69,7 +69,7 @@ func execIngest(t *testing.T, d *Deps, args ...string) (string, string, error) {
 
 func depsWithRuns(cfg config.Config, repo domain.IngestRunRepository, now time.Time) *Deps {
 	d := NewDeps()
-	d.LoadConfig = func(string) (config.Config, error) { return cfg, nil }
+	d.LoadConfig = func(string, config.Overrides) (config.Config, error) { return cfg, nil }
 	d.NewIngestRunRepo = func(config.StorageConfig) (domain.IngestRunRepository, error) {
 		return repo, nil
 	}

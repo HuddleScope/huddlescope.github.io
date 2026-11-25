@@ -76,7 +76,7 @@ func TestRootCommandNoSecretsInError(t *testing.T) {
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
 		// Use an invalid config path to trigger an error
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, assert.AnError // Simulate error
 		}),
 	)
@@ -98,7 +98,7 @@ func TestConfigCheckRedacted(t *testing.T) {
 	r := runner.NewRunner(
 		runner.WithOutput(&out),
 		runner.WithErrorOutput(&errOut),
-		runner.WithLoadConfig(func(path string) (config.Config, error) {
+		runner.WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				UserAgent:           "test-agent/1.0",
 				RequestTimeout:      30 * time.Second,
@@ -155,7 +155,7 @@ func TestExecuteCWithCommand(t *testing.T) {
 	result := ExecuteC(args,
 		WithOutput(&out),
 		WithErrorOutput(&out),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{
 				UserAgent:           "test-agent/1.0",
 				RequestTimeout:      30 * time.Second,
@@ -255,7 +255,7 @@ func TestIngestRunExitCode(t *testing.T) {
 	cmd := NewRootCommand(
 		WithOutput(&out),
 		WithErrorOutput(&errOut),
-		WithLoadConfig(func(path string) (config.Config, error) {
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) {
 			return config.Config{}, nil
 		}),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
