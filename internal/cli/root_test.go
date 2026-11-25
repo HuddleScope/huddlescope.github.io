@@ -361,6 +361,46 @@ func TestVersionCommand(t *testing.T) {
 	assert.Contains(t, output, "huddlescope version", "version output should contain version string")
 }
 
+// TestCliVersionIsOverridableVar is a regression test for issue #203 / #161.
+//
+// The build & release workflow stamps the binary version at build time via:
+//
+//	go build -ldflags "-X .../internal/cli.cliVersion=X.Y.Z"
+//
+// The Go linker's `-X` flag can only override a *package-level variable*, not
+// a constant. If `cliVersion` were ever reverted to a `const`, that `-X` stamp
+// would silently no-op and every released binary would report the hardcoded
+// default version. This test pins the invariant that `cliVersion` is an
+// assignable `var` and that the version command renders its current value.
+func TestCliVersionIsOverridableVar(t *testing.T) {
+	original := cliVersion
+	defer func() { cliVersion = original }() // restore so other tests see the default
+
+	// The invariant: cliVersion must be assignable (i.e., a var, not a const).
+	// This assignment compiles only if cliVersion is a package-level variable.
+	cliVersion = "9.9.9-overridable"
+
+	var out bytes.Buffer
+	cmd := NewVersionCommand(nil)
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{})
+	assert.NoError(t, cmd.Execute())
+
+	assert.Equal(t, "huddlescope version 9.9.9-overridable\n", out.String(),
+		"version command must render the (mutable) cliVersion value")
+}
+
+// TestCliVersionDefault is a regression test for issue #203: the default
+// (unstamped) version string must remain a well-formed semver so that local
+// `make build` binaries report a sane version even when no `-X` stamp is passed.
+func TestCliVersionDefault(t *testing.T) {
+	// Default version must be non-empty and a plausible semver.
+	assert.NotEmpty(t, cliVersion, "cliVersion must have a non-empty default")
+	// The default must be a semver-ish string (digits and dots, no spaces).
+	assert.Regexp(t, `^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$`, cliVersion,
+		"cliVersion default should look like a semantic version, got %q", cliVersion)
+}
+
 func TestExecute(t *testing.T) {
 	// Test Execute helper function doesn't crash
 	var out bytes.Buffer
