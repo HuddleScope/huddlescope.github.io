@@ -7,9 +7,18 @@ import (
 )
 
 const (
-	cliName    = "huddlescope"
-	cliVersion = "0.3.0"
+	cliName = "huddlescope"
 )
+
+// cliVersion is a package-level variable (not a const) so that build-time
+// stamping via `go build -ldflags "-X .../internal/cli.cliVersion=X.Y.Z"`
+// can override the default. The default below is the source-of-truth version
+// for builds that do not pass a stamp (e.g., local `make build`).
+//
+// Issue #161 (reproducible builds & version stamping) / #203 (release
+// binaries) depend on this being a `var`: the Go linker's `-X` flag cannot
+// override a constant.
+var cliVersion = "0.3.0"
 
 // NewRootCommand creates the root Cobra command.
 func NewRootCommand(opts ...Option) *cobra.Command {

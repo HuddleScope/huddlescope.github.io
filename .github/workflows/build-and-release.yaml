@@ -1,0 +1,141 @@
+# Build & Release workflow (issue #203)
+#
+# Builds static Linux binaries (amd64, arm64, armv7l) from the tagged commit
+# or from main (on manual dispatch) and uploads them as assets of a GitHub
+# Release named v${VERSION}.
+#
+# Version resolution is delegated to scripts/resolve-version.sh so that this
+# workflow and the later Docker image workflow (issue #204) resolve the exact
+# same version string for a given run (acceptance criteria AC-2 / AC-10 of
+# the issue: the binary's stamped version must match the Docker image tag).
+#
+# Design notes (see plan.md §3):
+#   - workflow_dispatch builds `main` (not the dispatching branch) so we never
+#     publish unmerged branch code under a computed version.
+#   - The release is created via the preinstalled `gh` CLI (no third-party
+#     release action); the create-or-upload-`--clobber` branch makes re-runs
+#     idempotent after a partial asset upload.
+#   - `contents: write` is scoped to the `release` job only; the `build` job
+#     runs with the workflow-level `contents: read` default (token minimization).
+
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build linux/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, arm64, armv7l]
+        include:
+          - goarch: armv7l
+            goarm: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # fetch-depth: 0 so `git describe` (used by resolve-version.sh on the
+          # dispatch/describe path) can see the full tag history.
+          fetch-depth: 0
+          # Dispatch builds main, not the dispatching branch.
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve version
+        id: version
+        run: echo "version=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Build static binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliVersion=${{ steps.version.outputs.version }}" \
+            -o "huddlescope_${{ steps.version.outputs.version }}_linux_${{ matrix.goarch }}" \
+            ./cmd/huddlescope
+
+      - name: Verify static linking
+        run: |
+          BIN="huddlescope_${{ steps.version.outputs.version }}_linux_${{ matrix.goarch }}"
+          if readelf -d "$BIN" 2>/dev/null | grep -q NEEDED; then
+            echo "FAIL: $BIN has a dynamic (NEEDED) section" >&2
+            exit 1
+          fi
+          echo "OK: $BIN is statically linked"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: huddlescope-${{ steps.version.outputs.version }}-linux-${{ matrix.goarch }}
+          path: huddlescope_*
+          retention-days: 1
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: echo "version=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: huddlescope-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: sha256sum huddlescope_* > checksums.txt
+
+      - name: Verify stamp (amd64 runs natively on the runner)
+        run: |
+          out="$(./huddlescope_${{ steps.version.outputs.version }}_linux_amd64 version)"
+          echo "$out"
+          if ! printf '%s\n' "$out" | grep -q "${{ steps.version.outputs.version }}"; then
+            echo "FAIL: stamped version not found in `huddlescope version` output" >&2
+            exit 1
+          fi
+
+      - name: Create or update release
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" --clobber huddlescope_* checksums.txt
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --target main \
+              --notes "huddlescope ${{ steps.version.outputs.version }} (commit ${{ github.sha }})" \
+              huddlescope_* checksums.txt
+          fi
