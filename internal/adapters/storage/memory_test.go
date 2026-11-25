@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -284,5 +285,52 @@ func TestMemoryRepositoryUpsertEntityOrderUnchanged(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Fatalf("expected 1 story (reorder should not create duplicate), got %d", len(list))
+	}
+}
+
+// TestMemoryRepositoryListDeterministicOrder is a regression test for the
+// issue #165 flake: List() used to return map iteration order, which is
+// randomized by the runtime. Snapshot builders tie-break on list order, so a
+// nondeterministic List() made ContentEqual flaky and reported spurious
+// "changed" publishes. List() must always return ID-sorted order.
+func TestMemoryRepositoryListDeterministicOrder(t *testing.T) {
+	repo := NewMemoryRepository()
+
+	// Insert with IDs in an order that differs from sorted order, using
+	// shuffled keys to force map bucket diversity.
+	ids := []string{"zulu", "alpha", "mike", "kilo", "bravo", "echo", "hotel", "golf", "delta", "charlie"}
+	for _, id := range ids {
+		story := domain.Story{
+			ID:          id,
+			Title:       "T " + id,
+			Source:      "src-" + id,
+			PublishedAt: time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC),
+			Summary:     "S " + id,
+			URL:         "https://example.com/" + id,
+			GUID:        id,
+			DedupeKey:   "src-" + id + "|" + id,
+		}
+		if _, err := repo.Upsert(story); err != nil {
+			t.Fatalf("Upsert %s failed: %v", id, err)
+		}
+	}
+
+	// Repeated List() calls must all be identical and sorted by ID.
+	want := append([]string(nil), ids...)
+	sort.Strings(want)
+
+	for i := 0; i < 50; i++ {
+		stories, err := repo.List()
+		if err != nil {
+			t.Fatalf("List failed: %v", err)
+		}
+		if len(stories) != len(ids) {
+			t.Fatalf("List returned %d stories, want %d", len(stories), len(ids))
+		}
+		for j, s := range stories {
+			if s.ID != want[j] {
+				t.Fatalf("List()[%d].ID = %q, want %q (order must be deterministic ID-sorted)", j, s.ID, want[j])
+			}
+		}
 	}
 }

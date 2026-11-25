@@ -80,6 +80,15 @@ jobs:
           ./dist/huddlescope --help
           ./dist/huddlescope config check
 
+      # E2E matrix (offline) — issue #165 / HS-PORT-09 / AC-1, AC-2. Runs the
+      # binary-level suite (execs the built CLI against a 127.0.0.1 fixture RSS
+      # server + a local sqlite-file DB) and the failover suite (8 scenarios
+      # against the real sqlite-file backend + shared lease, build tag `e2e`).
+      # Purely offline: no TURSO_* / GITHUB_* env (the script refuses to run if
+      # any are present), DBs in temp dirs, no external feeds, no web/data writes.
+      - name: E2E matrix (offline)
+        run: make e2e
+
       - name: Install Hugo extended
         run: |
           HUGO_VERSION="0.169.0"

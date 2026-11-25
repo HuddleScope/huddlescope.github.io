@@ -112,6 +112,10 @@ type Config struct {
 	// New for issue #158 (HS-PORT-02): opt-in single-line JSON run log.
 	// "true"/"false" (default false). Non-secret; included in redacted output.
 	JSONLog string
+	// New for issue #165 (HS-PORT-09): test-only injected clock. Holds the
+	// raw HSC_FAKE_NOW value (RFC3339). Non-secret; honored by EffectiveNow
+	// only in dev, rejected in production (fail closed).
+	FakeNow string
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -343,6 +347,11 @@ func (c *Config) loadFromEnv() {
 	}
 	if v := os.Getenv("HSC_JSON_LOG"); v != "" {
 		c.JSONLog = strings.ToLower(v)
+	}
+	// New for issue #165 (HS-PORT-09): test-only injected clock. Non-secret;
+	// validated (RFC3339) by EffectiveNow. An empty value means "unset".
+	if v := os.Getenv("HSC_FAKE_NOW"); v != "" {
+		c.FakeNow = v
 	}
 }
 
@@ -819,6 +828,10 @@ func loadEnvFile(path string, cfg *Config) error {
 			cfg.PublishSiteData = strings.ToLower(value)
 		case "HSC_JSON_LOG":
 			cfg.JSONLog = strings.ToLower(value)
+		case "HSC_FAKE_NOW":
+			// issue #165: test-only injected clock. Non-secret; validated when
+			// the command calls EffectiveNow (a bad value fails closed there).
+			cfg.FakeNow = value
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -866,6 +879,28 @@ func (c Config) ShouldPublishSiteData() bool {
 	default: // "auto" (or empty) — env-dependent
 		return c.Env != "production"
 	}
+}
+
+// EffectiveNow resolves the clock to use for freshness decisions. When
+// HSC_FAKE_NOW is set it returns that fixed time (RFC3339) only in dev (or
+// when HSC_ENV is unset); in production a doctored clock is a configuration
+// fault and the command must fail closed rather than silently use it
+// (issue #165 / AC-1, security).
+//
+// A syntactically invalid HSC_FAKE_NOW is always an error, regardless of env:
+// a typo'd clock must never be silently ignored, it must surface loudly.
+func (c Config) EffectiveNow(realNow time.Time) (time.Time, error) {
+	if c.FakeNow == "" {
+		return realNow, nil
+	}
+	fake, err := time.Parse(time.RFC3339, c.FakeNow)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("HSC_FAKE_NOW must be a valid RFC3339 timestamp (e.g. 2024-07-31T14:00:00Z): %w", err)
+	}
+	if c.Env == "production" {
+		return time.Time{}, fmt.Errorf("HSC_FAKE_NOW is a test-only override and is not honored in production (HSC_ENV=production); unset it")
+	}
+	return fake.UTC(), nil
 }
 
 // ShouldJSONLog reports whether the optional single-line JSON run log is enabled.
@@ -1123,6 +1158,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		RetentionWindowDays int      `json:"RetentionWindowDays"`
 		PublishSiteData     string   `json:"PublishSiteData"`
 		JSONLog             string   `json:"JSONLog"`
+		FakeNow             string   `json:"FakeNow,omitempty"` // test-only clock (issue #165); non-secret flag marker
 	}
 	safe := SafeConfig{
 		ConfigFile:          c.ConfigFile,
@@ -1143,6 +1179,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		RetentionWindowDays: c.RetentionWindowDays,
 		PublishSiteData:     c.PublishSiteData,
 		JSONLog:             c.JSONLog,
+		FakeNow:             c.FakeNow,
 	}
 	return json.Marshal(safe)
 }

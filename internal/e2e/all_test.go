@@ -286,8 +286,16 @@ func TempWebDir(t *testing.T) (dir string, cleanup func()) {
 		t.Fatalf("web directory not found at %s", webRoot)
 	}
 
-	tmpDir := filepath.Join(os.TempDir(), fmt.Sprintf("huddlescope-web-%d", time.Now().UnixNano()))
+	// os.MkdirTemp guarantees a unique path. Hand-rolled timestamp-based names can
+	// collide when parallel tests allocate directories within the same nanosecond,
+	// which would make two tests share the same homepage.json data file and
+	// trample each other's snapshots (observed flake in release-gate tests).
+	tmpDir, err := os.MkdirTemp(os.TempDir(), "huddlescope-web-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
 	if err := copyDir(webRoot, tmpDir); err != nil {
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("failed to copy web directory: %v", err)
 	}
 	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }
