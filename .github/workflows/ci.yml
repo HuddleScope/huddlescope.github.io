@@ -71,6 +71,15 @@ jobs:
       - name: Build binaries
         run: make build
 
+      # Native smoke checks (AC-2/AC-4): the stamped, locally-built binary must
+      # start, report its version/revision/build-info/target, and run
+      # `config check` against the default dev config without a network.
+      - name: Smoke (version / --help / config check)
+        run: |
+          ./dist/huddlescope version
+          ./dist/huddlescope --help
+          ./dist/huddlescope config check
+
       - name: Install Hugo extended
         run: |
           HUGO_VERSION="0.169.0"
@@ -81,6 +90,58 @@ jobs:
 
       - name: Verify binaries
         run: ls -la dist/
+
+  # Cross-architecture static build matrix (issue #161 AC-7): proves the
+  # single binary cross-compiles with CGO_ENABLED=0 and stays static on every
+  # release target per-PR. The release workflow (build-and-release.yaml) also
+  # enforces the readelf NEEDED check on its own linux artifacts; this job is
+  # the per-PR guard so a cgo-gated transitive dep is caught before release.
+  cross-build:
+    name: Cross-build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64 }
+          - { goos: linux,  goarch: arm64 }
+          - { goos: linux,  goarch: arm,   goarm: '7' }
+          - { goos: darwin, goarch: arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve version
+        id: version
+        run: echo "version=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile static binary (CGO_ENABLED=0, -trimpath)
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/HuddleScope/huddlescope.github.io/internal/cli.cliVersion=${{ steps.version.outputs.version }}" \
+            -o "huddlescope_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}" \
+            ./cmd/huddlescope
+
+      - name: Verify static linking (ELF targets)
+        if: matrix.goos == 'linux'
+        run: |
+          BIN="huddlescope_${{ steps.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if readelf -d "$BIN" 2>/dev/null | grep -q NEEDED; then
+            echo "FAIL: $BIN has a dynamic (NEEDED) section" >&2
+            exit 1
+          fi
+          echo "OK: $BIN is statically linked"
 
   # Scheduled worker: Cloudflare Worker Cron
   # Independent job — does not block merges (not a required status check)

@@ -1,0 +1,14 @@
+# Keep the Docker build context minimal and secret-free (issue #161 AC-5/AC-6).
+# Nothing here is a secret, but excluding .env/web/dist/coverage keeps the
+# context small and guarantees no .env or built artifacts ever reach a layer.
+.env
+.env.*
+!.env.example
+dist/
+web/public/
+web/data/
+coverage.out
+*.test
+.github/
+docs/
+archive/

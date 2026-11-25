@@ -20,6 +20,21 @@ const (
 // override a constant.
 var cliVersion = "0.3.0"
 
+// cliCommit is a package-level variable (not a const) so that build-time
+// stamping via `go build -ldflags "-X .../internal/cli.cliCommit=<sha>"`
+// can override the default. The default is "unknown" so unstamped local
+// builds report a clearly-non-release revision rather than a stale value.
+var cliCommit = "unknown"
+
+// cliBuiltAt is a package-level variable (not a const) so that build-time
+// stamping via `go build -ldflags "-X .../internal/cli.cliBuiltAt=<stamp>"`
+// can override the default. It holds a deterministic build-time stamp (see
+// Makefile / scripts/resolve-version.sh); the default is "dev" for local
+// builds without a stamp. A deterministic stamp (sourced from
+// SOURCE_DATE_EPOCH or the commit timestamp) is what makes release builds
+// byte-reproducible across identical toolchain + flags (issue #161 AC-3).
+var cliBuiltAt = "dev"
+
 // NewRootCommand creates the root Cobra command.
 func NewRootCommand(opts ...Option) *cobra.Command {
 	d := NewDeps(opts...)
