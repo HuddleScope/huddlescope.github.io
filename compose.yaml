@@ -1,0 +1,14 @@
+services:
+  ingest:
+    build: .
+    image: huddlescope:${HSC_VERSION:-dev}
+    # One-shot run; scheduling is external (host cron / systemd timer running
+    # `docker compose run --rm ingest`). Never an in-container loop.
+    restart: "no"
+    user: "65534:65534"
+    env_file:
+      # Operator-provided, gitignored file (see deploy/examples/ for a
+      # placeholder-only example). The committed example is never referenced
+      # here, so no secret path lands in the repo.
+      - ./huddlescope.env
+    command: ["ingest", "run", "--mode", "primary"]

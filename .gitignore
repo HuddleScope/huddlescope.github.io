@@ -20,6 +20,9 @@ web/fixtures/dev/
 
 # Local secrets
 .env
+# Operator-provided compose env file (see compose.yaml env_file); the committed
+# placeholder-only example lives at deploy/examples/huddlescope.env.example.
+/huddlescope.env
 
 # Go cache
 # go.sum is required for dependency verification and CI
