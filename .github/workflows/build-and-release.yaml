@@ -128,7 +128,7 @@ jobs:
         run: echo "version=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: huddlescope-*
           merge-multiple: true
