@@ -1,189 +1,153 @@
-# Implementation: Issue #201 — [UI-04] Preserve original headline casing in display titles
+# Implementation Notes — Issue #158 (HS-PORT-02): Portable Configuration and Runtime
 
-Implemented `autopilot/issue-201` per the saved plan (plan §1–§7). Display
-titles (original feed casing) are now carried separately from identity titles
-(normalized/lowercased) across the domain, storage, snapshot, and Hugo layers.
-The identity primitives (`ComputeStoryID`, `ComputeStorySlugFromHeadline`,
-`ComputeStoryPageKey`, `DedupeKey`, `computeGroupID`, `TokenizeTitle`-based
-clustering) are unchanged and still read the normalized `Title`/`Headline`.
+## Summary
 
-A new `DisplayTitle` (articles/stories) and `DisplayHeadline` (story groups)
-is threaded from feed ingestion → domain → persistence → snapshot JSON → Hugo
-story pages. Every display read falls back to the normalized `Title` when
-`DisplayTitle` is empty, so pre-change rows render exactly as today. Display
-normalization is `trim + collapse whitespace + NFC` — case and punctuation are
-preserved (AC-1). The `NormalizeTitle` function is byte-for-byte unchanged (its
-lowercase step is identity-critical).
+Made the `huddlescope` binary portable across VPS/Raspberry Pi (ingest to
+Turso without repo/web-data writes) and GitHub Actions (export + publish
+site-data files). Added config precedence (flags > env > file > defaults),
+absolute path support with fail-fast validation, a `HSC_PUBLISH_SITE_DATA`
+gate for site-data writes, an opt-in JSON run log, and deployment config
+install tooling.
 
-## What was built
+## Changes by file
 
-### Domain (`internal/domain/`)
+### `internal/config/config.go`
+- Added `Overrides` struct (`SourcesFile`, `TeamsFile`, `Timeout`, `LogLevel`)
+  carrying CLI-flag values.
+- `Load(path)` is now a wrapper around `LoadWith(path, o Overrides)`.
+- `LoadWith` applies the precedence chain: defaults → config file → env → flag
+  overrides (applied LAST so flags always win).
+- `loadEnvFile` now parses `HSC_SOURCES_FILE`, `HSC_TEAMS_FILE`,
+  `HSC_PUBLISH_SITE_DATA`, `HSC_JSON_LOG`.
+- `loadFromEnv` now reads `HSC_PUBLISH_SITE_DATA` and `HSC_JSON_LOG` (lowercased).
+- `applyOverrides` applies flag overrides (zero values ignored).
+- New `Config` fields: `PublishSiteData` (string), `JSONLog` (string) —
+  non-secret, included in `MarshalJSON` output.
+- `ShouldPublishSiteData()` — `auto` (default: dev writes, production skips),
+  `true` (always), `false` (never). Case-insensitive.
+- `ShouldJSONLog()` — `true`/`1`/`yes`/`on` → true, else false.
+- `Validate()` — rejects explicitly-set relative paths: input files
+  (`SourcesFile`, `TeamsFile`) in all envs; output paths (`HeartbeatFile`,
+  `FeedsFile`, `DataDir`, `HugoContentDir`, `StoragePath`) in production.
+  Built-in defaults remain valid. `relativeExplicit` helper distinguishes
+  operator-set relative paths from the default.
 
-- **`normalize.go`** — new `DisplayNormalizeTitle(title string) string`:
-  `""` → `""`; `TrimSpace` → collapse whitespace → `NormalizeUnicode` (NFC).
-  **No lowercasing.** `NormalizeTitle` is untouched.
-- **`story.go`** — `Story` gains `DisplayTitle string` (JSON tag
-  `displayTitle` in `MarshalJSON`/`UnmarshalJSON`; old payloads unmarshal to
-  `""`). New helper `func (s Story) Display() string` returns `DisplayTitle`
-  when non-empty after trim, else `Title` — the single fallback point every
-  display surface uses. `MeaningfulFieldsChanged` now compares the
-  fallback-aware `Display()` values, so a display-only re-ingestion (restoring
-  original casing) counts as an update (AC-3) while `""` vs same-as-`Title`
-  stays unchanged (storage-column/JSON hydration stability).
-- **`source.go`** — `Story.Canonicalize` sets `DisplayTitle:
-  DisplayNormalizeTitle(entry.Title)` alongside the normalized `Title`.
-  Identity fields (`ID`, `DedupeKey`, slug inputs) untouched.
-- **`clustering.go`** — `Article` gains `DisplayTitle string`. `NewArticle`
-  sets it from `DisplayNormalizeTitle(feedEntry.Title)`. `StoryGroup` gains
-  `DisplayHeadline string`; `NewStoryGroup`/`AddArticle` set it from the
-  earliest article's `DisplayTitle` (fallback `Title`). `Headline` semantics
-  unchanged (normalized — still feeds slugs, group ID, scoring, summary
-  fallback). `NewStoryFromGroup` sets `Story.DisplayTitle =
-  group.DisplayHeadline`.
-- **`storypage.go`** — `BuildStoryDetailPage`: `Headline` = group display
-  headline (fallback `group.Headline`); each `PublisherArticle.Title` =
-  `art.Display()`. **`Slug` and `PageKey` remain computed from the normalized
-  `rep.Title`** (AC-2).
-- **`snapshot.go`** — `buildStories`: `SnapshotStory.Title` uses the display
-  headline (group `DisplayHeadline`-or-`Headline` fallback);
-  `snapshotStorySummary` fallback uses the same display headline.
-  `buildLatestArticles`: `SnapshotArticle.Title` = `s.Display()`. `Validate`,
-  `Render`, `ContentEqual`, sort orders unchanged.
+### `internal/types/deps.go`
+- `LoadConfigFunc` changed to `func(path string, o config.Overrides)
+  (config.Config, error)`.
+- `DefaultLoadConfig` now calls `config.LoadWith`.
 
-### Storage (`internal/adapters/storage/sqlite/`)
+### `internal/cli/deps.go`
+- `DefaultLoadConfig` updated to the new 2-arg signature.
 
-- **`migrations/010_display_title.sql`** (new) — forward-only, additive:
-  `ALTER TABLE articles ADD COLUMN display_title TEXT NOT NULL DEFAULT '';`
-  `UPDATE articles SET display_title = COALESCE(title, '');`
-  `ALTER TABLE stories ADD COLUMN display_title TEXT NOT NULL DEFAULT '';`
-  `UPDATE stories SET display_title = COALESCE(headline, COALESCE(title, ''));`
-  Header documents the normalized-fallback backfill (AC-3), Turso/libSQL
-  compatibility, and the schema_migrations guard (v10) preventing re-run.
-- **`repository.go`** —
-  - `Upsert`: the story INSERT, the found-by-story_key UPDATE, and the
-    dedupe-hit UPDATE all persist `display_title` (bind `storyDisplayTitle`,
-    which coalesces `story.Title` when `DisplayTitle` is empty). The
-    found-by-story_key branch now also reads the existing `display_title`
-    column + `story_data` `displayTitle` key into `otherStory.DisplayTitle`
-    (via new helper `storyDataDisplayTitle`) so unchanged-detection is stable
-    across column/JSON hydration.
-  - `upsertArticles` / `UpsertArticle`: UPDATE/INSERT include
-    `display_title` (coalesce `article.Title` when empty).
-  - `List` / `ListWithCtx`: article hydration SELECT adds `a.display_title`;
-    when empty, `DisplayTitle = article.Title` (legacy fallback). Story rows
-    hydrate `DisplayTitle` from the `display_title` column when the
-    `story_data` JSON key is absent (legacy rows render as today, AC-3).
-- **`turso/repository.go`** — no change: it delegates to the `sqlite`
-  package, so the shared SQL covers both drivers.
+### `internal/cli/root.go`
+- Added persistent flags `--sources-file` and `--teams-file`.
+- Updated `Long` help text with the precedence chain and absolute-path note.
 
-### Application layer (`internal/application/`)
+### `internal/cli/flags.go` (new)
+- `loadConfigFromFlags(cmd, d)` returns a `types.LoadConfigFunc` closure that
+  reads the persistent flags (`config`, `sources-file`, `teams-file`,
+  `log-level`, `timeout`) and calls `d.LoadConfig(cfgPath, overrides)`. Only
+  explicitly-set flags (`Changed`) are applied. `lookupFlag` helper checks both
+  local and persistent flag sets.
 
-- `app.go` (`RunGrouping`, `runGroupAndScorePipeline`, `RebuildRanking`, and
-  the `RunStoryPages` story→article loop), `snapshot.go`
-  (`storiesToArticles`), and `storypages.go` (`RunStoryPages`) — all
-  `Story`→`Article` conversion sites add `DisplayTitle: story.DisplayTitle`.
+### `internal/cli/{ingest,export,config,heartbeat}.go`
+- Wired `runner.WithLoadConfig(loadConfigFromFlags(cmd, d))` instead of
+  `runner.WithLoadConfig(d.LoadConfig)`.
 
-## Tests added (targeted regression coverage)
+### `internal/cli/status.go`
+- `openIngestRuns(cmd, d)` now uses `loadConfigFromFlags` (was
+  `d.LoadConfig(cfgPath)`).
 
-- `internal/domain/normalize_test.go` — `DisplayNormalizeTitle` table tests:
-  mixed case kept, leading/trailing spaces trimmed, runs collapsed, tabs/
-  newlines collapsed, NFC composition (pre-composed and decomposed inputs),
-  empty→empty, punctuation preserved; `DisplayNormalizeTitleKeepsCase`
-  (display differs from normalized); `DisplayNormalizeTitleIdempotent`.
-- `internal/domain/source_test.go` — `TestCanonicalize_DisplayTitle`
-  (Title lowercased, DisplayTitle original casing, `Display()` prefers it,
-  `ComputeStoryID`/`DedupeKey` unchanged, lowercased entry → same ID);
-  `TestStory_Display_Fallback`; `MeaningfulFieldsChanged` display-title
-  cases (changed → true; empty-vs-empty → false).
-- `internal/domain/clustering_test.go` — `NewArticle` sets DisplayTitle;
-  `Article.Display()` fallback; `NewStoryGroup`/`NewStoryFromGroup` propagate
-  display headline; `computeGroupID` invariant under display casing;
-  `Cluster` group count/ID/Headline identical for mixed-case vs all-lowercase
-  inputs (display headline differs); `TokenizeTitle` lowercases internally.
-- `internal/domain/story_test.go` — JSON round-trip with a set DisplayTitle
-  (key present, value preserved); legacy payload without `displayTitle` key
-  (required `publishedAt`/`firstSeenAt`/`updatedAt` included) decodes to
-  empty DisplayTitle → `Display()` falls back to Title; empty DisplayTitle
-  round-trips to empty.
-- `internal/domain/snapshot_test.go` — `TestBuildSnapshot_DisplayTitle`
-  (story + latest article titles carry display casing, Render contains the
-  display headline); `TestBuildSnapshot_DisplayTitleFallback` (empty
-  DisplayTitle → normalized fallback, `Validate()` passes).
-- `internal/domain/storypage_test.go` — `BuildStoryDetailPage` Headline
-  carries display casing while Slug is normalized; display-heading fallback
-  when no DisplayHeadline; slug/page-key invariant under display casing.
-- `internal/adapters/storage/sqlite/repository_test.go` — article
-  `display_title` round-trip (column + normalized title); story
-  `display_title` round-trip (List hydration + unchanged re-upsert); legacy
-  story fallback (cleared `display_title` → `Display()` falls back to Title;
-  re-ingest with casing restored → `UpsertUpdated`); migration 010 backfill
-  on a v9 DB (story at schema 9 → 010 backfills `display_title` from
-  headline). Existing migration-count and schema-version assertions updated
-  from 9 → 10 across `migrations_test.go`, `repository_test.go`,
-  `ingest_lease_migration_test.go`, `ingest_runs_migration_test.go`,
-  `retentiondb_test.go`, `retentionpkg_test.go`, `turso_test.go`, and the
-  storage/turso retention tests.
-- `internal/adapters/hugo/publisher_test.go` — `RenderMarkdown` preserves
-  display casing + punctuation in front-matter `title:`/`description:`, body
-  `# Headline`, and article `title:`; slug stays normalized.
-- `internal/application/snapshot_test.go` — end-to-end: story upserted with a
-  display title flows through `RunSnapshot` into the snapshot story title and
-  latest article title; `Validate()` passes.
-- `internal/application/storypages_test.go` — end-to-end: story upserted with
-  a display title flows through `RunStoryPages` into the rendered page's
-  front-matter title (display casing) while the slug file name stays the
-  normalized form.
+### `internal/cli/retention.go`
+- `loadRetentionConfig` now uses `loadConfigFromFlags` (was
+  `d.LoadConfig(cfgPath)`).
 
-## Verification
+### `internal/runner/runner.go`
+- Added `config` and `encoding/json` imports.
+- `RunIngest`, `RunExport`, `CheckConfig` call `r.loadConfig("",
+  config.Overrides{})` (new 2-arg signature).
+- `RunIngest`: one-line memory/sqlite-file backend warning (stderr); gates
+  heartbeat/feeds publishers on `cfg.ShouldPublishSiteData()`; opt-in JSON run
+  log (`buildJSONRunLog`) when `cfg.ShouldJSONLog()`.
+- `buildJSONRunLog` — strict field whitelist (time, run_id, origin, command,
+  status, exit_code, committed, counters); no secrets.
+- `orAuto` helper — normalizes empty `PublishSiteData` to "auto" for logs.
 
-- `make test` — **passed** (`go vet ./...` + `go test ./... -race`; all
-  packages green).
-- `gofmt -l` (repo-wide gate) — clean (0 files unformatted).
-- `make lint` — **0 issues** (golangci-lint).
-- `make security` — **passed** (gosec 0 issues; govulncheck no
-  vulnerabilities).
-- `make check-coverage` — **passed** (core `internal/domain` 85.4%,
-  `internal/application` 85.6%; all other internal packages at/above the
-  ≥70% threshold).
-- `make build` — **passed** (`dist/huddlescope` built).
-- `scripts/site-test.sh` — **all site tests passed** (fixture overlay,
-  success/failure/idempotency paths, HS-015/HS-023 assertions).
-- `scheduler` npm tests — **23/23 passed** (independent CI job).
+### `internal/config/config_test.go`
+- Appended 14 new tests for LoadWith, ShouldPublishSiteData, ShouldJSONLog,
+  Validate path validation.
 
-## Key files
+### `internal/runner/runner_portable_test.go` (new)
+- 9 tests for memory warning, site-data gating, JSON log.
 
-- `internal/domain/normalize.go` — `DisplayNormalizeTitle` (no lowercasing).
-- `internal/domain/story.go` — `Story.DisplayTitle` (+JSON), `Display()`
-  helper, `MeaningfulFieldsChanged` display-aware comparison.
-- `internal/domain/source.go` — `Canonicalize` sets DisplayTitle.
-- `internal/domain/clustering.go` — `Article.DisplayTitle`,
-  `StoryGroup.DisplayHeadline`, `NewArticle`/`NewStoryGroup`/
-  `NewStoryFromGroup`.
-- `internal/domain/storypage.go` — display Headline, normalized Slug/PageKey.
-- `internal/domain/snapshot.go` — display story/article titles, summary
-  fallback.
-- `internal/adapters/storage/sqlite/migrations/010_display_title.sql` (new)
-  — additive `display_title` columns + normalized-fallback backfill.
-- `internal/adapters/storage/sqlite/repository.go` — upsert/list display_title
-  persistence + hydration + unchanged-detection stability.
-- `internal/application/{app,snapshot,storypages}.go` — Story→Article
-  `DisplayTitle` mapping.
-- Test files listed above (targeted regression coverage).
+### `internal/cli/portable_test.go` (new)
+- 6 tests for persistent flags and flag precedence.
 
-## Deviations from the plan
+### Test double updates
+- All `WithLoadConfig(func(path string) ...)` closures in `runner_test.go`,
+  `runner_lease_test.go`, `root_test.go`, `runners_test.go`,
+  `ingest_lease_test.go`, `status_test.go`, `deps_test.go` updated to the new
+  2-arg `func(path string, _ config.Overrides) ...` signature.
 
-- **`MeaningfulFieldsChanged` compares `Display()` (fallback-aware) rather
-  than raw `DisplayTitle`.** The plan (§3 source.go) specified a raw
-  `DisplayTitle` comparison. In practice the storage layer's
-  found-by-story_key branch hydrates `otherStory.DisplayTitle` from the
-  `display_title` column (which `Upsert` coalesces to `Title` when
-  `DisplayTitle` is empty) while the incoming story keeps `DisplayTitle`
-  `""` — a raw comparison would falsely flag every re-upsert as `Updated`.
-  Comparing the fallback-aware `Display()` values makes unchanged-detection
-  stable (empty DisplayTitle ≡ DisplayTitle-set-to-Title) while still
-  detecting genuine display-casing restorations (AC-3). This is a
-  behavior-preserving refinement of the plan's intent, not a scope change.
-- **`Story.MarshalJSON` includes `displayTitle` unconditionally** (no
-  `omitempty`), consistent with the other always-present fields (`title`,
-  `summary`, `url`, …). Legacy hydration (column fallback) still covers rows
-  whose `story_data` JSON predates the key.
+### `.env.example`
+- Added `HSC_SOURCES_FILE`, `HSC_TEAMS_FILE`, `HSC_PUBLISH_SITE_DATA`,
+  `HSC_JSON_LOG` with documentation.
+
+### `conf/deploy.production.example.env` (new)
+- Example production deploy config (VPS).
+
+### `conf/rpi.production.example.env` (new)
+- Example Raspberry Pi production config with absolute paths under
+  `/opt/huddlescope/`.
+
+### `scripts/install-config.sh` (new, executable)
+- Installs a deploy config with `0600` permissions
+  (`deploy` → `/etc/huddlescope/deploy.env`, `rpi` →
+  `/opt/huddlescope/huddlescope.env`).
+
+### `.github/workflows/refresh-news.yml`
+- Added `HSC_PUBLISH_SITE_DATA: "true"` to the build job `env:` block so
+  GitHub Actions keeps the committed `web/data` files fresh.
+
+### `README.md`
+- Added "Portable Deployment" subsection under Configuration and new env var
+  rows (`HSC_RUNNER_ORIGIN`, `HSC_PUBLISH_SITE_DATA`, `HSC_JSON_LOG`).
+
+### `docs/portable-deployment.md` (new)
+- Detailed guide: precedence, env vars, path independence, VPS/RPi/Actions
+  procedures, fail-fast diagnostics, security, cross-compile reference.
+
+## Design decisions
+
+1. **Overrides travel through `LoadConfigFunc`**: The `LoadConfigFunc` type
+   gained a `config.Overrides` parameter. The CLI wires
+   `loadConfigFromFlags` which reads the persistent flags and calls
+   `d.LoadConfig(cfgPath, overrides)`. The runner keeps calling
+   `r.loadConfig("", config.Overrides{})`; the flags are resolved in the CLI
+   closure. This avoids changing the runner's call shape while honoring the
+   precedence chain.
+
+2. **`ShouldPublishSiteData` default = env-dependent**: `auto` writes in
+   dev/test and skips in production. This makes the repo-less production host
+   safe by default (no `web/data` creation) while keeping dev usage working
+   without config changes.
+
+3. **Path validation only for explicitly-set paths**: The `relativeExplicit`
+   helper rejects a path only if it's non-empty AND not the exact built-in
+   default AND relative. This keeps the documented dev defaults (relative
+   `conf/*.yaml`, `web/data`) working while rejecting operator-set relative
+   paths.
+
+4. **JSON log field whitelist**: `buildJSONRunLog` builds a struct with a fixed
+   set of non-secret fields and marshals it. No config secrets (Turso token,
+   DSN) are reachable from the function's inputs (`RunRecord`, `origin`
+   string, `exitCode` int), so no secret can appear.
+
+## Out of scope (handled by other issues)
+
+- Dashboard reads from Turso (HS-PORT-07 / issue #154) — the run indicators
+  are persisted to storage; the dashboard reads them later.
+- Scheduler lease/identity (HS-PORT-04 / issue #160) — already merged; the
+  workflow runs ingest as backup.
+- Hugo build portability (HS-PORT-05 / issue #156) — not touched.

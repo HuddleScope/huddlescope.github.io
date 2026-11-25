@@ -35,9 +35,21 @@ Available Commands:
   version     Show CLI version information
 
 Global Flags:
-      --config PATH       Path to config file (.env format)
-      --log-level LEVEL   Log level: debug, info, warn, error (default: info)
-      --timeout DUR       Request timeout (e.g., 30s, 1m)
+      --config PATH           Path to config file (.env format)
+      --sources-file PATH     Absolute path to a YAML sources file
+      --teams-file PATH       Absolute path to a YAML teams file
+      --log-level LEVEL       Log level: debug, info, warn, error (default: info)
+      --timeout DUR           Request timeout (e.g., 30s, 1m)
+
+Configuration precedence (highest wins):
+  1. CLI flags (--config, --sources-file, --teams-file, --log-level, --timeout)
+  2. Environment variables (HSC_*, TURSO_*)
+  3. --config file values (KEY=VALUE lines)
+  4. Built-in defaults
+
+Sources/teams files are expected to be ABSOLUTE paths when set explicitly
+(e.g., /etc/huddlescope/sources.yaml). Relative paths are rejected for input
+files in all envs and for output paths in production (see docs/portable-deployment.md).
 
 For more information, visit https://huddlescope.github.io/
 `,
@@ -48,6 +60,8 @@ For more information, visit https://huddlescope.github.io/
 
 	// Add persistent flags
 	rootCmd.PersistentFlags().String("config", "", "Path to config file (.env format)")
+	rootCmd.PersistentFlags().String("sources-file", "", "Absolute path to a YAML sources file (wins over HSC_SOURCES_FILE and --config file)")
+	rootCmd.PersistentFlags().String("teams-file", "", "Absolute path to a YAML teams file (wins over HSC_TEAMS_FILE and --config file)")
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level: debug, info, warn, error")
 	rootCmd.PersistentFlags().String("timeout", "", "Request timeout (e.g., 30s, 1m)")
 

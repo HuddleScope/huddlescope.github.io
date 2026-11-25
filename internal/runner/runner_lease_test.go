@@ -174,7 +174,7 @@ func leaseTestRunner(t *testing.T, lease *fakeLeaseRepo, runs *fakeIngestRunRepo
 	return NewRunner(
 		WithOutput(&bytes.Buffer{}),
 		WithErrorOutput(&bytes.Buffer{}),
-		WithLoadConfig(func(path string) (config.Config, error) { return leaseTestConfig(t), nil }),
+		WithLoadConfig(func(path string, _ config.Overrides) (config.Config, error) { return leaseTestConfig(t), nil }),
 		WithNewRepository(func(cfg config.StorageConfig) (domain.Repository, error) {
 			return storage.NewMemoryRepository(), nil
 		}),

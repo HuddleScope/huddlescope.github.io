@@ -56,11 +56,13 @@ func (r *RunResult) IsFailure() bool {
 }
 
 // LoadConfigFunc is a function type for loading configuration.
-type LoadConfigFunc func(path string) (config.Config, error)
+// The second argument carries CLI-flag overrides that win over env/file
+// (issue #158 / AC-1, AC-2). Pass config.Overrides{} for no overrides.
+type LoadConfigFunc func(path string, o config.Overrides) (config.Config, error)
 
 // DefaultLoadConfig is the default configuration loader.
-func DefaultLoadConfig(path string) (config.Config, error) {
-	return config.Load(path)
+func DefaultLoadConfig(path string, o config.Overrides) (config.Config, error) {
+	return config.LoadWith(path, o)
 }
 
 // NewRepoFunc is a function type for creating a repository.

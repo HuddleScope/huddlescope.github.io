@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/rss"
 	"github.com/HuddleScope/huddlescope.github.io/internal/adapters/storage"
 	"github.com/HuddleScope/huddlescope.github.io/internal/application"
+	"github.com/HuddleScope/huddlescope.github.io/internal/config"
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 	"github.com/HuddleScope/huddlescope.github.io/internal/types"
 )
@@ -189,7 +191,7 @@ var LeaseRenewInterval = 5 * time.Minute
 func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Duration, force bool) *RunIngestResult {
 	result := &RunIngestResult{}
 
-	cfg, err := r.loadConfig("")
+	cfg, err := r.loadConfig("", config.Overrides{})
 	if err != nil {
 		result.ExitCode = 1
 		result.Error = fmt.Errorf("failed to load config: %w", err)
@@ -204,6 +206,13 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 
 	// Build publisher
 	publisher := r.newPublisher()
+
+	// Issue #158 / AC-4: warn (one line, stderr) when the backend is memory or
+	// sqlite-file so an operator does not silently assume shared/persistent
+	// storage on a production host. Non-fatal: dev/test use of memory is legal.
+	if cfg.StorageBackend == "memory" || cfg.StorageBackend == "sqlite-file" {
+		_, _ = fmt.Fprintf(r.err, "Warning: storage backend %q is not shared/persistent; data is per-host only\n", cfg.StorageBackend)
+	}
 
 	// Build repository based on storage backend
 	repo, err := r.newRepository(cfg.Storage())
@@ -544,33 +553,59 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 		return result
 	}
 
-	// Publish heartbeat (best-effort: failures don't affect run exit)
-	heartbeatPath := cfg.HeartbeatFile
-	if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
-		if hb := domain.NewHeartbeat(result.Result.RunID.String()); hb != nil {
-			hb.FromRunRecord(*result.Result, *result.Result.EndedAt)
-			// Set PublishedAt when ingest succeeds so heartbeat check sees fresh state
-			if result.Result.Status == domain.RunStatusOK {
-				pubTime := result.Result.EndedAt.UTC().Format(time.RFC3339)
-				hb.PublishedAt = &pubTime
-			}
-			if err := hbPub.Publish(context.Background(), hb); err != nil {
-				_, _ = fmt.Fprintf(r.err, "Warning: failed to publish heartbeat: %v\n", err)
-			}
-		}
+	// Issue #158 / AC-3, AC-5: gate the site-data writes (heartbeat.json +
+	// feeds.json) on ShouldPublishSiteData(). In production the default ("auto")
+	// is false so a repo-less VPS/Raspberry host never creates web/data; the run
+	// indicators are persisted to the shared storage instead. GitHub Actions sets
+	// HSC_PUBLISH_SITE_DATA=true so the committed files keep updating.
+	publishSiteData := cfg.ShouldPublishSiteData()
+	if !publishSiteData {
+		_, _ = fmt.Fprintf(r.err, "site-data writes disabled (HSC_PUBLISH_SITE_DATA=%q); run indicators persisted to storage\n", orAuto(cfg.PublishSiteData))
 	}
 
-	// Publish feed health (best-effort: failures don't affect run exit)
-	feedsPath := cfg.FeedsFile
-	// Extract outDir and dataFile from full path
-	feedsDir := filepath.Dir(feedsPath)
-	feedsFile := filepath.Base(feedsPath)
-	if fhPub := hugo.NewFeedsDataPublisher(feedsDir, feedsFile); fhPub != nil {
-		if feedHealth := app.BuildFeedHealth(*result.Result, *result.Result.EndedAt); feedHealth.Version != "" {
-			_, err := fhPub.Publish(context.Background(), feedHealth)
-			if err != nil {
-				_, _ = fmt.Fprintf(r.err, "Warning: failed to publish feed health: %v\n", err)
+	// Publish heartbeat (best-effort: failures don't affect run exit)
+	heartbeatPath := cfg.HeartbeatFile
+	if publishSiteData {
+		if hbPub := heartbeat.NewFilePublisher(heartbeatPath); hbPub != nil {
+			if hb := domain.NewHeartbeat(result.Result.RunID.String()); hb != nil {
+				hb.FromRunRecord(*result.Result, *result.Result.EndedAt)
+				// Set PublishedAt when ingest succeeds so heartbeat check sees fresh state
+				if result.Result.Status == domain.RunStatusOK {
+					pubTime := result.Result.EndedAt.UTC().Format(time.RFC3339)
+					hb.PublishedAt = &pubTime
+				}
+				if err := hbPub.Publish(context.Background(), hb); err != nil {
+					_, _ = fmt.Fprintf(r.err, "Warning: failed to publish heartbeat: %v\n", err)
+				}
 			}
+		}
+
+		// Publish feed health (best-effort: failures don't affect run exit)
+		feedsPath := cfg.FeedsFile
+		// Extract outDir and dataFile from full path
+		feedsDir := filepath.Dir(feedsPath)
+		feedsFile := filepath.Base(feedsPath)
+		if fhPub := hugo.NewFeedsDataPublisher(feedsDir, feedsFile); fhPub != nil {
+			if feedHealth := app.BuildFeedHealth(*result.Result, *result.Result.EndedAt); feedHealth.Version != "" {
+				_, err := fhPub.Publish(context.Background(), feedHealth)
+				if err != nil {
+					_, _ = fmt.Fprintf(r.err, "Warning: failed to publish feed health: %v\n", err)
+				}
+			}
+		}
+	} else {
+		// Site-data writes are skipped. The feed-health counters are still
+		// computed (and persisted to storage via the ingest-run repository)
+		// so the dashboard can read them from Turso later (HS-PORT-07).
+		_ = app.BuildFeedHealth(*result.Result, *result.Result.EndedAt)
+	}
+
+	// Issue #158 / AC-8: optional single-line JSON run log (HSC_JSON_LOG=true).
+	// Field whitelist only: time, run_id, origin, command, status, exit_code,
+	// and a few counters. Never includes tokens, DSNs, or other secrets.
+	if cfg.ShouldJSONLog() {
+		if line, jerr := buildJSONRunLog(result.Result, cfg.RunnerOrigin, result.ExitCode); jerr == nil {
+			_, _ = fmt.Fprintln(r.err, string(line))
 		}
 	}
 
@@ -587,6 +622,54 @@ func (r *Runner) RunIngest(ctx context.Context, mode string, staleAfter time.Dur
 	}
 
 	return result
+}
+
+// orAuto renders the effective HSC_PUBLISH_SITE_DATA value for log messages,
+// normalizing an empty value to "auto" (the default).
+func orAuto(v string) string {
+	if v == "" {
+		return "auto"
+	}
+	return v
+}
+
+// buildJSONRunLog renders a single-line JSON run-log entry (issue #158 / AC-8).
+// The field set is a strict whitelist (time, run_id, origin, command, status,
+// exit_code, and a few integer counters) so no secret (Turso token, DSN, etc.)
+// can ever appear in the output. The counters are integers; strings come only
+// from sanitized, non-secret config fields (origin) or run metadata.
+func buildJSONRunLog(rec *domain.RunRecord, origin string, exitCode int) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New("nil run record")
+	}
+	payload := struct {
+		Time      string `json:"time"`
+		RunID     string `json:"run_id"`
+		Origin    string `json:"origin"`
+		Command   string `json:"command"`
+		Status    string `json:"status"`
+		ExitCode  int    `json:"exit_code"`
+		Committed bool   `json:"committed"`
+		Fetched   int    `json:"entries_fetched"`
+		Created   int    `json:"stories_created"`
+		Updated   int    `json:"stories_updated"`
+		Skipped   int    `json:"stories_skipped"`
+		Errors    int    `json:"errors"`
+	}{
+		Time:      rec.StartedAt.UTC().Format(time.RFC3339),
+		RunID:     rec.RunID.String(),
+		Origin:    origin,
+		Command:   "ingest run",
+		Status:    rec.Status.String(),
+		ExitCode:  exitCode,
+		Committed: rec.Committed,
+		Fetched:   rec.EntriesFetched,
+		Created:   rec.StoriesCreated,
+		Updated:   rec.StoriesUpdated,
+		Skipped:   rec.StoriesSkipped,
+		Errors:    len(rec.Errors),
+	}
+	return json.Marshal(payload)
 }
 
 // buildLeaseHolderID composes a sanitized holder identity:
@@ -693,7 +776,7 @@ type RunExportResult struct {
 func (r *Runner) RunExport(ctx context.Context, dryRun bool, dataDir, dataFile, contentDir string) *RunExportResult {
 	result := &RunExportResult{}
 
-	cfg, err := r.loadConfig("")
+	cfg, err := r.loadConfig("", config.Overrides{})
 	if err != nil {
 		result.ExitCode = 1
 		result.Error = fmt.Errorf("failed to load config: %w", err)
@@ -864,7 +947,7 @@ type CheckConfigResult struct {
 func (r *Runner) CheckConfig(ctx context.Context, format string) *CheckConfigResult {
 	result := &CheckConfigResult{}
 
-	cfg, err := r.loadConfig("")
+	cfg, err := r.loadConfig("", config.Overrides{})
 	if err != nil {
 		result.ExitCode = 1
 		result.Error = fmt.Errorf("failed to load config: %w", err)

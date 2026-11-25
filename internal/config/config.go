@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -105,6 +106,12 @@ type Config struct {
 	// New for issue #159 (HS-PORT-03): execution origin recorded on ingest
 	// run rows (e.g., raspberry, vps, github-backup). Default "local".
 	RunnerOrigin string
+	// New for issue #158 (HS-PORT-02): site-data publish control. Values:
+	// "auto" (default: dev writes files, production skips), "true", "false".
+	PublishSiteData string
+	// New for issue #158 (HS-PORT-02): opt-in single-line JSON run log.
+	// "true"/"false" (default false). Non-secret; included in redacted output.
+	JSONLog string
 }
 
 // StorageConfig carries the storage-backend options for repository
@@ -154,8 +161,30 @@ const (
 	defaultRunnerOrigin = "local"
 )
 
+// Overrides carries CLI-flag values that must win over environment variables
+// and the --config file (issue #158 / AC-1, AC-2). Zero values mean "unset" and
+// fall through to the next precedence level. The documented precedence chain is
+// flags > environment > --config file > defaults.
+type Overrides struct {
+	SourcesFile string
+	TeamsFile   string
+	Timeout     time.Duration
+	LogLevel    string
+}
+
 // Load loads configuration from environment variables with optional file override.
+// It is equivalent to LoadWith(configFile, Overrides{}).
 func Load(configFile string) (Config, error) {
+	return LoadWith(configFile, Overrides{})
+}
+
+// LoadWith loads configuration applying the documented precedence chain
+// (issue #158): defaults -> --config file -> environment -> flag overrides.
+// The overrides are applied LAST so a CLI flag always wins over the environment
+// and the file. This is how the root --config/--sources-file/--teams-file/
+// --timeout/--log-level persistent flags reach config loading without changing
+// the runner's `loadConfig("")` call shape.
+func LoadWith(configFile string, o Overrides) (Config, error) {
 	cfg := Config{
 		LogLevel:       defaultLogLevel,
 		UserAgent:      defaultUserAgent,
@@ -190,6 +219,9 @@ func Load(configFile string) (Config, error) {
 
 	// Override with environment variables
 	cfg.loadFromEnv()
+
+	// Apply CLI flag overrides last (highest precedence; issue #158 / AC-1).
+	cfg.applyOverrides(o)
 
 	// Parse sources after all env vars are loaded
 	if err := cfg.parseSources(); err != nil {
@@ -304,6 +336,31 @@ func (c *Config) loadFromEnv() {
 	// New for issue #159 (HS-PORT-03): execution origin for ingest run rows.
 	if v := os.Getenv("HSC_RUNNER_ORIGIN"); v != "" {
 		c.RunnerOrigin = sanitizeRunnerOrigin(v)
+	}
+	// New for issue #158 (HS-PORT-02): site-data publish control + JSON run log.
+	if v := os.Getenv("HSC_PUBLISH_SITE_DATA"); v != "" {
+		c.PublishSiteData = strings.ToLower(v)
+	}
+	if v := os.Getenv("HSC_JSON_LOG"); v != "" {
+		c.JSONLog = strings.ToLower(v)
+	}
+}
+
+// applyOverrides applies CLI flag overrides (issue #158 / AC-1, AC-2). These are
+// the highest-precedence values and are applied after file+env so a flag always
+// wins. Zero-valued fields are ignored (they mean "not set on the command line").
+func (c *Config) applyOverrides(o Overrides) {
+	if o.SourcesFile != "" {
+		c.SourcesFile = o.SourcesFile
+	}
+	if o.TeamsFile != "" {
+		c.TeamsFile = o.TeamsFile
+	}
+	if o.Timeout > 0 {
+		c.RequestTimeout = o.Timeout
+	}
+	if o.LogLevel != "" {
+		c.LogLevel = o.LogLevel
 	}
 }
 
@@ -754,6 +811,14 @@ func loadEnvFile(path string, cfg *Config) error {
 			cfg.RetentionWindowDays = n
 		case "HSC_RUNNER_ORIGIN":
 			cfg.RunnerOrigin = sanitizeRunnerOrigin(value)
+		case "HSC_SOURCES_FILE":
+			cfg.SourcesFile = value
+		case "HSC_TEAMS_FILE":
+			cfg.TeamsFile = value
+		case "HSC_PUBLISH_SITE_DATA":
+			cfg.PublishSiteData = strings.ToLower(value)
+		case "HSC_JSON_LOG":
+			cfg.JSONLog = strings.ToLower(value)
 		default:
 			// Permissive: unknown keys are ignored
 		}
@@ -784,6 +849,34 @@ func sanitizeRunnerOrigin(v string) string {
 		}
 	}
 	return b.String()
+}
+
+// ShouldPublishSiteData reports whether ingest should write the site-data files
+// (web/data/heartbeat.json + web/data/feeds.json). HSC_PUBLISH_SITE_DATA accepts
+// "auto" (default), "true", or "false". "auto" writes files in dev/test and skips
+// them in production, so a repo-less VPS/Raspberry host does not create web/data
+// (issue #158 / AC-3, AC-5). GitHub Actions sets HSC_PUBLISH_SITE_DATA=true so
+// refresh-news keeps the committed files fresh.
+func (c Config) ShouldPublishSiteData() bool {
+	switch strings.ToLower(c.PublishSiteData) {
+	case "true":
+		return true
+	case "false":
+		return false
+	default: // "auto" (or empty) — env-dependent
+		return c.Env != "production"
+	}
+}
+
+// ShouldJSONLog reports whether the optional single-line JSON run log is enabled.
+// Defaults to false (issue #158 / AC-8).
+func (c Config) ShouldJSONLog() bool {
+	switch c.JSONLog {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // Validate checks the configuration for validity and returns all errors.
@@ -956,10 +1049,49 @@ func (c Config) Validate() error {
 		}
 	}
 
+	// Path-independence validation (issue #158 / AC-3). Explicitly configured
+	// relative paths are rejected for input files in all envs, and for output
+	// paths in production. The built-in repo-relative defaults remain valid so
+	// documented dev usage (relative conf/*.yaml, web/data) keeps working.
+	if relativeExplicit(c.SourcesFile, "conf/sources.yaml") {
+		errs = append(errs, fmt.Errorf("HSC_SOURCES_FILE must be an absolute path when explicitly set; got %q", c.SourcesFile))
+	}
+	if relativeExplicit(c.TeamsFile, defaultTeamsFile) {
+		errs = append(errs, fmt.Errorf("HSC_TEAMS_FILE must be an absolute path when explicitly set; got %q", c.TeamsFile))
+	}
+	if c.Env == "production" {
+		if relativeExplicit(c.HeartbeatFile, defaultHeartbeatFile) {
+			errs = append(errs, fmt.Errorf("HSC_HEARTBEAT_FILE must be an absolute path in production; got %q", c.HeartbeatFile))
+		}
+		if relativeExplicit(c.FeedsFile, defaultFeedsFile) {
+			errs = append(errs, fmt.Errorf("HSC_FEEDS_FILE must be an absolute path in production; got %q", c.FeedsFile))
+		}
+		if relativeExplicit(c.DataDir, defaultDataDir) {
+			errs = append(errs, fmt.Errorf("HSC_DATA_DIR must be an absolute path in production; got %q", c.DataDir))
+		}
+		if relativeExplicit(c.HugoContentDir, defaultHugoContentDir) {
+			errs = append(errs, fmt.Errorf("HSC_HUGO_CONTENT_DIR must be an absolute path in production; got %q", c.HugoContentDir))
+		}
+		if relativeExplicit(c.StoragePath, defaultStoragePath) {
+			errs = append(errs, fmt.Errorf("HSC_STORAGE_PATH must be an absolute path in production; got %q", c.StoragePath))
+		}
+	}
+
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// relativeExplicit reports whether a configured path is a non-default relative
+// path (issue #158 / AC-3). An empty value (unset) and the exact built-in default
+// are both legal (the default is repo-relative and documented for dev). Only a
+// value the operator explicitly set that is relative returns true.
+func relativeExplicit(path, defaultPath string) bool {
+	if path == "" || path == defaultPath {
+		return false
+	}
+	return !filepath.IsAbs(path)
 }
 
 // Redacted returns a copy of Config with secrets replaced by "***".
@@ -989,6 +1121,8 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		HugoContentDir      string   `json:"HugoContentDir"`
 		RetentionEnabled    bool     `json:"RetentionEnabled"`
 		RetentionWindowDays int      `json:"RetentionWindowDays"`
+		PublishSiteData     string   `json:"PublishSiteData"`
+		JSONLog             string   `json:"JSONLog"`
 	}
 	safe := SafeConfig{
 		ConfigFile:          c.ConfigFile,
@@ -1007,6 +1141,8 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		HugoContentDir:      c.HugoContentDir,
 		RetentionEnabled:    c.RetentionEnabled,
 		RetentionWindowDays: c.RetentionWindowDays,
+		PublishSiteData:     c.PublishSiteData,
+		JSONLog:             c.JSONLog,
 	}
 	return json.Marshal(safe)
 }

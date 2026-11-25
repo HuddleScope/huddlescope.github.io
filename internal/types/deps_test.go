@@ -51,7 +51,7 @@ func TestDefaultDeps(t *testing.T) {
 }
 
 func TestDefaultLoadConfig(t *testing.T) {
-	_, err := DefaultLoadConfig("/nonexistent/path")
+	_, err := DefaultLoadConfig("/nonexistent/path", config.Overrides{})
 	assert.Error(t, err)
 }
 
@@ -273,7 +273,7 @@ func TestDepsValidateNilNewIngestRunRepo(t *testing.T) {
 }
 
 func TestWithLoadConfig(t *testing.T) {
-	d := NewDeps(WithLoadConfig(func(string) (config.Config, error) {
+	d := NewDeps(WithLoadConfig(func(string, config.Overrides) (config.Config, error) {
 		return config.Config{}, nil
 	}))
 	assert.NotNil(t, d.LoadConfig)

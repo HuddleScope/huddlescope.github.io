@@ -82,7 +82,7 @@ func TestNewRetentionCommand_Wiring(t *testing.T) {
 
 func TestRetentionRun_Disabled(t *testing.T) {
 	d := NewDeps()
-	d.LoadConfig = func(path string) (config.Config, error) {
+	d.LoadConfig = func(path string, _ config.Overrides) (config.Config, error) {
 		cfg := config.Config{}
 		cfg.RetentionEnabled = false
 		return cfg, nil
