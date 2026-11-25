@@ -4,6 +4,9 @@
 
 import { strictEqual, ok, equal } from 'node:assert';
 import { describe, it, beforeEach, afterEach } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 // Import functions
 import { scheduled, fetch as httpFetch, RetryableError } from './index.js';
@@ -299,7 +302,7 @@ describe('scheduled (default export)', () => {
     await scheduled({}, env, { waitUntil: fn => fn() });
 
     const logs = parseLogs();
-    const infoLog = logs.find(l => l.event === 'scheduled_dispatch' && l.level === 'info');
+    const infoLog = logs.find(l => l.event === 'publication_dispatch' && l.level === 'info');
     ok(infoLog, 'Should log success info');
     strictEqual(infoLog?.status, 'accepted'); // 204 means accepted/queued
   });
@@ -482,5 +485,66 @@ describe('utilities', () => {
     ok(!isRetryableError(new Error('401 Unauthorized')), '401 should not be retryable');
     ok(!isRetryableError(new Error('404 Not Found')), '404 should not be retryable');
     ok(!isRetryableError(new Error('422 Unprocessable')), '422 should not be retryable');
+  });
+});
+
+// Issue #164 / HS-PORT-08 (AC-1): the worker must remain a pure export
+// *trigger*. It must not reference Turso, fetch RSS, run Hugo export, or take
+// any lock. This static guard pins that boundary forever: if someone adds
+// ingest/export/Turso/lock code to the worker, this test fails.
+//
+// We read the worker source as text (not import behavior) so the guard holds
+// even if the offending code is never executed by the tests above.
+//
+// Comments are stripped before matching so prose (e.g., a header saying the
+// worker "never touches Turso") doesn't trip the guard — but any real code
+// that references turso/rss/hugo/lock will fail it.
+describe('AC-1 static guard: worker stays a trigger-only dispatch', () => {
+  let workerCode = '';
+
+  // Remove // line comments and /* */ block comments so we inspect code, not prose.
+  function stripComments(src) {
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+      .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments (avoid URLs like https://)
+  }
+
+  beforeEach(() => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = readFileSync(join(here, 'index.js'), 'utf8');
+    workerCode = stripComments(raw);
+  });
+
+  it('must NOT reference TURSO_AUTH_TOKEN', () => {
+    ok(!workerCode.includes('TURSO_AUTH_TOKEN'),
+      'worker must not reference TURSO_AUTH_TOKEN (Turso credentials live only in the repo/Actions, never the worker)');
+  });
+
+  it('must NOT reference the turso storage backend or adapter', () => {
+    ok(!/turso/i.test(workerCode),
+      'worker code must not reference any turso backend/adapter (it never touches the shared store)');
+  });
+
+  it('must NOT perform RSS fetching', () => {
+    ok(!/\brss\b/i.test(workerCode),
+      'worker code must not fetch RSS feeds (ingestion happens on the repo-less host and/or in Actions)');
+  });
+
+  it('must NOT perform Hugo export', () => {
+    ok(!/\bexport run\b/i.test(workerCode) && !/\bhugo\b/i.test(workerCode),
+      'worker code must not run Hugo export (export happens inside the Actions workflow)');
+  });
+
+  it('must NOT acquire locks', () => {
+    ok(!/\block\b/i.test(workerCode),
+      'worker code must not take locks (no ingest/coordination role; it only dispatches)');
+  });
+
+  it('must still dispatch the refresh-news workflow on ref main with publish=true', () => {
+    // The dispatch contract (AC-2) must remain intact — the guard must not
+    // accidentally strip the core dispatch behavior.
+    ok(workerCode.includes('refresh-news.yml'), 'worker must reference the refresh-news workflow');
+    ok(workerCode.includes("ref: DEFAULT_BRANCH"), 'worker must dispatch on the default branch (main)');
+    ok(workerCode.includes("inputs: { publish: 'true' }"), 'worker must send inputs.publish=true');
   });
 });

@@ -129,7 +129,7 @@ Expected response:
 
 Reference: [Cloudflare Workerslimits](https://developers.cloudflare.com/workers/platform/limits/)
 
-## Scheduled execution semantics
+## Publication dispatch semantics
 
 - **Cron**: `7,37 * * * *` UTC — runs at :07 and :37 past every hour (48 runs/day)
 - **Latency**: Actual trigger time may vary by seconds due to Cloudflare's scheduling queue
@@ -163,8 +163,8 @@ See `docs/ops-runbook.md` for real-time status and known issues.
 # Latest worker logs
 wrangler logs
 
-# Filter for scheduled events
-wrangler logs --level=info --event=scheduled_dispatch
+# Filter for publication dispatch events
+wrangler logs --level=info --event=publication_dispatch
 ```
 
 ### Troubleshooting
