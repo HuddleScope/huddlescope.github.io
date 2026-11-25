@@ -97,6 +97,14 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 	// Pick representative: earliest PublishedAt, ties on smallest canonical URL
 	rep := pickRepresentative(group.Articles)
 
+	// Display headline (original casing where available, normalized fallback)
+	// (#201). The slug/page key below remain computed from the normalized
+	// representative title so identity stays stable (AC-2).
+	displayHeadline := group.DisplayHeadline
+	if strings.TrimSpace(displayHeadline) == "" {
+		displayHeadline = group.Headline
+	}
+
 	// Build article list, skipping those without URL
 	var articles []PublisherArticle
 	for _, art := range group.Articles {
@@ -106,7 +114,7 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 		articles = append(articles, PublisherArticle{
 			SourceID:    art.SourceID,
 			SourceName:  resolver.Resolve(art.SourceID),
-			Title:       art.Title,
+			Title:       art.Display(),
 			URL:         art.URL,
 			PublishedAt: art.ParsePublishedAtOrZero(),
 		})
@@ -125,7 +133,7 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 		return articles[i].URL < articles[j].URL
 	})
 
-	// Compute stable slug from the representative's headline
+	// Compute stable slug from the representative's normalized headline
 	slug := StorySlug(ComputeStorySlugFromHeadline(rep.Title))
 
 	page := StoryDetailPage{
@@ -135,7 +143,7 @@ func BuildStoryDetailPage(group StoryGroup, resolver SourceNameResolver, now tim
 		PageKey:          ComputeStoryPageKey(rep),
 		Status:           group.Status,
 		Aliases:          group.Aliases,
-		Headline:         group.Headline,
+		Headline:         displayHeadline,
 		FirstPublishedAt: group.FirstPublishedAt,
 		LastPublishedAt:  group.LastPublishedAt,
 		FirstSeenAt:      now.UTC(),

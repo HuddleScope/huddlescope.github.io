@@ -182,14 +182,15 @@ func (a *Application) storiesToArticles(stories []domain.Story) []domain.Article
 	var articles []domain.Article
 	for _, s := range stories {
 		articles = append(articles, domain.Article{
-			ID:          s.ID,
-			SourceID:    s.Source,
-			Title:       s.Title,
-			Summary:     s.Summary,
-			URL:         s.URL,
-			PublishedAt: s.PublishedAt.UTC().Format(time.RFC3339),
-			FirstSeenAt: s.FirstSeenAt.UTC().Format(time.RFC3339),
-			Entities:    s.Entities,
+			ID:           s.ID,
+			SourceID:     s.Source,
+			Title:        s.Title,
+			DisplayTitle: s.DisplayTitle,
+			Summary:      s.Summary,
+			URL:          s.URL,
+			PublishedAt:  s.PublishedAt.UTC().Format(time.RFC3339),
+			FirstSeenAt:  s.FirstSeenAt.UTC().Format(time.RFC3339),
+			Entities:     s.Entities,
 		})
 	}
 	return articles

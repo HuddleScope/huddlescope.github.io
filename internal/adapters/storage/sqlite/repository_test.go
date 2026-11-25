@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,8 +22,8 @@ func TestMigrateSuccess(t *testing.T) {
 	if len(versions) == 0 {
 		t.Fatal("Migrate() returned empty versions")
 	}
-	if len(versions) != 9 {
-		t.Errorf("expected 9 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 10 {
+		t.Errorf("expected 10 migrations, got %d: %v", len(versions), versions)
 	}
 }
 
@@ -502,4 +503,245 @@ func TestUpsertEntityOrderUnchanged(t *testing.T) {
 
 func now() time.Time {
 	return time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+}
+
+// TestUpsertArticleDisplayTitle_RoundTrip (#201): an article upserted with a
+// display title must persist it, and ListWithCtx must hydrate it back (AC-1, AC-3).
+func TestUpsertArticleDisplayTitle_RoundTrip(t *testing.T) {
+	repo, err := NewRepository("")
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	if _, err := Migrate(""); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	article := domain.Article{
+		ID:           "art-1",
+		SourceID:     "official-min",
+		Title:        "chiefs sign rb james cook", // normalized identity
+		DisplayTitle: "Chiefs sign RB James Cook", // original casing
+		Summary:      "summary",
+		URL:          "https://example.com/chiefs-cook",
+		PublishedAt:  now().Format(time.RFC3339),
+		FirstSeenAt:  now().Format(time.RFC3339),
+	}
+	if err := repo.UpsertArticle(article); err != nil {
+		t.Fatalf("UpsertArticle() error = %v", err)
+	}
+
+	// Read the display_title column directly to verify persistence.
+	var displayTitle string
+	if err := repo.db.QueryRow(`SELECT display_title FROM articles WHERE article_id = ?`, "art-1").Scan(&displayTitle); err != nil {
+		t.Fatalf("read display_title: %v", err)
+	}
+	if displayTitle != "Chiefs sign RB James Cook" {
+		t.Errorf("articles.display_title = %q; want %q", displayTitle, "Chiefs sign RB James Cook")
+	}
+
+	// Also verify the normalized title column.
+	var title string
+	if err := repo.db.QueryRow(`SELECT title FROM articles WHERE article_id = ?`, "art-1").Scan(&title); err != nil {
+		t.Fatalf("read title: %v", err)
+	}
+	if title != "chiefs sign rb james cook" {
+		t.Errorf("articles.title = %q; want normalized", title)
+	}
+}
+
+// TestUpsertStoryDisplayTitle_RoundTrip (#201): a story upserted with a display
+// title must persist it in both the display_title column and the story_data JSON,
+// and List must hydrate it back.
+func TestUpsertStoryDisplayTitle_RoundTrip(t *testing.T) {
+	repo, err := NewRepository("")
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	if _, err := Migrate(""); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	story := domain.Story{
+		ID:           "story-display-1",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs sign RB James Cook",
+		Source:       "official-min",
+		PublishedAt:  now(),
+		Summary:      "summary",
+		URL:          "https://example.com/chiefs-cook",
+		GUID:         "guid-1",
+		DedupeKey:    "official-min|guid-1",
+	}
+	if _, err := repo.Upsert(story); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("List() returned %d stories; want 1", len(stories))
+	}
+	if stories[0].DisplayTitle != "Chiefs sign RB James Cook" {
+		t.Errorf("List()[0].DisplayTitle = %q; want %q", stories[0].DisplayTitle, "Chiefs sign RB James Cook")
+	}
+	if stories[0].Display() != "Chiefs sign RB James Cook" {
+		t.Errorf("List()[0].Display() = %q; want display casing", stories[0].Display())
+	}
+
+	// Re-upsert identical story: Display() values match so unchanged detected.
+	status, err := repo.Upsert(story)
+	if err != nil {
+		t.Fatalf("second Upsert() error = %v", err)
+	}
+	if status != domain.UpsertUnchanged {
+		t.Errorf("second Upsert() status = %v; want UpsertUnchanged", status)
+	}
+}
+
+// TestLegacyStoryDisplayTitleFallback (#201, AC-3): a story persisted before
+// #201 (no display_title) must fall back to the normalized title when hydrated,
+// and a re-ingestion that restores original casing must be detected as a change.
+func TestLegacyStoryDisplayTitleFallback(t *testing.T) {
+	repo, err := NewRepository("")
+	if err != nil {
+		t.Fatalf("NewRepository() error = %v", err)
+	}
+	defer func() { _ = repo.Close() }()
+
+	if _, err := Migrate(""); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	// Simulate a legacy row: display_title column NULL/empty, story_data without
+	// displayTitle key. The migration 010 backfill should have populated the
+	// column from the headline/title, but to exercise the legacy fallback we
+	// directly set the column to empty (pre-#201 shape).
+	story := domain.Story{
+		ID:          "story-legacy-1",
+		Title:       "chiefs sign rb james cook",
+		Source:      "official-min",
+		PublishedAt: now(),
+		Summary:     "summary",
+		URL:         "https://example.com/chiefs-cook",
+		GUID:        "guid-legacy",
+		DedupeKey:   "official-min|guid-legacy",
+	}
+	if _, err := repo.Upsert(story); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+
+	// Clear the display_title column to simulate a pre-#201 row (the backfill
+	// would normally have populated it). The story_data JSON has no displayTitle
+	// key, so hydration must fall back to Title.
+	if _, err := repo.db.Exec(`UPDATE stories SET display_title = '' WHERE story_key = ?`, story.ID); err != nil {
+		t.Fatalf("clear display_title: %v", err)
+	}
+
+	stories, err := repo.List()
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(stories) != 1 {
+		t.Fatalf("List() returned %d stories; want 1", len(stories))
+	}
+	// Display() must fall back to the normalized Title.
+	if stories[0].Display() != "chiefs sign rb james cook" {
+		t.Errorf("legacy story Display() = %q; want normalized title fallback", stories[0].Display())
+	}
+
+	// Re-ingest with original casing restored: Display() now differs, so a
+	// change must be detected (AC-3).
+	reingested := story
+	reingested.DisplayTitle = "Chiefs sign RB James Cook"
+	status, err := repo.Upsert(reingested)
+	if err != nil {
+		t.Fatalf("re-ingest Upsert() error = %v", err)
+	}
+	if status != domain.UpsertUpdated {
+		t.Errorf("re-ingest Upsert() status = %v; want UpsertUpdated (display restored)", status)
+	}
+}
+
+// TestMigration010_BackfillDisplayTitle (#201): migration 010 backfills the
+// display_title column from the existing normalized title/headline for rows that
+// pre-date the migration, so legacy rows keep rendering as today.
+func TestMigration010_BackfillDisplayTitle(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "backfill.db")
+	defer func() { _ = os.Remove(dbPath) }()
+
+	// Build a DB at schema 9 (pre-#201), insert a story, then apply 010.
+	db, err := openDBForTest(t, dbPath)
+	if err != nil {
+		t.Fatalf("open DB: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Apply migrations 001-009 manually to reach schema 9 (pre-#201).
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))`); err != nil {
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+	names, err := ListMigrations()
+	if err != nil {
+		t.Fatalf("ListMigrations: %v", err)
+	}
+	for _, name := range names {
+		ver, _ := parseMigrationVersion(name)
+		if ver > 9 {
+			continue // skip 010 — the migration under test
+		}
+		raw, err := ReadMigration(name)
+		if err != nil {
+			t.Fatalf("ReadMigration %s: %v", name, err)
+		}
+		if _, err := db.Exec(string(raw)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, ver); err != nil {
+			t.Fatalf("mark %d: %v", ver, err)
+		}
+	}
+
+	// Insert a story at schema 9 with a known normalized title/headline.
+	// story_id must satisfy the 36-char UUID CHECK constraint; use a fixed 36-char
+	// UUID. The stories table at schema 9 has no `url` column (it uses
+	// canonical_url).
+	if _, err := db.Exec(`INSERT INTO stories (story_id, story_key, title, headline, summary, canonical_url, published_at, first_seen_at, updated_at, dedupe_key, story_data)
+		VALUES ('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'key-1', 'chiefs sign rb james cook', 'chiefs sign rb james cook', 'summary', 'https://example.com/chiefs-cook', '2026-01-01T10:00:00Z', '2026-01-01T09:00:00Z', '2026-01-01T10:00:00Z', 'official-min|guid-1', '{}')`); err != nil {
+		t.Fatalf("insert story: %v", err)
+	}
+
+	// Apply migration 010.
+	versions, err := MigrateDB(db)
+	if err != nil {
+		t.Fatalf("MigrateDB: %v", err)
+	}
+	if len(versions) != 1 || versions[0] != 10 {
+		t.Fatalf("expected only migration 10 applied, got %v", versions)
+	}
+
+	// The display_title column must be backfilled from the headline/title.
+	var displayTitle string
+	if err := db.QueryRow(`SELECT display_title FROM stories WHERE story_key = 'key-1'`).Scan(&displayTitle); err != nil {
+		t.Fatalf("read backfilled display_title: %v", err)
+	}
+	if displayTitle != "chiefs sign rb james cook" {
+		t.Errorf("backfilled display_title = %q; want normalized headline", displayTitle)
+	}
+}
+
+// openDBForTest opens a sqlite DB at the given path and returns it.
+func openDBForTest(t *testing.T, path string) (*sql.DB, error) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }

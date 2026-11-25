@@ -36,6 +36,29 @@ func NormalizeTitle(title string) string {
 	return s
 }
 
+// DisplayNormalizeTitle normalizes a title for display purposes while
+// preserving the original casing and punctuation exactly as published.
+// It trims whitespace, collapses multiple whitespace characters into a single
+// space, and applies NFC Unicode normalization. Unlike NormalizeTitle it does
+// NOT lowercase, so "Chiefs sign RB James Cook" is preserved as-is (issue #201).
+func DisplayNormalizeTitle(title string) string {
+	if title == "" {
+		return ""
+	}
+
+	// Trim leading/trailing whitespace
+	s := strings.TrimSpace(title)
+
+	// Collapse multiple whitespace characters into a single space
+	fields := strings.Fields(s)
+	s = strings.Join(fields, " ")
+
+	// Apply NFC Unicode normalization (no lowercasing: display keeps case)
+	s = NormalizeUnicode(s)
+
+	return s
+}
+
 // NormalizeUnicode applies NFC normalization to the input string.
 func NormalizeUnicode(s string) string {
 	return norm.NFC.String(s)

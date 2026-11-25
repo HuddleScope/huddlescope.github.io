@@ -686,3 +686,84 @@ func TestRunStoryPagesMultiSourceResolver(t *testing.T) {
 		}
 	}
 }
+
+// TestRunStoryPages_DisplayTitleEndToEnd (#201, AC-1, AC-2): a story upserted
+// with a display title (original casing) must flow through RunStoryPages into the
+// rendered page's front-matter title (display casing) and H1, while the slug
+// remains the normalized (lowercased) identity form.
+func TestRunStoryPages_DisplayTitleEndToEnd(t *testing.T) {
+	repo := storage.NewMemoryRepository()
+
+	// A story whose normalized Title is lowercase and whose DisplayTitle keeps
+	// the original feed casing. A single story = one cluster = one page.
+	_, err := repo.Upsert(domain.Story{
+		ID:           "display-201-1",
+		Title:        "chiefs sign rb james cook",
+		DisplayTitle: "Chiefs sign RB James Cook",
+		Source:       "official-min",
+		PublishedAt:  time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC),
+		Summary:      "Chiefs sign RB James Cook.",
+		URL:          "https://example.com/chiefs-cook",
+	})
+	if err != nil {
+		t.Fatalf("Upsert failed: %v", err)
+	}
+
+	app := New(
+		WithRepository(repo),
+		WithClusterer(domain.NewClusterer()),
+	)
+
+	outDir := filepath.Join(t.TempDir(), "web", "content")
+	storiesDir := filepath.Join(outDir, "stories")
+	publisher := hugo.NewPublisher(outDir, "")
+
+	result := app.RunStoryPages(context.Background(), time.Now(), publisher)
+	if len(result.Errors) > 0 {
+		t.Fatalf("run errors: %v", result.Errors)
+	}
+	if result.PagesPublished != 1 {
+		t.Fatalf("PagesPublished = %d; want 1", result.PagesPublished)
+	}
+
+	entries, err := os.ReadDir(storiesDir)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("stories dir has %d files; want 1", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(storiesDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	// The slug (file name) must be the normalized lowercase form.
+	if entries[0].Name() != "chiefs-sign-rb-james-cook.md" {
+		t.Errorf("slug file = %q; want normalized %q", entries[0].Name(), "chiefs-sign-rb-james-cook.md")
+	}
+
+	// The front-matter title must carry the original display casing.
+	block, ok := extractFrontMatterBlock(data)
+	if !ok {
+		t.Fatalf("no front-matter block:\n%s", data)
+	}
+	var fm struct {
+		Title string `yaml:"title"`
+		Slug  string `yaml:"slug"`
+	}
+	if err := yaml.Unmarshal(block, &fm); err != nil {
+		t.Fatalf("front-matter does not parse: %v\n%s", err, block)
+	}
+	if fm.Title != "Chiefs sign RB James Cook" {
+		t.Errorf("front-matter title = %q; want display casing %q", fm.Title, "Chiefs sign RB James Cook")
+	}
+	if fm.Slug != "chiefs-sign-rb-james-cook" {
+		t.Errorf("front-matter slug = %q; want normalized %q", fm.Slug, "chiefs-sign-rb-james-cook")
+	}
+
+	// The rendered body must contain the display-cased H1.
+	if !strings.Contains(string(data), "# Chiefs sign RB James Cook") {
+		t.Errorf("body H1 missing display casing:\n%s", string(data))
+	}
+}

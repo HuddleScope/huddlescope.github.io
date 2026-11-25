@@ -136,9 +136,16 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 			evidence = sb.EvidenceLevel
 		}
 
+		// Get the display headline (original casing where available,
+		// normalized fallback) for the snapshot story title (#201).
+		displayHeadline := g.DisplayHeadline
+		if strings.TrimSpace(displayHeadline) == "" {
+			displayHeadline = g.Headline
+		}
+
 		ss = append(ss, SnapshotStory{
 			ID:               g.ID,
-			Title:            g.Headline,
+			Title:            displayHeadline,
 			Summary:          snapshotStorySummary(g),
 			FirstPublishedAt: g.FirstPublishedAt.UTC().Format(time.RFC3339),
 			LastPublishedAt:  g.LastPublishedAt.UTC().Format(time.RFC3339),
@@ -160,13 +167,17 @@ func buildStories(stories []Story, clusters []StoryGroup, scorer *Scorer, now ti
 // snapshotStorySummary returns a summary for a clustered story that always
 // survives Snapshot.Validate. Rows persisted before #122 (and rows whose feed
 // item carried no description) may store an empty summary; the first
-// non-empty article summary is used, falling back to the group headline so
-// one poisoned row cannot fail the whole export.
+// non-empty article summary is used, falling back to the display headline (with
+// the normalized headline fallback) so one poisoned row cannot fail the whole
+// export.
 func snapshotStorySummary(g StoryGroup) string {
 	for _, a := range g.Articles {
 		if sum := strings.TrimSpace(a.Summary); sum != "" {
 			return sum
 		}
+	}
+	if d := strings.TrimSpace(g.DisplayHeadline); d != "" {
+		return g.DisplayHeadline
 	}
 	return g.Headline
 }
@@ -210,7 +221,7 @@ func buildLatestArticles(stories []Story, limit int) ([]SnapshotArticle, error) 
 		articles = append(articles, SnapshotArticle{
 			SourceID:    NormalizeSourceID(s.Source),
 			SourceName:  s.Source, // use raw source ID as name when no resolver
-			Title:       s.Title,
+			Title:       s.Display(),
 			URL:         s.URL,
 			PublishedAt: s.PublishedAt.UTC().Format(time.RFC3339),
 		})
