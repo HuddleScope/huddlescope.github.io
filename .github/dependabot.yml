@@ -48,3 +48,26 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Docker base images (issue #204): keeps the golang builder tag in the
+  # repo-root Dockerfile in sync with the Go version declared in go.mod.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "08:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore(docker):"
+      include: "scope"
+    groups:
+      docker-base:
+        patterns:
+          - "golang*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -1,18 +1,25 @@
-# huddlescope runtime image (issue #161 AC-5).
+# huddlescope runtime image (issue #161 AC-5, published by issue #204).
 #
 # Multi-stage: stage 1 cross-compiles the static binary (CGO_ENABLED=0,
 # -trimpath, stamped with the same version/commit/built-at the Makefile and
-# release workflow use); stage 2 is a minimal alpine runtime with CA certs and
-# a non-root user. No `.env` or credentials are ever copied into the image —
-# runtime config is supplied as environment variables at `docker run` time,
-# identical to the native binary's precedence chain (flags > env > file >
-# defaults), so container and native share the same execution model.
+# release workflow use); stage 2 is the minimal gcr.io/distroless/static
+# runtime (no shell, no package manager, ~2 MB) running as a non-root user.
+# distroless/static ships the ca-certificates bundle, so the Turso HTTPS
+# connection works without any package-manager install step.
+# No `.env` or credentials are ever copied into the image — runtime config is
+# supplied as environment variables at `docker run` time, identical to the
+# native binary's precedence chain (flags > env > file > defaults), so
+# container and native share the same execution model.
 #
-# No image is published by any workflow (issue #161 AC-6); building this image
-# is a local/manual operation (`make docker-build`).
+# The image is published to ghcr.io on every merge to main by
+# .github/workflows/docker-build.yaml (issue #204). Local builds remain
+# available via `make docker-build`.
 
 # ---- Stage 1: build the static binary -------------------------------------
-FROM golang:1.27-alpine AS build
+# The golang base tag is kept in sync with go.mod (see dependabot docker
+# group `docker-base` tracking `golang*`); CGO_ENABLED=0 below keeps the
+# binary static regardless of the base.
+FROM golang:1.27 AS build
 
 # Build args mirror the Makefile stamp defaults so the image's binary reports
 # the same version/revision/build-info as a `make build` of the same commit.
@@ -41,10 +48,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/huddlescope ./cmd/huddlescope
 
 # ---- Stage 2: minimal runtime ---------------------------------------------
-FROM alpine:3.22
+FROM gcr.io/distroless/static
 
-# CA certs so the Turso HTTPS connection works inside the container.
-RUN apk add --no-cache ca-certificates
+# The distroless/static base ships the system ca-certificates bundle and has
+# no shell or package manager; nothing to install.
 
 # Copy only the compiled binary; no source, no .env, no secrets in layers.
 COPY --from=build /out/huddlescope /usr/local/bin/huddlescope
@@ -55,5 +62,5 @@ USER 65534:65534
 # Runtime configuration is supplied via environment variables at `docker run`
 # time (HSC_*, TURSO_*) — identical to the native binary. Example:
 #   docker run --rm -e TURSO_DATABASE_URL=... -e TURSO_AUTH_TOKEN=... \
-#     -e HSC_STORAGE_BACKEND=turso huddlescope:VERSION ingest run
+#     -e HSC_STORAGE_BACKEND=turso ghcr.io/huddlescope/huddlescope.github.io:latest ingest run
 ENTRYPOINT ["/usr/local/bin/huddlescope"]

@@ -205,12 +205,16 @@ precedence chain (flags > env > `--config` file > defaults) and execution model.
 No repo, web-data, or `.env` is baked into the image; config is supplied as
 environment variables at `docker run` time.
 
-Build the image locally (no workflow publishes it automatically — image
-publishing is the separate, unapproved #204 scope):
+Build the image locally, or pull the published image (issue #204 publishes
+`ghcr.io/huddlescope/huddlescope.github.io` on every merge to `main`):
 
 ```bash
+# Local build:
 make docker-build
 # tags huddlescope:<version>
+
+# Or pull the published image:
+docker pull ghcr.io/huddlescope/huddlescope.github.io:latest
 ```
 
 Run it, mirroring the native production config (`HSC_ENV=production`,
@@ -232,11 +236,14 @@ docker run --rm \
 Image invariants (enforced by `TestDockerfileSafeguards` / `TestNoImagePushWorkflow`):
 
 - multi-stage build; build stage sets `CGO_ENABLED=0` and uses `-trimpath`;
-- runtime stage installs `ca-certificates` and runs as a non-root `USER`;
+- runtime stage is `gcr.io/distroless/static` (ships CA certs, no shell) and
+  runs as a non-root `USER`;
 - the binary is installed at `/usr/local/bin/huddlescope` and set as the
   `ENTRYPOINT`;
 - no `COPY` of `.env` or credentials into any layer;
-- no workflow `docker push`/`docker login` (no automatic publication).
+- image publication is restricted to the approved Docker workflow
+  (`.github/workflows/docker-build.yaml`, issue #204); no other workflow may
+  log in to or push to a container registry.
 
 Because the container uses env for config exactly like the native binary, the
 fail-fast production checks (Turso URL/token required, non-memory backend,
