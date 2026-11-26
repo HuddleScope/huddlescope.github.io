@@ -18,8 +18,8 @@ func TestMigrate008CreatesIngestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 11 {
-		t.Fatalf("expected 11 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 12 {
+		t.Fatalf("expected 12 migrations, got %d: %v", len(versions), versions)
 	}
 
 	repo, err := NewRepository(dbPath)
@@ -115,9 +115,9 @@ func TestMigrate008CarryOver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	wantVersions := map[int]bool{8: true, 9: true, 10: true, 11: true}
-	if len(versions) != 4 {
-		t.Errorf("expected migrations [8 9 10 11] applied, got %d: %v", len(versions), versions)
+	wantVersions := map[int]bool{8: true, 9: true, 10: true, 11: true, 12: true}
+	if len(versions) != 5 {
+		t.Errorf("expected migrations [8 9 10 11 12] applied, got %d: %v", len(versions), versions)
 	}
 	for _, v := range versions {
 		if !wantVersions[v] {

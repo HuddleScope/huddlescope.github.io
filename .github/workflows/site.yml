@@ -237,6 +237,9 @@ jobs:
       # snapshot is now read from the re-projected workspace (Turso), not from
       # a committed file.
       # Exit codes: 0 allow/skip-identical, 3 deny, 1 invalid input.
+      # issue #250 / PUB-04 (AC2, G6): the gate verdict drives a `deploy` output
+      # — `allow` deploys, `skip-identical` quiesces (no redundant Pages write
+      # on a frontend-only merge), `deny` fails the job (retain last-good).
       - name: Publish gate
         id: publish-gate
         run: |
@@ -255,6 +258,17 @@ jobs:
           echo "$GATE_JSON"
           VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
           echo "Gate verdict: $VERDICT"
+          if [ "$VERDICT" = "allow" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif [ "$VERDICT" = "skip-identical" ]; then
+            # Frontend-only change with identical content: quiesce the Pages
+            # deploy (no redundant write). The PR merge for editorial content
+            # still proceeds (always() step below).
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unexpected gate verdict: $VERDICT"
+            exit 1
+          fi
 
       - name: Install Hugo extended
         run: |
@@ -299,6 +313,35 @@ jobs:
           file_count=$(find web/public/ -type f | wc -l)
           echo "Total files in web/public/: $file_count"
 
+      # issue #250 / PUB-04 (AC2, AC6): rendered-HTML verification. The publish
+      # gate compares JSON exports; verify-html compares the rendered
+      # web/public/index.html against the candidate (and, when present, the
+      # stored manifest), so a skeleton/zero-story render from a valid JSON
+      # export (the #229 failure mode) is caught by the rendered artifact
+      # itself. Hard fail (no continue-on-error) BEFORE any Pages upload: a
+      # failure fails the deploy job, so the last-known-good Pages content is
+      # preserved and the manifest is NOT advanced. The candidate is the
+      # re-projected workspace homepage.json; the manifest is the stored
+      # manifest read by manifest-get.
+      - name: Verify rendered HTML against candidate
+        id: verify-html
+        if: steps.make-site.conclusion == 'success' && steps.publish-gate.outputs.deploy == 'true'
+        run: |
+          set -euo pipefail
+          echo "Verifying rendered HTML against the candidate snapshot..."
+          VERIFY_JSON=$(./dist/huddlescope publish verify-html --public web/public --candidate web/data/homepage.json --manifest web/data/deployed.json) || {
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -eq 3 ]; then
+              echo "$VERIFY_JSON"
+              echo "::error::verify-html denied: retaining last-known-good deployment"
+              exit 1
+            fi
+            echo "::error::verify-html failed (exit $EXIT_CODE): $VERIFY_JSON"
+            exit 1
+          }
+          echo "$VERIFY_JSON"
+          echo "verify=pass" >> "$GITHUB_OUTPUT"
+
       - name: Upload site artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -308,27 +351,31 @@ jobs:
           if-no-files-found: ignore
 
       - name: Configure GitHub Pages
-        if: inputs.publish
+        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: inputs.publish
+        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
 
+      # issue #250 / PUB-04 (AC3, AC4): the manifest put is monotonic (never
+      # lowers the stored generatedAt) and records the v2 binding fields
+      # (snapshotId, lastIngestAt, sourceCommit, runId) when available.
       # issue #247 / PUB-01 (AC-6): after a successful deploy, record what was
       # actually deployed in the durable store (Turso) via `publish manifest
       # put`. No Git commit/PR. The candidate is the re-projected
       # web/data/homepage.json. A failed put does NOT undo the deploy; the next
       # run re-deploys (correct, just noisy).
       - name: Record deployed manifest in store
-        if: success() && inputs.publish
+        if: success() && inputs.publish && steps.publish-gate.outputs.deploy == 'true'
         run: |
           set -euo pipefail
           echo "Recording deployed manifest in the durable store..."
           COMMIT_SHA="${{ github.sha }}"
-          ./dist/huddlescope publish manifest put --candidate web/data/homepage.json --commit "$COMMIT_SHA"
+          RUN_ID="${{ github.run_id }}"
+          ./dist/huddlescope publish manifest put --candidate web/data/homepage.json --commit "$COMMIT_SHA" --run-id "$RUN_ID" --source-commit "$COMMIT_SHA"
           echo "Deployed manifest recorded in the durable store"
 
       # issue #229 / AC-1, AC-3, AC-4: merge the feature-branch PR with a

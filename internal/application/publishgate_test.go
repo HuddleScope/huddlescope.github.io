@@ -325,3 +325,166 @@ func TestStampManifest(t *testing.T) {
 		t.Errorf("deployedAt not RFC3339: %v", err)
 	}
 }
+
+// --- issue #250 / PUB-04: v2 manifest, monotonic stamp, v1∪v2 gate ---
+
+// TestEvaluatePublishGate_V2Manifest_Allow: the gate accepts a v2 manifest
+// (with binding fields) and allows a newer candidate.
+func TestEvaluatePublishGate_V2Manifest_Allow(t *testing.T) {
+	cand := makeSnapshot(t, 5, "2026-01-03T00:00:00Z", "dal")
+	m := &DeployedManifest{
+		Version:       ManifestVersion, // "2"
+		DeployedAt:    "2026-01-02T00:00:00Z",
+		GeneratedAt:   "2026-01-02T00:00:00Z",
+		Commit:        "abc123",
+		ContentSHA256: "different-hash",
+		Stories:       5,
+		Latest:        3,
+		SnapshotID:    "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb",
+		LastIngestAt:  "2026-01-02T00:00:00Z",
+		SourceCommit:  "abc123",
+		RunID:         "12345",
+	}
+	res, err := EvaluatePublishGate(cand, m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Verdict != GateVerdictAllow {
+		t.Errorf("verdict = %q, want allow (v2 manifest)", res.Verdict)
+	}
+}
+
+// TestEvaluatePublishGate_LegacyV1Manifest_Allow: the gate still accepts a
+// legacy v1 manifest (missing v2 fields) during rollout.
+func TestEvaluatePublishGate_LegacyV1Manifest_Allow(t *testing.T) {
+	cand := makeSnapshot(t, 5, "2026-01-03T00:00:00Z", "dal")
+	m := &DeployedManifest{
+		Version:       LegacyManifestVersion, // "1"
+		DeployedAt:    "2026-01-02T00:00:00Z",
+		GeneratedAt:   "2026-01-02T00:00:00Z",
+		Commit:        "abc123",
+		ContentSHA256: "different-hash",
+		Stories:       5,
+		Latest:        3,
+	}
+	res, err := EvaluatePublishGate(cand, m)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Verdict != GateVerdictAllow {
+		t.Errorf("verdict = %q, want allow (legacy v1 manifest)", res.Verdict)
+	}
+}
+
+// TestEvaluatePublishGate_UnknownVersion_Error: an unknown manifest version
+// fails closed.
+func TestEvaluatePublishGate_UnknownVersion_Error(t *testing.T) {
+	cand := makeSnapshot(t, 5, "2026-01-03T00:00:00Z", "dal")
+	m := &DeployedManifest{
+		Version:       "999",
+		DeployedAt:    "2026-01-02T00:00:00Z",
+		GeneratedAt:   "2026-01-02T00:00:00Z",
+		Commit:        "abc123",
+		ContentSHA256: "different-hash",
+		Stories:       5,
+	}
+	if _, err := EvaluatePublishGate(cand, m); err == nil {
+		t.Error("expected error for unknown manifest version")
+	}
+}
+
+// TestStampManifestV2_BindingFields: the v2 stamp records the binding fields.
+func TestStampManifestV2_BindingFields(t *testing.T) {
+	cand := makeSnapshot(t, 5, "2026-01-01T00:00:00Z", "dal")
+	m := StampManifestV2(cand, "abc123", "snap1", "2026-01-01T00:00:00Z", "src456", "run789")
+	if m.Version != ManifestVersion {
+		t.Errorf("version = %q, want %q", m.Version, ManifestVersion)
+	}
+	if m.SnapshotID != "snap1" {
+		t.Errorf("snapshotId = %q, want snap1", m.SnapshotID)
+	}
+	if m.LastIngestAt != "2026-01-01T00:00:00Z" {
+		t.Errorf("lastIngestAt = %q", m.LastIngestAt)
+	}
+	if m.SourceCommit != "src456" {
+		t.Errorf("sourceCommit = %q, want src456", m.SourceCommit)
+	}
+	if m.RunID != "run789" {
+		t.Errorf("runId = %q, want run789", m.RunID)
+	}
+}
+
+// TestMonotonicStamp_FirstPut_Advances: no stored manifest → advance.
+func TestMonotonicStamp_FirstPut_Advances(t *testing.T) {
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "h"}
+	res := MonotonicStamp(nil, cand)
+	if !res.Advanced {
+		t.Error("expected advance for first put")
+	}
+}
+
+// TestMonotonicStamp_OlderCandidate_SkipsWithWarning: AC3 — a late/delayed run
+// with an older candidate must not regress the stored manifest.
+func TestMonotonicStamp_OlderCandidate_SkipsWithWarning(t *testing.T) {
+	stored := &DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-03T00:00:00Z", ContentSHA256: "hNewer"}
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hOlder"}
+	res := MonotonicStamp(stored, cand)
+	if !res.Skipped {
+		t.Error("expected skip for older candidate")
+	}
+	if res.Warning == "" {
+		t.Error("expected a warning for the regression skip")
+	}
+	if res.Advanced {
+		t.Error("must not advance for an older candidate")
+	}
+}
+
+// TestMonotonicStamp_NewerCandidate_Advances: a newer candidate advances.
+func TestMonotonicStamp_NewerCandidate_Advances(t *testing.T) {
+	stored := &DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hOlder"}
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-03T00:00:00Z", ContentSHA256: "hNewer"}
+	res := MonotonicStamp(stored, cand)
+	if !res.Advanced {
+		t.Error("expected advance for newer candidate")
+	}
+}
+
+// TestMonotonicStamp_EqualGenAtIdenticalContent_SkipsNoWarning: same instant,
+// identical content → no-op, no warning.
+func TestMonotonicStamp_EqualGenAtIdenticalContent_SkipsNoWarning(t *testing.T) {
+	stored := &DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hSame"}
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hSame"}
+	res := MonotonicStamp(stored, cand)
+	if !res.Skipped {
+		t.Error("expected skip for equal generatedAt + identical content")
+	}
+	if res.Warning != "" {
+		t.Errorf("unexpected warning: %q", res.Warning)
+	}
+}
+
+// TestMonotonicStamp_EqualGenAtDifferentContent_Advances: same instant,
+// different content → advance (legitimate re-stamp).
+func TestMonotonicStamp_EqualGenAtDifferentContent_Advances(t *testing.T) {
+	stored := &DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hA"}
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "2026-01-01T00:00:00Z", ContentSHA256: "hB"}
+	res := MonotonicStamp(stored, cand)
+	if !res.Advanced {
+		t.Error("expected advance for equal generatedAt + different content")
+	}
+}
+
+// TestMonotonicStamp_UnparseableTimestamps_Skips: fail closed (skip with a
+// warning) when timestamps cannot be compared.
+func TestMonotonicStamp_UnparseableTimestamps_Skips(t *testing.T) {
+	stored := &DeployedManifest{Version: ManifestVersion, GeneratedAt: "not-a-time", ContentSHA256: "h"}
+	cand := DeployedManifest{Version: ManifestVersion, GeneratedAt: "also-not-a-time", ContentSHA256: "h"}
+	res := MonotonicStamp(stored, cand)
+	if !res.Skipped {
+		t.Error("expected skip for unparseable timestamps (fail closed)")
+	}
+	if res.Warning == "" {
+		t.Error("expected a warning for unparseable timestamps")
+	}
+}

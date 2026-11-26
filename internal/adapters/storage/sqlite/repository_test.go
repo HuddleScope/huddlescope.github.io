@@ -22,8 +22,8 @@ func TestMigrateSuccess(t *testing.T) {
 	if len(versions) == 0 {
 		t.Fatal("Migrate() returned empty versions")
 	}
-	if len(versions) != 11 {
-		t.Errorf("expected 11 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 12 {
+		t.Errorf("expected 12 migrations, got %d: %v", len(versions), versions)
 	}
 }
 
@@ -733,8 +733,8 @@ func TestMigration010_BackfillDisplayTitle(t *testing.T) {
 	if !applied[11] {
 		t.Fatalf("expected migration 11 applied, got %v", versions)
 	}
-	if len(versions) != 2 {
-		t.Fatalf("expected migrations [10 11] applied, got %v", versions)
+	if len(versions) != 3 {
+		t.Fatalf("expected migrations [10 11 12] applied, got %v", versions)
 	}
 
 	// The display_title column must be backfilled from the headline/title.

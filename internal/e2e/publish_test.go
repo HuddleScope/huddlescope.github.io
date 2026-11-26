@@ -228,3 +228,88 @@ func TestPublishGate_S5_NoManifest(t *testing.T) {
 		t.Errorf("S5: verdict = %v, want allow (no manifest)", r["verdict"])
 	}
 }
+
+// S6: Skeleton render deny (issue #250 / PUB-04 AC6). A valid JSON export with
+// 5 stories but a rendered index.html with 0 story cards must be denied by
+// verify-html (exit 3). This is the #229 failure mode: the gate compares JSON,
+// verify-html compares the rendered artifact.
+func TestPublishVerifyHTML_S6_SkeletonRender_Deny(t *testing.T) {
+	t.Parallel()
+	cli := buildCLI(t)
+	tmpDir := t.TempDir()
+
+	// Candidate: 5 stories (a "valid" JSON export).
+	candidate := filepath.Join(tmpDir, "homepage.json")
+	writeSnapshot(t, candidate, 5, "2026-01-01T00:00:00Z")
+
+	// Rendered site: an index.html with a freshness note but 0 story cards
+	// (a skeleton render — the data did not make it into the HTML).
+	publicDir := filepath.Join(tmpDir, "public")
+	if err := os.MkdirAll(publicDir, 0o755); err != nil {
+		t.Fatalf("mkdirt public: %v", err)
+	}
+	indexPath := filepath.Join(publicDir, "index.html")
+	indexHTML := `<html><body><p class="update-note">Data as of ` +
+		`<time datetime="2026-01-01T00:00:00Z">Jan 1</time></time></p>` +
+		`<main><!-- no story cards rendered --></main></body></html>`
+	if err := os.WriteFile(indexPath, []byte(indexHTML), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	cmd := exec.Command(cli, "publish", "verify-html", "--public", publicDir, "--candidate", candidate)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("S6: expected error for skeleton render (exit 3)")
+	}
+	if ee, ok := err.(*exec.ExitError); ok {
+		if ee.ExitCode() != 3 {
+			t.Errorf("S6: exit code = %d, want 3", ee.ExitCode())
+		}
+	}
+	var r map[string]any
+	if jerr := json.Unmarshal(out, &r); jerr != nil {
+		t.Fatalf("S6: parse verify output: %v (output: %s)", jerr, out)
+	}
+	if r["pass"] != false {
+		t.Errorf("S6: pass = %v, want false", r["pass"])
+	}
+}
+
+// S7: Rendered pass (issue #250 / PUB-04 AC6). A rendered site with 5 story
+// cards matching the candidate and a matching freshness label passes
+// (exit 0).
+func TestPublishVerifyHTML_S7_RenderedPass(t *testing.T) {
+	t.Parallel()
+	cli := buildCLI(t)
+	tmpDir := t.TempDir()
+
+	candidate := filepath.Join(tmpDir, "homepage.json")
+	writeSnapshot(t, candidate, 5, "2026-01-01T00:00:00Z")
+
+	publicDir := filepath.Join(tmpDir, "public")
+	if err := os.MkdirAll(publicDir, 0o755); err != nil {
+		t.Fatalf("mkdir public: %v", err)
+	}
+	indexPath := filepath.Join(publicDir, "index.html")
+	var cards string
+	for i := 0; i < 5; i++ {
+		cards += `<article class="story-card"><h3>S</h3></article>`
+	}
+	indexHTML := `<html><body><p class="update-note">Data as of ` +
+		`<time datetime="2026-01-01T00:00:00Z">Jan 1</time></time></p>` +
+		`<main>` + cards + `</main></body></html>`
+	if err := os.WriteFile(indexPath, []byte(indexHTML), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	cmd := exec.Command(cli, "publish", "verify-html", "--public", publicDir, "--candidate", candidate)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("S7: expected pass (exit 0), got %v (output: %s)", err, out)
+	}
+	var r map[string]any
+	json.Unmarshal(out, &r)
+	if r["pass"] != true {
+		t.Errorf("S7: pass = %v, want true", r["pass"])
+	}
+}

@@ -59,8 +59,8 @@ func TestNewRetentionService_SqliteFile(t *testing.T) {
 	if st.Backend != "sqlite-file" {
 		t.Errorf("backend: want sqlite-file, got %q", st.Backend)
 	}
-	if st.SchemaVersion != 11 {
-		t.Errorf("schema: want 11, got %d", st.SchemaVersion)
+	if st.SchemaVersion != 12 {
+		t.Errorf("schema: want 12, got %d", st.SchemaVersion)
 	}
 }
 

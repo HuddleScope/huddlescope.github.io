@@ -33,7 +33,14 @@ import (
 type DeployedManifest = domain.DeployedManifest
 
 // ManifestVersion is the current version of the deployed manifest format.
+//
+// issue #250 / PUB-04: the gate accepts both the current v2 and the legacy v1
+// manifest versions on read (v1 rows are readable with zero-value v2 fields);
+// writes always produce v2. See domain.LegacyManifestVersion.
 const ManifestVersion = domain.ManifestVersion
+
+// LegacyManifestVersion is the pre-#250 manifest version (still readable).
+const LegacyManifestVersion = domain.LegacyManifestVersion
 
 // GateVerdict is the outcome of a publish gate evaluation.
 type GateVerdict string
@@ -91,7 +98,11 @@ func EvaluatePublishGate(candidate *domain.Snapshot, m *DeployedManifest) (GateR
 		}, nil
 	}
 
-	// Validate manifest fields.
+	// Validate manifest fields (fail closed on unknown version or missing
+	// required fields). v1 and v2 are both accepted (issue #250 / PUB-04).
+	if m.Version != ManifestVersion && m.Version != LegacyManifestVersion {
+		return GateResult{}, fmt.Errorf("manifest version %q, want %q or %q", m.Version, ManifestVersion, LegacyManifestVersion)
+	}
 	if m.GeneratedAt == "" {
 		return GateResult{}, fmt.Errorf("manifest missing generatedAt")
 	}
@@ -231,8 +242,8 @@ func LoadDeployedManifest(path string) (*DeployedManifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
-	if m.Version != ManifestVersion {
-		return nil, fmt.Errorf("manifest version %q, want %q", m.Version, ManifestVersion)
+	if m.Version != ManifestVersion && m.Version != LegacyManifestVersion {
+		return nil, fmt.Errorf("manifest version %q, want %q or %q", m.Version, ManifestVersion, LegacyManifestVersion)
 	}
 	return &m, nil
 }
@@ -255,6 +266,12 @@ func LoadCandidateSnapshot(path string) (*domain.Snapshot, error) {
 }
 
 // StampManifest creates a DeployedManifest from a candidate snapshot and commit SHA.
+//
+// issue #250 / PUB-04: the manifest is v2 and binds the deployment to the exact
+// validated artifact and run (snapshotId, lastIngestAt, sourceCommit, runID).
+// Empty snapshotId/lastIngestAt/sourceCommit/runID are written as-is (empty) —
+// the CLI supplies them from the site-snapshot package + CI context when
+// available.
 func StampManifest(candidate *domain.Snapshot, commit string) DeployedManifest {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return DeployedManifest{
@@ -266,4 +283,67 @@ func StampManifest(candidate *domain.Snapshot, commit string) DeployedManifest {
 		Stories:       len(candidate.Stories),
 		Latest:        len(candidate.Latest),
 	}
+}
+
+// StampManifestV2 creates a v2 DeployedManifest from a candidate snapshot,
+// commit SHA, and the validated-artifact/run binding fields (issue #250 /
+// PUB-04 AC4). The binding fields are written as-is; empty values stay empty
+// (a caller without site-snapshot/CI context produces a v2 manifest with empty
+// binding fields, which is still valid).
+func StampManifestV2(candidate *domain.Snapshot, commit, snapshotID, lastIngestAt, sourceCommit, runID string) DeployedManifest {
+	m := StampManifest(candidate, commit)
+	m.SnapshotID = snapshotID
+	m.LastIngestAt = lastIngestAt
+	m.SourceCommit = sourceCommit
+	m.RunID = runID
+	return m
+}
+
+// MonotonicStampResult reports the outcome of a monotonic manifest put (issue
+// #250 / PUB-04 AC3): whether the stored manifest was advanced, left
+// unchanged, or the put was a no-op warning (the candidate is older than the
+// stored manifest).
+type MonotonicStampResult struct {
+	Advanced bool             `json:"advanced"`
+	Skipped  bool             `json:"skipped"`
+	Warning  string           `json:"warning,omitempty"`
+	Manifest DeployedManifest `json:"manifest,omitempty"`
+}
+
+// MonotonicStamp compares a candidate manifest against the stored manifest and
+// returns whether the put should advance the store (AC3: never lower the
+// stored generatedAt). Rules:
+//
+//   - stored is nil/empty: advance (first put).
+//   - candidate.generatedAt == stored.generatedAt: skip if content is identical
+//     (no-op, no warning); advance if content differs (same instant, newer
+//     content is a legitimate re-stamp).
+//   - candidate.generatedAt < stored.generatedAt: skip with a warning (a
+//     late/delayed run must not regress the stored manifest).
+//   - candidate.generatedAt > stored.generatedAt: advance.
+//
+// The returned Manifest is the manifest to store (the candidate) when
+// Advanced=true, or zero when Skipped.
+func MonotonicStamp(stored *DeployedManifest, candidate DeployedManifest) MonotonicStampResult {
+	if stored == nil || stored.Version == "" {
+		return MonotonicStampResult{Advanced: true, Manifest: candidate}
+	}
+	candT, cerr := time.Parse(time.RFC3339, candidate.GeneratedAt)
+	depT, derr := time.Parse(time.RFC3339, stored.GeneratedAt)
+	if cerr != nil || derr != nil {
+		// Unparseable timestamps: fail closed by treating as a regression-skip
+		// with a warning (never lower a manifest we cannot compare).
+		return MonotonicStampResult{Skipped: true, Warning: "cannot compare generatedAt; skipping put (fail closed)"}
+	}
+	if candT.Before(depT) {
+		return MonotonicStampResult{
+			Skipped: true,
+			Warning: fmt.Sprintf("candidate generatedAt %s is older than stored %s; skipping put (no regression)", candidate.GeneratedAt, stored.GeneratedAt),
+		}
+	}
+	if candT.Equal(depT) && candidate.ContentSHA256 == stored.ContentSHA256 {
+		// Same instant, identical content: no-op, no warning.
+		return MonotonicStampResult{Skipped: true}
+	}
+	return MonotonicStampResult{Advanced: true, Manifest: candidate}
 }
