@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd LaunchAgent for huddlescope ingest (issue #202 / HS-PORT-10).
+
+  Mirrors the systemd oneshot semantics of deploy/systemd/huddlescope-ingest.*:
+  a non-root, one-shot ingest every 30 minutes, with secrets loaded from the
+  0600 env file (launchd has no EnvironmentFile, so the env is sourced via a
+  sh -c wrapper exactly like the systemd EnvironmentFile tier).
+
+  Installed by scripts/deploy.sh into ~/Library/LaunchAgents/ as a user agent
+  (no root, non-root by construction). The binary path is rewritten to the
+  actual install dir by deploy.sh before loading.
+
+  Guard test: internal/cli/launchd_units_test.go pins these invariants so
+  drift fails CI (same philosophy as the systemd unit guard test).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.huddlescope.ingest</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . /opt/huddlescope/huddlescope.env; exec /opt/huddlescope/huddlescope ingest run --mode primary --stale-after 75m</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/opt/huddlescope</string>
+
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/opt/huddlescope/logs/ingest.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/opt/huddlescope/logs/ingest.err.log</string>
+</dict>
+</plist>

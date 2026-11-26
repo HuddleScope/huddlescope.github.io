@@ -50,6 +50,14 @@ Download the release tarball for your architecture (see
 sudo install -m 0755 huddlescope /usr/local/bin/huddlescope
 ```
 
+Or use the auto-deploy script (issue #202), which detects the arch, downloads
+and checksum-verifies the matching release binary, installs the systemd units,
+and activates the timer in one step:
+
+```bash
+sudo bash scripts/deploy.sh --version vX.Y.Z
+```
+
 Cross-compile reference (if you build locally):
 
 ```bash

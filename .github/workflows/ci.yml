@@ -133,6 +133,12 @@ jobs:
       - name: Verify binaries
         run: ls -la dist/
 
+      # Shell syntax gate for the deploy script (issue #202): `bash -n` parses
+      # without executing, so it needs no network, root, or mutation and is
+      # safe on every PR. Catches shell syntax regressions cheaply.
+      - name: Verify deploy.sh syntax (bash -n)
+        run: bash -n scripts/deploy.sh
+
   # Cross-architecture static build matrix (issue #161 AC-7): proves the
   # single binary cross-compiles with CGO_ENABLED=0 and stays static on every
   # release target per-PR. The release workflow (build-and-release.yaml) also
