@@ -1,7 +1,7 @@
 {
   "version": "1",
-  "generatedAt": "2026-11-26T03:11:02Z",
-  "run_id": "ci_NPnYK_Fg7BAOxdIysQA==",
+  "generatedAt": "2026-11-26T04:41:14Z",
+  "run_id": "zGzH0LaYcapQhwvDiXpwpQ==",
   "run_status": "ok",
   "duration_ms": 0,
   "feeds": [],
@@ -15,8 +15,8 @@
     "healthy": 0,
     "not_checked": 0,
     "stale": 0,
-    "entries": 467,
-    "new": 42,
+    "entries": 473,
+    "new": 34,
     "duplicates": 0,
     "groups": 0
   }
