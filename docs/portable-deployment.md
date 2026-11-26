@@ -3,7 +3,10 @@
 This document describes how to run the `huddlescope` binary on hosts that do
 not sit inside the huddlescope GitHub repository — specifically a VPS and a
 Raspberry Pi — using Turso as the shared store. GitHub Actions continues to
-run export and keep the committed site-data files fresh.
+run export (re-projecting the production snapshot into the workspace from
+Turso) and records the deployed manifest in Turso (`publish manifest put`).
+Since issue #247 the generated `web/data/*.json` files are **not committed** to
+Git; the live site is served from the Pages deploy, not from committed files.
 
 Issue: #158 (HS-PORT-02).
 
@@ -12,9 +15,11 @@ Issue: #158 (HS-PORT-02).
 - **VPS / Raspberry Pi**: ingest to Turso without writing to `web/data` or any
   repo path. The binary must work from any working directory with absolute
   paths.
-- **GitHub Actions**: run export and publish the site-data files
-  (`web/data/heartbeat.json`, `web/data/feeds.json`, `web/data/homepage.json`)
-  so the committed versions stay fresh.
+- **GitHub Actions**: run export to re-project the production snapshot into
+  the workspace (`web/data/heartbeat.json`, `web/data/feeds.json`,
+  `web/data/homepage.json`), record the deployed manifest in Turso, and deploy
+  to Pages. These files are workspace-only (untracked/ignored) since issue
+  #247 — they are not committed.
 - **Config precedence**: CLI flags > environment variables > `--config` file >
   defaults.
 - **Fail-fast**: missing mandatory production config (Turso URL/token,
@@ -62,7 +67,8 @@ Controls whether ingest writes the site-data files
   This is what a repo-less VPS/Raspberry host wants — ingest never creates
   `web/data` on a production host.
 - **`true`**: always write the files, even in production. GitHub Actions sets
-  this so the committed files stay fresh.
+  this so the workspace site-data files are written (untracked/ignored, not
+  committed) before the Pages deploy.
 - **`false`**: never write the files.
 
 The run indicators (ingest run status, feed-health counters) are always
@@ -151,10 +157,11 @@ and export. It sets:
 - `HSC_RUNNER_ORIGIN=github-backup`
 - **`HSC_PUBLISH_SITE_DATA=true`** (issue #158 / AC-5)
 
-The `HSC_PUBLISH_SITE_DATA=true` ensures the committed
-`web/data/heartbeat.json` and `web/data/feeds.json` stay fresh. The workflow
-commits these files after each run (with `continue-on-error: true` so a
-transient commit failure does not break the deploy).
+The `HSC_PUBLISH_SITE_DATA=true` ensures the workspace
+`web/data/heartbeat.json` and `web/data/feeds.json` are written (untracked/
+ignored, not committed) before the Pages deploy. After a successful deploy the
+workflow records the deployed manifest in Turso via `publish manifest put`
+(no Git commit).
 
 ## Fail-fast diagnostics
 

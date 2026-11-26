@@ -96,6 +96,16 @@ func DefaultNewRetentionService(cfg config.StorageConfig) (domain.RetentionServi
 // repository (issue #159 / HS-PORT-03).
 type NewIngestRunRepoFunc func(cfg config.StorageConfig) (domain.IngestRunRepository, error)
 
+// NewManifestStoreFunc is a function type for creating the deployed-manifest
+// store (issue #247 / PUB-01). Used by `publish manifest get/put` to read or
+// upsert the durable manifest behind the publish gate.
+type NewManifestStoreFunc func(cfg config.StorageConfig) (domain.DeployedManifestStore, error)
+
+// DefaultNewManifestStore is the default deployed-manifest store constructor.
+func DefaultNewManifestStore(cfg config.StorageConfig) (domain.DeployedManifestStore, error) {
+	return storage.NewDeployedManifestStore(cfg)
+}
+
 // DefaultNewIngestRunRepository is the default ingest-run repository
 // constructor.
 func DefaultNewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
@@ -175,6 +185,7 @@ type Deps struct {
 	NewRetentionService NewRetentionServiceFunc
 	NewIngestRunRepo    NewIngestRunRepoFunc
 	NewLeaseRepo        NewLeaseRepoFunc
+	NewManifestStore    NewManifestStoreFunc
 	NewApp              NewAppFunc
 	NewPublisher        NewPublisherFunc
 	NewFetcher          NewFetcherFunc
@@ -193,6 +204,7 @@ func NewDeps(opts ...Option) *Deps {
 		NewRetentionService: DefaultNewRetentionService,
 		NewIngestRunRepo:    DefaultNewIngestRunRepository,
 		NewLeaseRepo:        DefaultNewLeaseRepository,
+		NewManifestStore:    DefaultNewManifestStore,
 		NewApp:              DefaultNewApp,
 		NewPublisher:        DefaultNewPublisher,
 		NewFetcher:          DefaultNewFetcher,

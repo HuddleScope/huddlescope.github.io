@@ -893,7 +893,8 @@ func buildIngestSummary(result *domain.RunRecord) string {
 // RunExportResult represents the result of running an export command.
 type RunExportResult struct {
 	RunResult
-	SnapshotResult application.SnapshotResult
+	SnapshotResult   application.SnapshotResult
+	StoryPagesResult application.StoryPageResult
 }
 
 // RunExport runs the export pipeline.
@@ -1008,6 +1009,22 @@ func (r *Runner) RunExport(ctx context.Context, dryRun bool, dataDir, dataFile, 
 		// Live run: execute and write to storage
 		snapshotResult := app.RunSnapshot(ctx, time.Now())
 		result.SnapshotResult = snapshotResult
+
+		// Issue #247 / PUB-01 (plan D2): re-project the story pages into the
+		// workspace (web/content/stories/*.md) so a fresh checkout's
+		// `export run` reproduces the full Hugo workspace (web/data + story
+		// pages), not just the snapshot. Guarded by HSC_PUBLISH_SITE_DATA.
+		// The story pages are gitignored/untracked since issue #247.
+		if cfg.ShouldPublishSiteData() {
+			storyPagesResult := app.RunStoryPages(ctx, time.Now(), storyPagePublisher)
+			result.StoryPagesResult = storyPagesResult
+			if len(storyPagesResult.Errors) > 0 {
+				_, _ = fmt.Fprintf(r.err, "Story pages errors: %v\n", storyPagesResult.Errors)
+				if result.ExitCode == 0 {
+					result.ExitCode = 2
+				}
+			}
+		}
 
 		// Issue #229 / AC-5: zero-over-N guard. If the exported snapshot has 0
 		// stories but the on-disk file (pre-export) had > 0 stories, this is a

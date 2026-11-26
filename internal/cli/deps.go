@@ -25,6 +25,7 @@ type (
 	LoadHeartbeatFunc       = types.LoadHeartbeatFunc
 	NewRetentionServiceFunc = types.NewRetentionServiceFunc
 	NewIngestRunRepoFunc    = types.NewIngestRunRepoFunc
+	NewManifestStoreFunc    = types.NewManifestStoreFunc
 	Deps                    = types.Deps
 	Option                  = types.Option
 )
@@ -150,4 +151,18 @@ func WithNewIngestRunRepo(fn NewIngestRunRepoFunc) Option {
 // constructor (issue #159).
 func DefaultNewIngestRunRepository(cfg config.StorageConfig) (domain.IngestRunRepository, error) {
 	return types.DefaultNewIngestRunRepository(cfg)
+}
+
+// DefaultNewManifestStore is the default deployed-manifest store constructor
+// (issue #247 / PUB-01).
+func DefaultNewManifestStore(cfg config.StorageConfig) (domain.DeployedManifestStore, error) {
+	return types.DefaultNewManifestStore(cfg)
+}
+
+// WithNewManifestStore sets the deployed-manifest store constructor on an
+// existing Deps (issue #247 / PUB-01).
+func WithNewManifestStore(fn NewManifestStoreFunc) Option {
+	return func(d *Deps) {
+		d.NewManifestStore = fn
+	}
 }

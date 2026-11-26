@@ -22,8 +22,8 @@ func TestMigrateSuccess(t *testing.T) {
 	if len(versions) == 0 {
 		t.Fatal("Migrate() returned empty versions")
 	}
-	if len(versions) != 10 {
-		t.Errorf("expected 10 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 11 {
+		t.Errorf("expected 11 migrations, got %d: %v", len(versions), versions)
 	}
 }
 
@@ -717,13 +717,24 @@ func TestMigration010_BackfillDisplayTitle(t *testing.T) {
 		t.Fatalf("insert story: %v", err)
 	}
 
-	// Apply migration 010.
+	// Apply migration 010 (011 also applies since it is newer than the seeded
+	// schema-9 state; this test is about the 010 backfill).
 	versions, err := MigrateDB(db)
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	if len(versions) != 1 || versions[0] != 10 {
-		t.Fatalf("expected only migration 10 applied, got %v", versions)
+	applied := map[int]bool{}
+	for _, v := range versions {
+		applied[v] = true
+	}
+	if !applied[10] {
+		t.Fatalf("expected migration 10 applied, got %v", versions)
+	}
+	if !applied[11] {
+		t.Fatalf("expected migration 11 applied, got %v", versions)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("expected migrations [10 11] applied, got %v", versions)
 	}
 
 	// The display_title column must be backfilled from the headline/title.
