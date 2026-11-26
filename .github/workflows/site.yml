@@ -8,6 +8,15 @@
 #     never the fixtures) and deploy it to GitHub Pages. A failed or
 #     cancelled CI run deploys nothing, and the last successfully deployed
 #     Pages content is preserved.
+#
+# Issue #229 / AC-2, AC-3: the deploy job now evaluates the publish gate
+# before building. If the committed homepage.json is stale or zero-over-N
+# relative to the last deployed manifest, the gate denies the deploy and the
+# job restores the last-deployed data (via git archive of the manifest commit)
+# so design/code changes ship without a data regression. If the gate skips
+# (identical content), the deploy job is skipped entirely (quiescence).
+# The shared concurrency group (huddlescope-pages-deploy) serializes all
+# Pages deploys across workflows.
 
 name: Site
 
@@ -18,8 +27,11 @@ on:
     workflows: ["CI"]
     types: [completed]
 
+# Issue #229 / AC-3: shared concurrency group with refresh-news.yml.
+# All Pages deploys serialize under this group; cancel-in-progress: false
+# prevents a new run from cancelling an in-progress deploy.
 concurrency:
-  group: site-${{ github.event.pull_request.number || github.ref }}
+  group: huddlescope-pages-deploy
   cancel-in-progress: false
 
 permissions:
@@ -80,10 +92,83 @@ jobs:
       pages: write
       id-token: write
     steps:
+      # Issue #229 / AC-3: pin the checkout to the CI-validated commit
+      # (github.event.workflow_run.head_sha) so the deploy always builds from
+      # the exact revision that passed CI. fetch-depth: 0 enables the
+      # git archive restore of the manifest commit when the gate denies.
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build unified CLI
+        run: make build-huddlescope
+
+      # Issue #229 / AC-2: evaluate the publish gate on the committed
+      # homepage.json vs the deployed manifest. If deny, restore the
+      # last-deployed data (git archive of the manifest commit) so design
+      # changes ship without a data regression. If skip-identical, skip
+      # the deploy entirely (quiescence).
+      - name: Publish gate (committed vs deployed)
+        id: publish-gate
+        run: |
+          set -euo pipefail
+          echo "Evaluating publish gate for site deploy..."
+          if [ ! -f web/data/homepage.json ]; then
+            echo "::error::Committed homepage.json missing; cannot evaluate gate"
+            exit 1
+          fi
+          GATE_JSON=$(./dist/huddlescope publish gate --candidate web/data/homepage.json --manifest web/data/deployed.json --output json) || {
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -eq 3 ]; then
+              echo "$GATE_JSON"
+              VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
+              REASON=$(echo "$GATE_JSON" | jq -r '.reason')
+              echo "Gate verdict: $VERDICT ($REASON)"
+              echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+              # Deny: restore last-deployed data from the manifest commit.
+              MANIFEST_COMMIT=$(jq -r '.commit' web/data/deployed.json 2>/dev/null || echo "")
+              if [ -n "$MANIFEST_COMMIT" ]; then
+                echo "::warning::Restoring last-deployed data from commit $MANIFEST_COMMIT"
+                git archive "$MANIFEST_COMMIT" web/data web/content/stories | tar -x
+                echo "Restored last-deployed data"
+              else
+                echo "::error::Gate denied but manifest commit is empty; cannot restore"
+                exit 1
+              fi
+              # Mark that we restored data (the build will use the restored files).
+              echo "restored=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Publish gate failed (exit $EXIT_CODE)"
+            exit 1
+          }
+          echo "$GATE_JSON"
+          VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
+          echo "Gate verdict: $VERDICT"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          if [ "$VERDICT" = "skip-identical" ]; then
+            echo "::notice::Content identical to deployed manifest; skipping deploy (quiescence)"
+            exit 0
+          fi
+
+      # If the gate skipped (identical content), skip the rest of the deploy.
+      - name: Skip deploy if gate verdict is skip-identical
+        id: skip-deploy
+        if: steps.publish-gate.outputs.verdict == 'skip-identical'
+        run: |
+          echo "Skipping Hugo build and deploy (content identical to deployed)"
+          exit 0
 
       - name: Install Hugo extended
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         run: |
           HUGO_VERSION="0.169.0"
           HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
@@ -92,6 +177,7 @@ jobs:
           echo "Hugo version: $(hugo version)"
 
       - name: Build Hugo site
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         run: |
           # site-test.sh leaves web/public from fixtures in other runs;
           # Hugo does not delete stale outputs, so start clean to guarantee
@@ -100,6 +186,7 @@ jobs:
           make site
 
       - name: Verify no demo markers
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         run: |
           # The production build must never contain the demo sample.
           # Hard fail before any Pages upload (same guard as refresh-news).
@@ -113,12 +200,15 @@ jobs:
           echo "No demo markers in web/public/"
 
       - name: Configure GitHub Pages
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
 
       - name: Deploy to Pages
+        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         uses: actions/deploy-pages@v5

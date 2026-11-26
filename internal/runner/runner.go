@@ -992,9 +992,59 @@ func (r *Runner) RunExport(ctx context.Context, dryRun bool, dataDir, dataFile, 
 			result.ExitCode = 2
 		}
 	} else {
+		// Issue #229 / AC-5: capture the previous on-disk story count BEFORE the
+		// export overwrites the data file. This lets us detect zero-over-N
+		// (exported 0 stories but the on-disk file had > 0) after RunSnapshot
+		// writes the new snapshot. The read is best-effort: a missing/unreadable
+		// prior file means "never deployed" (no zero-over-N).
+		prevStories := 0
+		if prevData, perr := os.ReadFile(filepath.Join(resolvedDataDir, resolvedDataFile)); perr == nil { // #nosec G304: resolvedDataDir + resolvedDataFile are operator-controlled config paths
+			var prev domain.Snapshot
+			if json.Unmarshal(prevData, &prev) == nil {
+				prevStories = len(prev.Stories)
+			}
+		}
+
 		// Live run: execute and write to storage
 		snapshotResult := app.RunSnapshot(ctx, time.Now())
 		result.SnapshotResult = snapshotResult
+
+		// Issue #229 / AC-5: zero-over-N guard. If the exported snapshot has 0
+		// stories but the on-disk file (pre-export) had > 0 stories, this is a
+		// regression: exit 3 (distinct from generic failure exit 1) so the
+		// workflow can distinguish "deliberate empty" from "data loss".
+		exportedStories := len(snapshotResult.Snapshot.Stories)
+		if exportedStories == 0 && prevStories > 0 {
+			_, _ = fmt.Fprintf(r.err, "Warning: zero-over-N: exported 0 stories, on-disk file had %d\n", prevStories)
+			result.ExitCode = 3
+			result.Error = fmt.Errorf("zero-over-N: exported 0 stories, on-disk file had %d", prevStories)
+		}
+
+		// Issue #229 / AC-7: emit the export diagnostics JSON line (secret-free).
+		if cfg.ShouldJSONLog() {
+			exported := len(snapshotResult.Snapshot.Stories)
+			latest := len(snapshotResult.Snapshot.Latest)
+			payload := struct {
+				Time            string `json:"time"`
+				Origin          string `json:"origin"`
+				Command         string `json:"command"`
+				ExportedStories int    `json:"exported_stories"`
+				Latest          int    `json:"latest"`
+				GeneratedAt     string `json:"generated_at"`
+				ExitCode        int    `json:"exit_code"`
+			}{
+				Time:            time.Now().UTC().Format(time.RFC3339),
+				Origin:          cfg.RunnerOrigin,
+				Command:         "export run",
+				ExportedStories: exported,
+				Latest:          latest,
+				GeneratedAt:     snapshotResult.Snapshot.GeneratedAt,
+				ExitCode:        result.ExitCode,
+			}
+			if line, jerr := json.Marshal(payload); jerr == nil {
+				_, _ = fmt.Fprintln(r.err, string(line))
+			}
+		}
 	}
 
 	return result
