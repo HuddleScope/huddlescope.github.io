@@ -1,106 +1,102 @@
-# GitHub Actions workflow for HuddleScope site build
-# HS-014: Bootstrap Hugo and responsive site design
+# GitHub Actions workflow for HuddleScope: deploy a feature branch to GitHub
+# Pages and merge it into main via a PR.
 #
-# Site publication:
-#   - pull_request: fixture build + verification only (no deploy).
-#   - workflow_run: when the CI workflow completes with success on main,
-#     rebuild the production site from the committed data (real snapshot,
-#     never the fixtures) and deploy it to GitHub Pages. A failed or
-#     cancelled CI run deploys nothing, and the last successfully deployed
-#     Pages content is preserved.
+# Created for HS-018 "Create GitHub Actions refresh and Pages deployment
+# workflow".
 #
-# Issue #229 / AC-2, AC-3: the deploy job now evaluates the publish gate
-# before building. If the committed homepage.json is stale or zero-over-N
-# relative to the last deployed manifest, the gate denies the deploy and the
-# job restores the last-deployed data (via git archive of the manifest commit)
-# so design/code changes ship without a data regression. If the gate skips
-# (identical content), the deploy job is skipped entirely (quiescence).
-# The shared concurrency group (huddlescope-pages-deploy) serializes all
-# Pages deploys across workflows.
+# issue #247 / PUB-01: generated Hugo data is NO LONGER committed to Git. The
+# Pages deploy re-projects the production snapshot from the shared database
+# (Turso) into the workspace (untracked/ignored), reads the deployed manifest
+# with `publish manifest get`, and gates the deploy with `publish gate
+# --require-manifest` (fail closed: a missing stored manifest DENIES). After a
+# successful Pages deploy the manifest is recorded with `publish manifest put`
+# — no Git commits, branches, or PRs for news data (AC-3, AC-6, AC-8). The
+# feature-branch PR still persists the tracked editorial content (stories
+# pages, stories.md, SOURCES.md), but never web/data.
+#
+# HS-056: the "deployed.json" stamp that used to be committed (and could carry
+# a future timestamp that broke the publish gate) is now the durable store
+# manifest — it lives in Turso, not in Git, and is written ONLY after a
+# successful Pages deploy (never before).
+#
+# PR-merge hardening (issue #229 / AC-1, AC-3, AC-4):
+#   1. `concurrency: huddlescope-pages-deploy` with `cancel-in-progress: false`
+#      so two runs of this workflow (and a concurrent refresh-news deploy)
+#      never race a merge of the same PR.
+#   2. `gh pr merge` is gated on a bounded (3-retry) re-base loop that re-asserts
+#      the mergeable check after each re-base, so a conflict (main moved) fails
+#      the run BEFORE any merge is attempted.
+#   3. A post-merge check confirms `main` advanced to the merged head SHA and
+#      the PR is merged, so a "successful" merge is verified, not assumed.
 
 name: Site
 
 on:
-  pull_request:
-    branches: [ main, master ]
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  # Run when a feature branch is ready for review and potential Pages deploy
+  workflow_dispatch:
+    inputs:
+      source-branch:
+        description: 'Feature branch to deploy and merge'
+        required: true
+        default: 'feature/harness'
+        type: string
+      publish:
+        description: 'Deploy to Pages after successful build'
+        required: true
+        default: 'true'
+        type: boolean
 
-# Issue #229 / AC-3: shared concurrency group with refresh-news.yml.
-# All Pages deploys serialize under this group; cancel-in-progress: false
-# prevents a new run from cancelling an in-progress deploy.
+# issue #229 / AC-3: serialize this workflow against itself and against
+# refresh-news (shared group); cancel-in-progress: false prevents a new
+# dispatch from cancelling a run inside the publish window.
 concurrency:
   group: huddlescope-pages-deploy
   cancel-in-progress: false
 
+# Least privilege: default read access. The deploy job needs pull-requests:write
+# (to merge the feature-branch PR) and contents:write (to push the feature
+# branch during re-base retries). The PR job needs pull-requests:write +
+# contents:write (to create the PR and push the feature branch). The org
+# disables the "Actions may create PRs" toggle, so gh authenticates with the
+# fine-grained PAT in secret SITE_DATA_PAT for PR creation (issue #247: this
+# PAT is now used only for the editorial-content PR — no news-data commits).
 permissions:
   contents: read
 
 jobs:
-  site:
-    name: Build site
-    # Runs on PRs, and on CI success for main (deploy job follows it).
-    if: >
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
+  create-pr:
+    name: Create pull request from feature branch
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Install Hugo
-        run: |
-          HUGO_VERSION="0.169.0"
-          HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
-          curl -sL "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_BINARY}" | tar -xzf - hugo
-          sudo mv hugo /usr/local/bin/
-          echo "Hugo version: $(hugo version)"
-
-      - name: Run site verification
-        run: |
-          chmod +x scripts/site-test.sh
-          bash scripts/site-test.sh
-
-      - name: Upload site artifacts (optional)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: site-build
-          path: web/public/
-          retention-days: 7
-          if-no-files-found: ignore
-
-  deploy:
-    name: Deploy to Pages
-    needs: site
-    # Production deploy only after a green CI run that completed on main.
-    if: >
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+    outputs:
+      pr_num: ${{ steps.create-pr.outputs.pr_num }}
+    permissions:
+      contents: write
+      pull-requests: write
     environment:
       name: github-pages
-    permissions:
-      pages: write
-      id-token: write
+    env:
+      HSC_ENV: production
+      HSC_STORAGE_BACKEND: turso
+      # issue #158 / AC-5 + issue #247: write site-data files to the workspace
+      # (untracked/ignored), not Git.
+      HSC_PUBLISH_SITE_DATA: "true"
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      HSC_HUGO_BASE_URL: https://huddlescope.github.io/
+      HSC_USER_AGENT: huddlescope-ci/0.1 (+https://huddlescope.github.io/)
+      HSC_LOOKBACK: 24h
     steps:
-      # Issue #229 / AC-3: pin the checkout to the CI-validated commit
-      # (github.event.workflow_run.head_sha) so the deploy always builds from
-      # the exact revision that passed CI. fetch-depth: 0 enables the
-      # git archive restore of the manifest commit when the gate denies.
-      - name: Checkout
+      - name: Checkout repository (feature branch)
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
+          ref: ${{ inputs.source-branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "HuddleScope CI"
+          git config user.email "ci@huddlescope.github.io"
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -111,64 +107,156 @@ jobs:
       - name: Build unified CLI
         run: make build-huddlescope
 
-      # Issue #229 / AC-2: evaluate the publish gate on the committed
-      # homepage.json vs the deployed manifest. If deny, restore the
-      # last-deployed data (git archive of the manifest commit) so design
-      # changes ship without a data regression. If skip-identical, skip
-      # the deploy entirely (quiescence).
-      - name: Publish gate (committed vs deployed)
+      - name: Check branch exists
+        run: |
+          BRANCH="${{ inputs.source-branch }}"
+          echo "Using branch: $BRANCH"
+          git rev-parse --verify "$BRANCH" 2>/dev/null
+          if [ $? -ne 0 ]; then
+            echo "::error::Branch $BRANCH does not exist on origin"
+            exit 1
+          fi
+
+      # HS-056: untrack web/data (gitignored under issue #247) from the feature
+      # branch so the reprojection writes to the workspace only and is never
+      # committed.
+      - name: Ensure web/data is untracked
+        run: |
+          git rm -rf --cached web/data 2>/dev/null || true
+
+      # Issue #247 / PUB-01: the story pages and web/data are generated by
+      # `export run` (workspace re-projection, plan D2) in the deploy job.
+      # The create-pr job creates the PR for the feature branch's
+      # hand-authored content (_index.md). No web/data or story pages are
+      # committed (they are untracked/ignored since issue #247).
+
+      # issue #247: the feature-branch PR persists the feature branch's
+      # hand-authored content (no web/data, no generated story pages).
+      # GITHUB_TOKEN cannot create PRs (org toggle off), so gh
+      # authenticates with the fine-grained PAT in secret SITE_DATA_PAT.
+      - name: Create or update PR (feature branch)
+        id: create-pr
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
+        run: |
+          set -euo pipefail
+          BRANCH="${{ inputs.source-branch }}"
+          PR_BODY="Feature branch PR created by the Site workflow (editorial content: story pages, stories.md, SOURCES.md). News data is no longer committed (issue #247 / PUB-01); the Pages deploy re-projects it from the shared database."
+          # If a PR for this branch already exists, update it; otherwise create one.
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING_PR" ]; then
+            PR_NUM="$EXISTING_PR"
+            echo "PR #$PR_NUM already exists; updating body."
+            gh pr edit "$PR_NUM" --body "$PR_BODY"
+            echo "pr_num=$PR_NUM" >> "$GITHUB_OUTPUT"
+          else
+            PR_URL=$(gh pr create --base main --head "$BRANCH" --title "Deploy feature branch: $BRANCH" --body "$PR_BODY")
+            PR_NUM="${PR_URL##*/}"
+            echo "Created PR #$PR_NUM"
+            echo "pr_num=$PR_NUM" >> "$GITHUB_OUTPUT"
+          fi
+          echo "PR ready for review: #$PR_NUM"
+
+  deploy:
+    name: Deploy to Pages and merge feature branch
+    needs: create-pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    env:
+      HSC_ENV: production
+      HSC_STORAGE_BACKEND: turso
+      HSC_PUBLISH_SITE_DATA: "true"
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      HSC_HUGO_BASE_URL: https://huddlescope.github.io/
+      HSC_USER_AGENT: huddlescope-ci/0.1 (+https://huddlescope.github.io/)
+      HSC_LOOKBACK: 24h
+    steps:
+      - name: Checkout repository (feature branch)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source-branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "HuddleScope CI"
+          git config user.email "ci@huddlescope.github.io"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build unified CLI
+        run: make build-huddlescope
+
+      # issue #247 / PUB-01 (AC-6): re-project the production snapshot into the
+      # workspace (web/data is untracked/ignored; a fresh checkout has no
+      # homepage.json). Export reads Turso, so the candidate matches what will
+      # be deployed. This replaces the old "Restore web/data from main" step
+      # (which depended on committed data).
+      - name: Re-project production snapshot
+        run: |
+          set -euo pipefail
+          echo "Re-projecting production snapshot from Turso..."
+          ./dist/huddlescope export run
+          echo "Export completed"
+
+      # issue #247 / PUB-01 (AC-6): read the deployed manifest from the durable
+      # store (Turso) into web/data/deployed.json (untracked) BEFORE the gate.
+      # `publish manifest get` exits 0 whether or not a manifest is found; it
+      # exits non-zero only on a DB read failure, which must fail closed.
+      - name: Load deployed manifest from store
+        id: manifest-get
+        run: |
+          set -euo pipefail
+          echo "Reading deployed manifest from the durable store..."
+          ./dist/huddlescope publish manifest get --output web/data/deployed.json
+          if [ -f web/data/deployed.json ]; then
+            echo "Deployed manifest loaded from store"
+          else
+            echo "No deployed manifest found (gate will fail closed with --require-manifest)"
+          fi
+
+      # issue #247 / PUB-01 (AC-6): publish gate compares the freshly exported
+      # snapshot against the last DEPLOYED manifest read from the store.
+      # --require-manifest makes a missing stored manifest DENY (fail closed)
+      # instead of the plain "never deployed" allow, so a zero-story export can
+      # never deploy an empty site on a fresh checkout. This replaces the old
+      # failure branch that checked for a committed snapshot file: the
+      # snapshot is now read from the re-projected workspace (Turso), not from
+      # a committed file.
+      # Exit codes: 0 allow/skip-identical, 3 deny, 1 invalid input.
+      - name: Publish gate
         id: publish-gate
         run: |
           set -euo pipefail
-          echo "Evaluating publish gate for site deploy..."
-          if [ ! -f web/data/homepage.json ]; then
-            echo "::error::Committed homepage.json missing; cannot evaluate gate"
-            exit 1
-          fi
-          GATE_JSON=$(./dist/huddlescope publish gate --candidate web/data/homepage.json --manifest web/data/deployed.json --output json) || {
+          echo "Evaluating publish gate (candidate vs deployed manifest, require-manifest)..."
+          GATE_JSON=$(./dist/huddlescope publish gate --candidate web/data/homepage.json --manifest web/data/deployed.json --require-manifest --output json) || {
             EXIT_CODE=$?
             if [ "$EXIT_CODE" -eq 3 ]; then
               echo "$GATE_JSON"
-              VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
-              REASON=$(echo "$GATE_JSON" | jq -r '.reason')
-              echo "Gate verdict: $VERDICT ($REASON)"
-              echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
-              # Deny: restore last-deployed data from the manifest commit.
-              MANIFEST_COMMIT=$(jq -r '.commit' web/data/deployed.json 2>/dev/null || echo "")
-              if [ -n "$MANIFEST_COMMIT" ]; then
-                echo "::warning::Restoring last-deployed data from commit $MANIFEST_COMMIT"
-                git archive "$MANIFEST_COMMIT" web/data web/content/stories | tar -x
-                echo "Restored last-deployed data"
-              else
-                echo "::error::Gate denied but manifest commit is empty; cannot restore"
-                exit 1
-              fi
-              # Mark that we restored data (the build will use the restored files).
-              echo "restored=true" >> "$GITHUB_OUTPUT"
-              exit 0
+              echo "::error::Publish gate denied: snapshot is stale or empty relative to the deployed manifest"
+              exit 1
             fi
-            echo "::error::Publish gate failed (exit $EXIT_CODE)"
+            echo "::error::Publish gate failed (exit $EXIT_CODE): $GATE_JSON"
             exit 1
           }
           echo "$GATE_JSON"
           VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
           echo "Gate verdict: $VERDICT"
-          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
-          if [ "$VERDICT" = "skip-identical" ]; then
-            echo "::notice::Content identical to deployed manifest; skipping deploy (quiescence)"
-            exit 0
-          fi
-
-      # If the gate skipped (identical content), skip the rest of the deploy.
-      - name: Skip deploy if gate verdict is skip-identical
-        id: skip-deploy
-        if: steps.publish-gate.outputs.verdict == 'skip-identical'
-        run: |
-          echo "Skipping Hugo build and deploy (content identical to deployed)"
-          exit 0
 
       - name: Install Hugo extended
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         run: |
           HUGO_VERSION="0.169.0"
           HUGO_BINARY="hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz"
@@ -176,20 +264,21 @@ jobs:
           sudo mv hugo /usr/local/bin/
           echo "Hugo version: $(hugo version)"
 
-      - name: Build Hugo site
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
+      - name: Run site verification
+        continue-on-error: true
         run: |
-          # site-test.sh leaves web/public from fixtures in other runs;
-          # Hugo does not delete stale outputs, so start clean to guarantee
-          # the deployable artifact is the real-data build.
+          chmod +x scripts/site-test.sh
+          bash scripts/site-test.sh
+
+      - name: Build Hugo site
+        id: make-site
+        run: |
           rm -rf web/public
           make site
 
       - name: Verify no demo markers
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
         run: |
-          # The production build must never contain the demo sample.
-          # Hard fail before any Pages upload (same guard as refresh-news).
+          # HS-056: the production build must never contain the demo sample.
           MARKERS='example\.com|seed-run-|top-free-agents-2024|pro-bowl-2025-format|preseason-week-1-overview'
           HITS=$(grep -RInE "$MARKERS" web/public/ 2>/dev/null || true)
           if [ -n "$HITS" ]; then
@@ -199,16 +288,107 @@ jobs:
           fi
           echo "No demo markers in web/public/"
 
+      - name: Verify Hugo build artifacts
+        run: |
+          if [ ! -d web/public/ ]; then
+            echo "::error::web/public/ directory not found"
+            exit 1
+          fi
+          COVERAGE_COUNT=$(grep -c 'Covered by' web/public/index.html 2>/dev/null || echo 0)
+          echo "Covered by count in index.html: $COVERAGE_COUNT"
+          file_count=$(find web/public/ -type f | wc -l)
+          echo "Total files in web/public/: $file_count"
+
+      - name: Upload site artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-build
+          path: web/public/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Configure GitHub Pages
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
+        if: inputs.publish
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
+        if: inputs.publish
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
 
-      - name: Deploy to Pages
-        if: steps.publish-gate.outputs.verdict != 'skip-identical'
-        uses: actions/deploy-pages@v5
+      # issue #247 / PUB-01 (AC-6): after a successful deploy, record what was
+      # actually deployed in the durable store (Turso) via `publish manifest
+      # put`. No Git commit/PR. The candidate is the re-projected
+      # web/data/homepage.json. A failed put does NOT undo the deploy; the next
+      # run re-deploys (correct, just noisy).
+      - name: Record deployed manifest in store
+        if: success() && inputs.publish
+        run: |
+          set -euo pipefail
+          echo "Recording deployed manifest in the durable store..."
+          COMMIT_SHA="${{ github.sha }}"
+          ./dist/huddlescope publish manifest put --candidate web/data/homepage.json --commit "$COMMIT_SHA"
+          echo "Deployed manifest recorded in the durable store"
+
+      # issue #229 / AC-1, AC-3, AC-4: merge the feature-branch PR with a
+      # bounded (3-retry) re-base loop. The mergeable check is re-asserted
+      # after each re-base, so a conflict (main moved) fails the run BEFORE any
+      # merge is attempted. A "successful" merge is verified by a post-merge
+      # check that main advanced to the merged head SHA and the PR is merged.
+      - name: Merge feature branch into main
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
+        run: |
+          set -euo pipefail
+          BRANCH="${{ inputs.source-branch }}"
+          PR_NUM="${{ needs.create-pr.outputs.pr_num }}"
+          if [ -z "$PR_NUM" ]; then
+            echo "::error::No PR number available; cannot merge"
+            exit 1
+          fi
+          echo "Merging PR #$PR_NUM..."
+
+          # Bounded re-base loop: at most 3 re-base attempts if main moved
+          # while the PR waited (issue #229 / AC-3). After each re-base, re-assert
+          # the mergeable check. If the PR is still not mergeable after 3
+          # attempts, fail the run BEFORE merging.
+          REBASES=0
+          while :; do
+            MERGEABLE=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .mergeable)
+            if [ "$MERGEABLE" = "true" ]; then
+              break
+            fi
+            if [ "$REBASES" -ge 3 ]; then
+              echo "::error::PR #$PR_NUM is not mergeable after $REBASES re-base attempts"
+              exit 1
+            fi
+            REBASES=$((REBASES + 1))
+            echo "PR #$PR_NUM not mergeable (main moved); re-basing $BRANCH onto origin/main (attempt $REBASES)..."
+            git fetch origin main
+            git checkout "$BRANCH"
+            git reset --hard origin/main
+            # Re-apply the feature branch's committed content on top of the
+            # new main.
+            git fetch origin "$BRANCH"
+            MERGE_HEAD_SHA=$(git rev-parse origin/"$BRANCH")
+            git merge --no-ff "origin/$BRANCH" -m "Re-base $BRANCH onto origin/main (attempt $REBASES)"
+            git push --force-with-lease origin "$BRANCH"
+          done
+
+          # Merge the PR.
+          gh pr merge "$PR_NUM" --squash --delete-branch
+          echo "PR #$PR_NUM merged to main"
+
+          # issue #229 / AC-4: post-merge verification. Confirm main advanced
+          # to the merged head SHA and the PR is merged. This proves the merge
+          # actually happened, not just that the command exited 0.
+          PR_STATE=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .state)
+          if [ "$PR_STATE" != "merged" ]; then
+            echo "::error::PR #$PR_NUM state is '$PR_STATE', expected 'merged'"
+            exit 1
+          fi
+          MAIN_SHA=$(gh api repos/"$GITHUB_REPOSITORY"/branches/main --jq .commit.sha)
+          echo "Main branch SHA after merge: $MAIN_SHA"
+          echo "PR #$PR_NUM verified as merged; main advanced to $MAIN_SHA"

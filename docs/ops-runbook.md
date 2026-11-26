@@ -105,18 +105,23 @@ gh run wait --run-id <RUN_ID> -R HuddleScope/huddlescope.github.io --timeout 15m
 gh run view <RUN_ID> -R HuddleScope/huddlescope.github.io
 ```
 
-Read the run's publish decision in the log ("Stories in exported snapshot: N
-(committed: M)") to know whether the snapshot was committed and deployed.
+Read the run's publish decision in the log ("Gate verdict: allow/deny/skip-identical")
+to know whether the snapshot was deployed.
 
-**Reading the heartbeat.** Note that the refresh workflow's commit steps do
-**not** push (see Known issues — missing push step): the committed
-`web/data/heartbeat.json` is only updated by manual commits to `main`. To read
-what the *latest run* produced, use the run log (step "Commit heartbeat" shows
-the file content via the commit diff) or the committed file:
+**Reading the heartbeat.** Since issue #247 the `web/data/*.json` files are
+generated into the workspace (untracked/ignored) and are **not committed** to
+`main`. The live site is updated from run artifacts (Pages deploy), not from
+committed files. To read what the *latest run* produced, use the run log (the
+"Load deployed manifest from store" / "Publish gate" steps) or re-project it
+locally from Turso:
 
 ```bash
-cat web/data/heartbeat.json                 # committed state (may be stale)
-gh run view <RUN_ID> -R HuddleScope/huddlescope.github.io --log | grep -A5 'Commit heartbeat'
+# Re-project the production snapshot from Turso (workspace only; untracked):
+HSC_STORAGE_BACKEND=turso \
+HSC_TURSO_DATABASE_URL=$TURSO_DATABASE_URL \
+HSC_TURSO_AUTH_TOKEN=$TURSO_AUTH_TOKEN \
+./dist/huddlescope export run
+cat web/data/heartbeat.json                 # workspace state (freshly re-projected)
 jq . web/data/heartbeat.json
 ```
 
@@ -124,9 +129,9 @@ Heartbeat status values: `ok` (ingestion and publication completed),
 `partial` (completed with warnings, some sources failed), `failed` (critical
 failure).
 
-The committed `web/data/homepage.json` and `web/data/feeds.json` are likewise
-only updated by manual commits; the live site is updated from run artifacts,
-not from the committed files.
+The `web/data/homepage.json`, `web/data/feeds.json`, and `web/data/deployed.json`
+files are likewise workspace-only (re-projected from Turso / the manifest
+store); the live site is updated from run artifacts, not from committed files.
 
 ## Migrating from the legacy cron scripts (HS-PORT-09)
 
@@ -163,6 +168,15 @@ huddlescope ingest status --output json
 
 # Export to Hugo (homepage.json + story pages):
 huddlescope export run                # or --dry-run to preview
+
+# Deployed manifest (issue #247 / PUB-01): the manifest lives in the durable
+# store (Turso in production), not in Git. Read it before the publish gate and
+# record it after a successful deploy.
+huddlescope publish manifest get --output web/data/deployed.json   # read from store (exit 0 whether or not found)
+huddlescope publish manifest put --candidate web/data/homepage.json --commit <sha>   # record after deploy
+
+# Publish gate (fail closed with --require-manifest on a fresh checkout):
+huddlescope publish gate --candidate web/data/homepage.json --manifest web/data/deployed.json --require-manifest --output json
 
 # Heartbeat staleness:
 huddlescope heartbeat check --file web/data/heartbeat.json --stale-after 90m
@@ -619,19 +633,28 @@ account, token creation, `wrangler login`, verification).
   - `run-retention` (boolean, default true): Run retention after build
   - `force_ingest` (boolean, default false): Force backup ingest even if Turso is fresh (maintenance only; still respects the distributed lease)
 - Jobs:
-  - `build`: checkout → setup Go → build → **Decide should-run** (Turso freshness) → **Backup ingest** (gated on should_run || force_ingest) → **Export** (always; re-publishes site-data from DB) → **Publish decision** (gated on export success) → **Commit+push site-data** (gated on export success; `[skip ci]`; `contents: write` at step level) → install Hugo → site verification → build site → demo-marker gate → retention → upload artifacts → Pages upload (gated)
-  - `deploy`: configure Pages → upload artifact → deploy (only if `publish=true` **and** the publish decision is `true`)
-- Permissions: least privilege; default `contents: read`; the site-data push step gets `contents: write` at step level; deploy job requires `pages: write` and `id-token: write`
-- **Fixed (issue #163):** the single `commit-and-push-site-data` step stages `web/data/{heartbeat,feeds,homepage}.json`, commits with `[skip ci]`, and pushes. The commit is gated on `steps.export.conclusion == 'success'`.
+  - `build`: checkout → setup Go → build → **Decide should-run** (Turso freshness) → **Backup ingest** (gated on should_run || force_ingest) → **Export** (always; re-publishes site-data to the workspace) → **Load deployed manifest** (`publish manifest get` from Turso) → **Publish gate** (`--require-manifest`; fail closed) → install Hugo → site verification → build site → demo-marker gate → **Retention export** → **Commit+push retention package** (only `archive/retention`, never `web/data`; plan D5) → retention apply → upload artifacts → Pages upload (gated)
+  - `deploy`: re-project snapshot → deploy to Pages → **Record deployed manifest** (`publish manifest put` to Turso; no git)
+- Permissions: least privilege; default `contents: read`; the `build` job gets `contents: write` (used only by the retention-only commit step); the deploy job requires `pages: write` and `id-token: write`
+- **Changed (issue #247 / PUB-01):** the old `commit-and-push-site-data` step (which committed `web/data`) is removed. The news snapshot is no longer committed to Git; the deployed manifest lives in Turso, read by `publish manifest get` and written by `publish manifest put`. The only Git-mutation step is the retention-only commit.
 
-### Publish decision step (HS-056)
-After export, the workflow compares the freshly exported story count with the
-previously committed snapshot (`git show HEAD:`):
-- ≥ 1 stories → commit the snapshot and deploy to Pages
-- Zero stories, but the committed snapshot previously had ≥ 1 story → skip the homepage commit and the Pages deploy; the last successfully deployed (real) content is retained
-- Zero stories, and no prior real snapshot (never a successful export) → deploy the clearly-labelled "No stories published yet" empty state with a truthful `generatedAt`
-- A failed ingest or export fails the build job, so the deploy job is skipped and the last-good Pages deployment is preserved
-The build also greps `web/public/` for sample-data markers (`example.com`, `seed-run-`, demo story IDs) and hard-fails before any Pages upload, so sample content can never be presented as current NFL news (the old "data guard" restore of a committed demo file was removed). See `web/README-data.md` for the full contract.
+### Publish decision step (issue #247 / PUB-01)
+After export, the workflow reads the deployed manifest from Turso (`publish
+manifest get`) and compares the freshly exported snapshot against it with
+`publish gate --require-manifest`:
+- ≥ 1 stories and different from the stored manifest → deploy to Pages, then
+  record the manifest in Turso (`publish manifest put`); no Git commit
+- Zero stories, but the stored manifest had ≥ 1 story → **deny**; the last
+  successfully deployed (real) content is retained
+- Zero stories, and **no stored manifest** (never deployed) → **deny**
+  (`--require-manifest` is fail closed)
+- Identical content to the stored manifest → **skip** the deploy (quiesce)
+- A failed ingest / export / **manifest read** fails the build job, so the
+deploy job is skipped and the last-good Pages deployment is preserved
+The build also greps `web/public/` for sample-data markers (`example.com`,
+`seed-run-`, demo story IDs) and hard-fails before any Pages upload, so sample
+content can never be presented as current NFL news. See `web/README-data.md`
+for the full contract.
 
 ### Pages configuration
 - Environment: `github-pages`
@@ -702,9 +725,14 @@ repo file) as a remote signal.
 
 ## Known issues
 
-- **Fixed (issue #163):** The missing push step is now the single
-  `commit-and-push-site-data` step, gated on export success, with `[skip ci]`
-  and step-level `contents: write`.
+- **Fixed (issue #163):** The missing push step is now handled by explicit
+  commit/merge steps gated on export success.
+- **Fixed (issue #247 / PUB-01):** The `web/data/*.json` files are no longer
+  committed to Git. The news snapshot is re-projected from Turso into the
+  workspace (untracked/ignored) and the deployed manifest lives in Turso
+  (`publish manifest get`/`put`), so a fresh checkout can deploy from the
+  database without any committed data. The only remaining Git-mutation step is
+  the retention-only commit (issue #120), which commits only `archive/retention`.
 - **Fixed (issue #163):** The heartbeat check no longer reads checkout files;
   it uses Turso-backed `ingest should-run` and an HTTP fetch of the deployed
   site's `data/heartbeat.json`.
@@ -718,8 +746,10 @@ repo file) as a remote signal.
   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which are validated at startup
   (a missing value fails the ingest step with a clear, redacted error). Local
   runs can use `sqlite-file` or `memory`.
-- The heartbeat file is committed to the repo; the refresh workflow does not
-  push any data back to the default branch (see missing push step above).
+- The `web/data/*.json` files are workspace-only (generated by `export run`,
+  re-projected from Turso) and are gitignored/untracked since issue #247. The
+  refresh workflow does not push any news data back to the default branch; the
+  only commit is the retention package.
 - Backup/restore code implemented in sqlite package (HS-041), not yet wired
   into the pipeline
 - Retention/archiving implemented in sqlite package (HS-041), not yet wired

@@ -26,21 +26,14 @@ import (
 	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
-// DeployedManifest is the tracked record of the last successfully deployed
-// snapshot (web/data/deployed.json, version "1"). It is non-secret by
-// construction: counts, RFC3339 timestamps, a content SHA-256, and a commit SHA.
-type DeployedManifest struct {
-	Version       string `json:"version"`
-	DeployedAt    string `json:"deployedAt"`
-	GeneratedAt   string `json:"generatedAt"`
-	Commit        string `json:"commit"`
-	ContentSHA256 string `json:"contentSha256"`
-	Stories       int    `json:"stories"`
-	Latest        int    `json:"latest"`
-}
+// DeployedManifest is the record of the last successfully deployed snapshot.
+// Issue #247 / PUB-01: the canonical type lives in domain so both the gate and
+// the storage adapters can reference it without an import cycle; this alias
+// keeps the existing application.DeployedManifest name stable.
+type DeployedManifest = domain.DeployedManifest
 
 // ManifestVersion is the current version of the deployed manifest format.
-const ManifestVersion = "1"
+const ManifestVersion = domain.ManifestVersion
 
 // GateVerdict is the outcome of a publish gate evaluation.
 type GateVerdict string
@@ -173,6 +166,34 @@ func EvaluatePublishGate(candidate *domain.Snapshot, m *DeployedManifest) (GateR
 	}
 
 	return result, nil
+}
+
+// EvaluatePublishGateRequired is the fail-closed variant of EvaluatePublishGate
+// (issue #247 / PUB-01, AC-6). With the deployed manifest moved out of Git
+// (untracked), a fresh checkout has no manifest file; the plain gate treats a
+// missing manifest as "never deployed" and would ALLOW a zero-story export,
+// deploying an empty site. When the caller knows a real deployment previously
+// existed (a production deploy path), a missing manifest must DENY instead.
+//
+// Behavior: identical to EvaluatePublishGate except that a nil/empty manifest
+// yields a deny verdict (fail closed) rather than the "first deploy" allow.
+// The candidate validation rules are unchanged.
+func EvaluatePublishGateRequired(candidate *domain.Snapshot) (GateResult, error) {
+	if candidate == nil {
+		return GateResult{}, fmt.Errorf("candidate snapshot is nil")
+	}
+	if err := candidate.Validate(); err != nil {
+		return GateResult{}, fmt.Errorf("candidate snapshot invalid: %w", err)
+	}
+	return GateResult{
+		Verdict:          GateVerdictDeny,
+		Reason:           "no deployed manifest and manifest required (fail closed; seed the manifest before deploying)",
+		CandidateStories: len(candidate.Stories),
+		DeployedStories:  0,
+		CandidateGenAt:   candidate.GeneratedAt,
+		DeployedGenAt:    "",
+		ContentSHA256:    ContentSHA256(candidate),
+	}, nil
 }
 
 // ContentSHA256 computes a SHA-256 hash of the snapshot's content (excluding

@@ -8,7 +8,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TestMigrate008CreatesIngestRuns (AC-7): a fresh DB applies 8 migrations,
+// TestMigrate008CreatesIngestRuns (AC-7): a fresh DB applies all migrations,
 // ingest_runs exists, and the legacy ingestion_runs table is dropped.
 func TestMigrate008CreatesIngestRuns(t *testing.T) {
 	tmp := t.TempDir()
@@ -18,8 +18,8 @@ func TestMigrate008CreatesIngestRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 10 {
-		t.Fatalf("expected 10 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 11 {
+		t.Fatalf("expected 11 migrations, got %d: %v", len(versions), versions)
 	}
 
 	repo, err := NewRepository(dbPath)
@@ -109,14 +109,15 @@ func TestMigrate008CarryOver(t *testing.T) {
 	}
 
 	// Now run MigrateDB: 008 and 009 are new (008 carry-over under test, 009
-	// lease rebuild), plus 010 (additive display_title). All three apply.
+	// lease rebuild), plus 010 (additive display_title) and 011
+	// (deployed_manifests). All four apply.
 	versions, err := MigrateDB(db)
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	wantVersions := map[int]bool{8: true, 9: true, 10: true}
-	if len(versions) != 3 {
-		t.Errorf("expected migrations [8 9 10] applied, got %d: %v", len(versions), versions)
+	wantVersions := map[int]bool{8: true, 9: true, 10: true, 11: true}
+	if len(versions) != 4 {
+		t.Errorf("expected migrations [8 9 10 11] applied, got %d: %v", len(versions), versions)
 	}
 	for _, v := range versions {
 		if !wantVersions[v] {

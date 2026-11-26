@@ -196,6 +196,10 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 
 	// --- Build job: publish-gate step gated on export success (AC-2, AC-3) ---
 	// Issue #229: the gate compares against the deployed manifest (not HEAD).
+	// Issue #247: the manifest is read from the durable store (Turso) via
+	// `publish manifest get` BEFORE the gate, and the gate is invoked with
+	// --require-manifest so a fresh checkout with no stored manifest DENIES
+	// (fail closed).
 	publishGateStep := findStepByID(t, wf, "build", "publish-gate")
 	gateIf, ok := publishGateStep["if"].(string)
 	if !ok {
@@ -213,6 +217,25 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	}
 	if !strings.Contains(gateScript, "web/data/deployed.json") {
 		t.Error("publish-gate step must compare against web/data/deployed.json (not git show HEAD:)")
+	}
+	// Issue #247 / AC-6: --require-manifest is mandatory.
+	if !strings.Contains(gateScript, "--require-manifest") {
+		t.Error("publish-gate step must invoke with --require-manifest (fail closed, issue #247)")
+	}
+
+	// Issue #247: manifest get step must run before the gate (load manifest from
+	// the durable store). It is gated on export success.
+	manifestGetStep := findStepByID(t, wf, "build", "manifest-get")
+	mgIf, ok := manifestGetStep["if"].(string)
+	if !ok || !strings.Contains(mgIf, "steps.export.conclusion == 'success'") {
+		t.Errorf("manifest-get if = %q, must gate on export success", mgIf)
+	}
+	mgScript := stepRunScript(manifestGetStep)
+	if !strings.Contains(mgScript, "publish manifest get") {
+		t.Error("manifest-get step must invoke 'publish manifest get'")
+	}
+	if !strings.Contains(mgScript, "--output web/data/deployed.json") {
+		t.Error("manifest-get step must write to web/data/deployed.json")
 	}
 
 	// --- Concurrency: shared group + cancel-in-progress: false (AC-3) ---
@@ -251,24 +274,27 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		t.Errorf("expected exactly one step with 'git push', got %d: %v", len(pushSteps), pushSteps)
 	}
 
-	// --- Build job: commit-and-push-site-data step (AC-7) ---
-	commitPushStep := findStepByID(t, wf, "build", "commit-and-push-site-data")
+	// --- Build job: commit-and-push-retention step (AC-7, issue #247 / D5) ---
+	// Issue #247: the news-data commit step is removed; the only commit+push
+	// step is the retention-only commit, which stages ONLY archive/retention
+	// (never web/data). It is gated on run-retention AND the retention export
+	// succeeding (NOT on export success).
+	commitPushStep := findStepByID(t, wf, "build", "commit-and-push-retention")
 	cpsIf, ok := commitPushStep["if"].(string)
 	if !ok {
-		t.Fatal("commit-and-push-site-data step must have an if condition")
+		t.Fatal("commit-and-push-retention step must have an if condition")
 	}
-	if !strings.Contains(cpsIf, "steps.export.conclusion == 'success'") {
-		t.Errorf("commit-and-push-site-data if = %q, must gate on export success", cpsIf)
+	if !strings.Contains(cpsIf, "inputs.run-retention") || !strings.Contains(cpsIf, "steps.retention-export.conclusion == 'success'") {
+		t.Errorf("commit-and-push-retention if = %q, must gate on run-retention AND retention-export success", cpsIf)
 	}
 	if hasAlwaysIf(commitPushStep) {
-		t.Error("commit-and-push-site-data step must NOT use if: always()")
+		t.Error("commit-and-push-retention step must NOT use if: always()")
 	}
 	if _, hasCOE := commitPushStep["continue-on-error"]; hasCOE {
-		t.Error("commit-and-push-site-data step must NOT have continue-on-error")
+		t.Error("commit-and-push-retention step must NOT have continue-on-error")
 	}
-	// Job-level permissions on build: contents: write. GitHub Actions does
-	// not support step-level permissions (a workflow with them is rejected as
-	// "Invalid workflow file"), so the AC-7 write grant lives on the build job.
+	// Job-level permissions on build: contents: write (GitHub Actions does not
+	// support step-level permissions).
 	jobPerms, ok := buildJob["permissions"].(map[string]any)
 	if !ok {
 		t.Fatal("build job must have job-level permissions")
@@ -277,34 +303,35 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		t.Errorf("build job permissions.contents = %v, want \"write\"", jobPerms["contents"])
 	}
 	if _, hasStepPerms := commitPushStep["permissions"]; hasStepPerms {
-		t.Error("commit-and-push-site-data step must NOT have step-level permissions (unsupported by GitHub Actions)")
+		t.Error("commit-and-push-retention step must NOT have step-level permissions")
 	}
-	// The main branch requires the `Build` status check (ruleset "Require CI
-	// before merging to main"), so the step must not push directly to main
-	// with [skip ci]: it commits to a short-lived branch, opens a PR, waits
-	// for the Build check, and squash-merges.
+	// The step must commit to a short-lived branch, open a PR, wait for the
+	// Build check, and squash-merge. It must stage archive/retention and
+	// NEVER web/data (issue #247 / AC-3).
 	cpsScript := stepRunScript(commitPushStep)
 	if strings.Contains(cpsScript, "[skip ci]") {
-		t.Error("commit-and-push-site-data must NOT use [skip ci]: the Build check is required by the main ruleset")
+		t.Error("commit-and-push-retention must NOT use [skip ci]: the Build check is required by the main ruleset")
 	}
 	if !strings.Contains(cpsScript, "git checkout -b") || !strings.Contains(cpsScript, "gh pr create") {
-		t.Error("commit-and-push-site-data must commit to a short-lived branch and open a PR")
+		t.Error("commit-and-push-retention must commit to a short-lived branch and open a PR")
 	}
 	if !strings.Contains(cpsScript, "gh pr merge") {
-		t.Error("commit-and-push-site-data must squash-merge the PR after the Build check passes")
+		t.Error("commit-and-push-retention must squash-merge the PR after the Build check passes")
 	}
-	// The retention package (issue #120 / HS-065) ships in the same PR as the
-	// site-data files, and the PR/branch are recorded for the cleanup step.
-	if !strings.Contains(cpsScript, "archive/retention") {
-		t.Error("commit-and-push-site-data must stage archive/retention in the same PR as the site-data files")
+	if !strings.Contains(cpsScript, "git add archive/retention") {
+		t.Error("commit-and-push-retention must stage archive/retention")
+	}
+	// Issue #247 / AC-3: the retention step must NOT stage web/data.
+	if strings.Contains(cpsScript, "git add web/data") {
+		t.Error("commit-and-push-retention must NOT stage web/data (issue #247: no news-data commits)")
 	}
 	if !strings.Contains(cpsScript, "pr_num=") || !strings.Contains(cpsScript, "branch=") {
-		t.Error("commit-and-push-site-data must write pr_num and branch to GITHUB_OUTPUT for the cleanup step")
+		t.Error("commit-and-push-retention must write pr_num and branch to GITHUB_OUTPUT for the cleanup step")
 	}
 	// Conflict recovery: after the Build check, verify mergeability and
 	// re-base onto origin/main when main moved (bounded re-base attempts).
 	if !strings.Contains(cpsScript, "mergeable") || !strings.Contains(cpsScript, "git reset --hard origin/main") {
-		t.Error("commit-and-push-site-data must check mergeability and re-base onto origin/main when main moved")
+		t.Error("commit-and-push-retention must check mergeability and re-base onto origin/main when main moved")
 	}
 
 	// --- Build job: retention steps (issue #120 / HS-065) ---
@@ -314,10 +341,10 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	}
 	retApply := findStepByID(t, wf, "build", "retention-apply")
 	ai, ok := retApply["if"].(string)
-	if !ok || !strings.Contains(ai, "inputs.run-retention") || !strings.Contains(ai, "steps.commit-and-push-site-data.conclusion == 'success'") {
-		t.Errorf("retention-apply if = %q, must gate on run-retention AND the site-data step success (package persisted before apply)", ai)
+	if !ok || !strings.Contains(ai, "inputs.run-retention") || !strings.Contains(ai, "steps.commit-and-push-retention.conclusion == 'success'") {
+		t.Errorf("retention-apply if = %q, must gate on run-retention AND the retention commit step success (package persisted before apply)", ai)
 	}
-	// The package must ship in the site-data PR: export before the commit step.
+	// The package must ship in the retention PR: export before the commit step.
 	stepIdx := func(stepID string) int {
 		for i, s := range steps {
 			st, ok := s.(map[string]any)
@@ -329,22 +356,19 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		}
 		return -1
 	}
-	if ei, ci := stepIdx("retention-export"), stepIdx("commit-and-push-site-data"); ei < 0 || ci < 0 || ei >= ci {
-		t.Error("retention-export must run before commit-and-push-site-data so the package ships in the same PR")
+	if ei, ci := stepIdx("retention-export"), stepIdx("commit-and-push-retention"); ei < 0 || ci < 0 || ei >= ci {
+		t.Error("retention-export must run before commit-and-push-retention so the package ships in the same PR")
 	}
-	if stepIdx("retention-commit") >= 0 {
-		t.Error("retention-commit must not exist: the retention package ships in the site-data PR (exactly one commit+push step)")
-	}
-	// Cleanup step: closes the PR and deletes the branch when the run did not
-	// merge (cancelled or failed), so no orphaned PR conflicts with later runs.
-	cleanup := findStepByID(t, wf, "build", "cleanup-site-data-pr")
+	// Cleanup step: closes the retention PR and deletes the branch when the run
+	// did not merge (cancelled or failed).
+	cleanup := findStepByID(t, wf, "build", "cleanup-retention-pr")
 	ciCond, ok := cleanup["if"].(string)
-	if !ok || !strings.Contains(ciCond, "always()") || !strings.Contains(ciCond, "steps.commit-and-push-site-data.outcome != 'success'") || !strings.Contains(ciCond, "pr_num") {
-		t.Errorf("cleanup-site-data-pr if = %q, must run on always() when the site-data step did not succeed and a PR was opened", ciCond)
+	if !ok || !strings.Contains(ciCond, "always()") || !strings.Contains(ciCond, "steps.commit-and-push-retention.outcome != 'success'") || !strings.Contains(ciCond, "pr_num") {
+		t.Errorf("cleanup-retention-pr if = %q, must run on always() when the retention step did not succeed and a PR was opened", ciCond)
 	}
 	cr := stepRunScript(cleanup)
 	if !strings.Contains(cr, "gh pr close") {
-		t.Error("cleanup-site-data-pr must close the orphaned PR")
+		t.Error("cleanup-retention-pr must close the orphaned PR")
 	}
 
 	// --- Build job: no if: always() on any commit/deploy step (AC-7) ---
@@ -498,7 +522,7 @@ func TestWorkflowContract_HeartbeatCheck_Structure(t *testing.T) {
 }
 
 // TestWorkflowContract_Site_PublishGate validates the publish gate invariants
-// in site.yml (issue #229 / AC-2, AC-3).
+// in site.yml (issue #229 / AC-2, AC-3; issue #247 / PUB-01 AC-4, AC-6, AC-8).
 func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 	t.Parallel()
 
@@ -517,7 +541,7 @@ func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 		t.Error("site.yml concurrency.cancel-in-progress must be false")
 	}
 
-	// --- Deploy job: pinned ref (AC-3) ---
+	// --- Deploy job: pinned feature branch (AC-3) ---
 	jobs := strMap(t, wf["jobs"])
 	deployJob, ok := jobs["deploy"].(map[string]any)
 	if !ok {
@@ -531,7 +555,7 @@ func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if name, _ := step["name"].(string); name == "Checkout" {
+		if name, _ := step["name"].(string); strings.HasPrefix(name, "Checkout repository") {
 			checkoutStep = step
 			break
 		}
@@ -543,11 +567,47 @@ func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 	if !ok {
 		t.Fatal("site.yml deploy job: Checkout step missing with block")
 	}
-	if ref, _ := withBlock["ref"].(string); !strings.Contains(ref, "workflow_run.head_sha") {
-		t.Errorf("site.yml deploy job: Checkout ref = %q, must pin to workflow_run.head_sha", ref)
+	if ref, _ := withBlock["ref"].(string); !strings.Contains(ref, "source-branch") {
+		t.Errorf("site.yml deploy job: Checkout ref = %q, must check out the feature branch (inputs.source-branch)", ref)
 	}
-	if fetchDepth, ok := withBlock["fetch-depth"].(int); !ok || fetchDepth != 0 {
-		t.Error("site.yml deploy job: Checkout must use fetch-depth: 0 (for git archive restore)")
+
+	// Issue #247: the deploy job must re-project the snapshot from Turso
+	// (workspace, not a committed file) and read the manifest from the store.
+	// AC-4: no "git archive" restore of committed data.
+	var reprojected bool
+	var manifestGet bool
+	var gateRequiresManifest bool
+	var foundGitArchive bool
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		run := stepRunScript(step)
+		if strings.Contains(run, "export run") {
+			reprojected = true
+		}
+		if strings.Contains(run, "publish manifest get") {
+			manifestGet = true
+		}
+		if strings.Contains(run, "publish gate") && strings.Contains(run, "--require-manifest") {
+			gateRequiresManifest = true
+		}
+		if strings.Contains(run, "git archive") {
+			foundGitArchive = true
+		}
+	}
+	if !reprojected {
+		t.Error("site.yml deploy job must re-project the snapshot from Turso (export run)")
+	}
+	if !manifestGet {
+		t.Error("site.yml deploy job must read the manifest from the store (publish manifest get)")
+	}
+	if !gateRequiresManifest {
+		t.Error("site.yml publish gate must use --require-manifest (fail closed, issue #247)")
+	}
+	if foundGitArchive {
+		t.Error("site.yml deploy job must NOT use 'git archive' to restore committed data (issue #247 / AC-4)")
 	}
 
 	// --- Deploy job: publish gate step (AC-2) ---
@@ -570,34 +630,25 @@ func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 		t.Error("site.yml publish-gate step must invoke 'publish gate'")
 	}
 	if !strings.Contains(gateScript, "web/data/deployed.json") {
-		t.Error("site.yml publish-gate step must compare against web/data/deployed.json")
+		t.Error("site.yml publish-gate step must compare against web/data/deployed.json (the stored manifest)")
 	}
-	// On deny, the gate must restore last-deployed data via git archive.
-	if !strings.Contains(gateScript, "git archive") {
-		t.Error("site.yml publish-gate step must restore last-deployed data via git archive on deny")
+	if !strings.Contains(gateScript, "--require-manifest") {
+		t.Error("site.yml publish-gate step must invoke with --require-manifest (issue #247)")
 	}
-
-	// --- Deploy job: skip-identical quiescence (AC-3) ---
-	// Deploy/build steps must be gated on verdict != 'skip-identical'.
+	// Issue #247 / AC-8: the manifest put step records the deploy in the store
+	// (no git).
+	var foundManifestPut bool
 	for _, s := range steps {
 		step, ok := s.(map[string]any)
 		if !ok {
 			continue
 		}
-		uses, _ := step["uses"].(string)
-		if strings.Contains(uses, "deploy-pages") || strings.Contains(uses, "upload-pages-artifact") || strings.Contains(uses, "configure-pages") {
-			ifCond, _ := step["if"].(string)
-			if !strings.Contains(ifCond, "skip-identical") {
-				t.Errorf("site.yml Pages step %q must be gated on verdict != 'skip-identical'", uses)
-			}
+		if strings.Contains(stepRunScript(step), "publish manifest put") {
+			foundManifestPut = true
 		}
-		// Hugo build must also be gated.
-		if name, _ := step["name"].(string); name == "Build Hugo site" {
-			ifCond, _ := step["if"].(string)
-			if !strings.Contains(ifCond, "skip-identical") {
-				t.Error("site.yml Build Hugo site step must be gated on verdict != 'skip-identical'")
-			}
-		}
+	}
+	if !foundManifestPut {
+		t.Error("site.yml deploy job must record the manifest in the store (publish manifest put) after deploy")
 	}
 
 	// --- Deploy job: demo marker gate kept (AC-5) ---

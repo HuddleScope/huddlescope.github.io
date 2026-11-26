@@ -271,6 +271,34 @@ func TestContentSHA256_DifferentContent(t *testing.T) {
 	}
 }
 
+// TestEvaluatePublishGateRequired_NoManifest_Deny (issue #247 / AC-6): with the
+// manifest moved out of Git, a fresh checkout has no manifest; the fail-closed
+// gate must DENY (never allow a zero-story / empty deploy) rather than the
+// plain gate's "never deployed" allow.
+func TestEvaluatePublishGateRequired_NoManifest_Deny(t *testing.T) {
+	cand := makeSnapshot(t, 0, "2026-01-01T00:00:00Z", "dal")
+	res, err := EvaluatePublishGateRequired(cand)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Verdict != GateVerdictDeny {
+		t.Errorf("verdict = %q, want deny", res.Verdict)
+	}
+	if res.Reason == "" {
+		t.Error("expected a deny reason")
+	}
+	if res.DeployedStories != 0 {
+		t.Errorf("deployed_stories = %d, want 0", res.DeployedStories)
+	}
+}
+
+// TestEvaluatePublishGateRequired_NilCandidate errors (fail closed).
+func TestEvaluatePublishGateRequired_NilCandidate(t *testing.T) {
+	if _, err := EvaluatePublishGateRequired(nil); err == nil {
+		t.Error("expected error for nil candidate")
+	}
+}
+
 func TestStampManifest(t *testing.T) {
 	cand := makeSnapshot(t, 5, "2026-01-01T00:00:00Z", "dal")
 	m := StampManifest(cand, "abc123")
