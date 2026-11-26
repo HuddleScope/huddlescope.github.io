@@ -50,6 +50,16 @@ in `docs/worker-deployment.md` (HS-053). Essentials:
   ```
 - The worker's PAT must **never** be added to GitHub repo secrets or workflow
   YAML; it lives only in Cloudflare secret storage.
+- **Deploys are automated** by `.github/workflows/deploy-cloudflare-worker.yml`
+  (manual `workflow_dispatch` only, `validate_only` defaults to true). It
+  requires repo secrets `CLOUDFLARE_API_TOKEN` (account-scoped,
+  **Workers Scripts — Edit** only) and `CLOUDFLARE_ACCOUNT_ID`. It runs
+  `npm ci` + `npm test` + `wrangler whoami` + `wrangler secret list` +
+  `wrangler deploy --dry-run` before any upload, and smoke-checks the
+  deployed `/ping` (`hasToken: true`). Rollback: revert the workflow file, or
+  `npx wrangler deployments rollback`, or disable the cron trigger in the
+  Cloudflare dashboard (see `docs/worker-deployment.md`). The workflow never
+  auto-deploys and never creates the worker's `GITHUB_TOKEN`.
 
 ### 3. GitHub: environment, workflow, Pages
 
@@ -69,11 +79,14 @@ in `docs/worker-deployment.md` (HS-053). Essentials:
 | Store | Secret | Used by |
 |-------|--------|---------|
 | GitHub repo secrets (Actions) | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | `refresh-news.yml` (build job) |
+| GitHub repo secrets (Actions) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `deploy-cloudflare-worker.yml` (manual Worker deploy) |
 | Cloudflare Worker secrets | `GITHUB_TOKEN` | `huddlescope-dispatcher` (cron dispatch) |
 
 The Cloudflare worker `GITHUB_TOKEN` is **never** a GitHub repo secret and
 **never** appears in workflow YAML. Rotating one does not affect the other
-(see Secret rotation).
+(see Secret rotation). The `CLOUDFLARE_API_TOKEN` is a separate, scoped
+Cloudflare credential (Workers Scripts — Edit only) and must not be reused
+for anything else.
 
 ## Manual refresh
 
@@ -502,11 +515,23 @@ Disable retention locally or in CI with `HSC_RETENTION_ENABLED=false`.
 1. Generate a new token at GitHub → Settings → Developer settings → Personal
    access tokens (fine-grained, repo scope: workflows).
 2. Update in worker: `cd scheduler && npx wrangler secret put GITHUB_TOKEN`
-3. Re-deploy: `npx wrangler deploy`
-4. Verify dispatch works: `gh run list -R HuddleScope/huddlescope.github.io
+3. Verify dispatch works: `gh run list -R HuddleScope/huddlescope.github.io
    --workflow refresh-news.yml --limit 5` shows fresh cron-triggered runs.
+   (No re-deploy is required to change a Worker secret.)
 
-These two stores are independent (see Initial provisioning §4): rotating the
+### Cloudflare deploy credentials (GitHub repo secrets)
+- `CLOUDFLARE_API_TOKEN` — account-scoped, **Workers Scripts — Edit** only.
+- `CLOUDFLARE_ACCOUNT_ID`
+
+**Rotation procedure**:
+1. Re-issue the token in Cloudflare (same minimal scope) and note the
+   account ID.
+2. `gh secret set CLOUDFLARE_API_TOKEN -R HuddleScope/huddlescope.github.io`
+   (and `CLOUDFLARE_ACCOUNT_ID` if it changed).
+3. Run `deploy-cloudflare-worker.yml` with `validate_only=true`; the
+   `wrangler whoami` step proves the new credentials work.
+
+These stores are independent (see Initial provisioning §4): rotating the
 worker token never touches repo secrets, and vice versa.
 
 ## Local execution steps

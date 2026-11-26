@@ -28,7 +28,7 @@ This runbook walks you through provisioning the Cloudflare Worker (`huddlescope-
 
 > **Security note**: Never commit the token to Git, store it in workflow YAML files, or add it to `.env.example`. The worker stores it as a Cloudflare secret.
 
-> **Cloudflare secret vs GitHub Actions secrets**: The `GITHUB_TOKEN` you set here is stored ONLY in Cloudflare secret storage. GitHub Actions workflows in this repository (for example, `refresh-news.yml`) read their own repository secrets; in this repo the refresh-news workflow uses `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for the Turso database—a completely separate store. Do NOT add the GitHub PAT to GitHub repository secrets or embed it in workflow YAML. The worker is the only consumer of this token.
+> **Cloudflare secret vs GitHub Actions secrets**: The `GITHUB_TOKEN` you set here is stored ONLY in Cloudflare secret storage. GitHub Actions workflows in this repository (for example, `refresh-news.yml`) read their own repository secrets; in this repo the refresh-news workflow uses `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for the Turso database—a completely separate store. Do NOT add the GitHub PAT to GitHub repository secrets or embed it in workflow YAML. The worker is the only consumer of this token. The Actions-only secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (used by `deploy-cloudflare-worker.yml`) are likewise separate: they grant *Workers Scripts — Edit* on the Cloudflare account and must never be reused for anything else.
 
 ## Authentication and deployment
 
@@ -80,6 +80,70 @@ This runbook walks you through provisioning the Cloudflare Worker (`huddlescope-
    ```
 
    Enter or paste the token when prompted. The secret is encrypted and never appears in logs or source code.
+
+## Deployment via GitHub Actions (redeploy, issue #227)
+
+After the first-time bootstrap below, all future deploys are automated by the
+`deploy-cloudflare-worker.yml` workflow. It is **manual only**
+(`workflow_dispatch`) — no push or PR ever deploys — and it runs the full
+pre-deploy gate (`npm ci` → `npm test` → `wrangler whoami` → `wrangler secret
+list` → `wrangler deploy --dry-run`) before any upload. A failing step fails
+the run; a failed deploy never claims success.
+
+### One-time repository secret provisioning
+
+1. Create a Cloudflare API token: Cloudflare dashboard → My Profile → API
+   Tokens → **Create token** → *Edit Cloudflare Workers* template (or a
+   fine-grained token). Scope it to **one account** with permission
+   **Workers Scripts — Edit** only. Copy the token.
+2. Note your Cloudflare account ID (dashboard → account overview).
+3. Set both repository secrets (name only — never write values into the repo
+   or workflow YAML):
+
+   ```bash
+   gh secret set CLOUDFLARE_API_TOKEN -R HuddleScope/huddlescope.github.io
+   gh secret set CLOUDFLARE_ACCOUNT_ID -R HuddleScope/huddlescope.github.io
+   ```
+
+### Deploying
+
+- **Validate only (default, safe):** GitHub → Actions → *Deploy Cloudflare
+  Worker* → Run workflow, leave `validate_only` checked. Runs every check and
+  a dry-run bundle without uploading.
+- **Deploy:** uncheck `validate_only` (set it to `false`). After the checks
+  pass, the workflow uploads the worker and smoke-checks the deployed
+  `/ping` endpoint (expects `hasToken: true`).
+
+The workflow's `GITHUB_TOKEN` handling: it **verifies** the worker secret
+exists (`wrangler secret list`) but never creates or rotates it. The worker's
+PAT is provisioned exactly once, manually, during first-time bootstrap, and
+rotated manually (see Token rotation below).
+
+> **Two different `GITHUB_TOKEN`s — do not confuse them.** The Cloudflare
+> Worker secret `GITHUB_TOKEN` is a long-lived fine-grained PAT stored only in
+> Cloudflare secret storage; the GitHub Actions `GITHUB_TOKEN` in other
+> workflows of this repo is ephemeral and injected per run. Rotating one
+> never affects the other.
+
+Rollback paths (reverting the workflow file, `wrangler deployments rollback`,
+disabling the cron trigger, secret rotation) are covered under **Rollback and
+safe disable** below and in `docs/ops-runbook.md`.
+
+## First-time bootstrap checklist (reproducible)
+
+Use this checklist for a fresh Cloudflare account (or when re-provisioning).
+It maps the narrative steps above to a verifiable sequence.
+
+- [ ] 1. Free Cloudflare account created; free `*.workers.dev` subdomain active (no paid plan, no custom domain).
+- [ ] 2. Fine-grained GitHub PAT created (`huddlescope-cf-worker`, repo access: this repo only, Actions: Read and write, 90-day expiry).
+- [ ] 3. `cd scheduler && npm install` (Node 20+).
+- [ ] 4. `npx wrangler login` (browser) — or set `CLOUDFLARE_API_TOKEN`+`CLOUDFLARE_ACCOUNT_ID` env for CI-style auth.
+- [ ] 5. `npx wrangler whoami` shows the expected account/ID.
+- [ ] 6. `npx wrangler deploy` succeeds; note the deployed `workers.dev` URL.
+- [ ] 7. `npx wrangler secret put GITHUB_TOKEN` (paste the PAT). Verify: `npx wrangler secret list` shows `GITHUB_TOKEN`.
+- [ ] 8. Health check: `curl https://huddlescope-dispatcher.<subdomain>.workers.dev/ping` returns `status: ok`.
+- [ ] 9. Cron verified: at the next :07/:37 UTC window, `gh run list -R HuddleScope/huddlescope.github.io --workflow refresh-news.yml` shows a new `workflow_dispatch` run (204 = queued, not completed).
+- [ ] 10. (Optional, for CI deploys) Set repo secrets `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` and run `deploy-cloudflare-worker.yml` with `validate_only=true` once.
 
 ## Verification
 
@@ -179,6 +243,9 @@ gh run view <RUN_ID> -R HuddleScope/huddlescope.github.io
 | `429 Too Many Requests` | GitHub rate limit exceeded | Worker honors the `Retry-After` header; wait for the suggested delay |
 | `5xx errors` | GitHub API transient issues | Worker retries up to 3 times with exponential backoff; check worker logs for details |
 | Cron missing trigger | Worker not deployed or config invalid | Run `npx wrangler deploy`; verify `triggers.crons` in `wrangler.toml` |
+| `deploy-cloudflare-worker` fails at "Fail fast" | Repo secrets `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` not set | Set them (see *Deployment via GitHub Actions*); re-run with `validate_only=true` |
+| `deploy-cloudflare-worker` fails at secret list | Worker secret `GITHUB_TOKEN` missing | `cd scheduler && npx wrangler secret put GITHUB_TOKEN` (manual, one-off) |
+| `deploy-cloudflare-worker` deploy step 403 | Cloudflare token scope too narrow | Re-issue the token with account scope + **Workers Scripts — Edit**; update `CLOUDFLARE_API_TOKEN` |
 
 ## Token rotation and expiry monitoring
 

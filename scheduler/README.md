@@ -101,6 +101,16 @@ npx wrangler deploy
 
 The deployment outputs the Workers URL (e.g., `https://huddlescope-dispatcher.<your-subdomain>.workers.dev`).
 
+### Re-deploys via GitHub Actions
+
+After first-time bootstrap, future deploys are automated by
+`.github/workflows/deploy-cloudflare-worker.yml` (manual `workflow_dispatch`
+only; `validate_only` defaults to true). It requires the repo secrets
+`CLOUDFLARE_API_TOKEN` (account-scoped, Workers Scripts — Edit only) and
+`CLOUDFLARE_ACCOUNT_ID`, and runs `npm ci` + `npm test` + `wrangler` validation
+before any upload. See `docs/worker-deployment.md` → "Deployment via GitHub
+Actions" for the runbook.
+
 ### Verify deployment
 
 ```bash

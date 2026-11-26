@@ -488,6 +488,63 @@ describe('utilities', () => {
   });
 });
 
+// Issue #227 (AC-3, AC-6): the wrangler.toml config must keep the pinned
+// cron schedule and the free-tier workers_dev subdomain. Any change to the
+// schedule (cron drift) or the hosting mode (paid domain) fails CI here and
+// forces an explicit reviewed change. We parse the TOML as text — no new
+// dependencies — and pin the exact values.
+describe('AC-3/AC-6 guard: wrangler.toml pins cron schedule and free tier', () => {
+  function parseSimpleToml(src) {
+    // Minimal TOML reader for the flat top-level keys + the triggers table
+    // used by scheduler/wrangler.toml. Sufficient for the guard; not a
+    // general-purpose parser.
+    const out = {};
+    let inTriggers = false;
+    for (const rawLine of src.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      // Single-line inline table: triggers = { crons = ["7,37 * * * *"] }
+      const inline = line.match(/^triggers\s*=\s*\{(.*)\}\s*$/);
+      if (inline) {
+        const m = inline[1].match(/^\s*crons\s*=\s*\[(.*)\]\s*$/);
+        if (m) out.crons = m[1].match(/"[^"]*"/g).map(s => s.slice(1, -1));
+        continue;
+      }
+      // Multi-line table form
+      if (line === 'triggers = {') { inTriggers = true; continue; }
+      if (inTriggers) {
+        if (line === '}') { inTriggers = false; continue; }
+        const m = line.match(/^crons\s*=\s*\[(.*)\]\s*$/);
+        if (m) out.crons = m[1].match(/"[^"]*"/g).map(s => s.slice(1, -1));
+        continue;
+      }
+      if (/^\[[^\]]+\]$/.test(line)) continue; // other table headers
+      const kv = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
+      if (!kv) continue;
+      let val = kv[2].trim();
+      if (val === 'true') out[kv[1]] = true;
+      else if (val === 'false') out[kv[1]] = false;
+      else out[kv[1]] = val.replace(/^"|"$/g, '');
+    }
+    return out;
+  }
+
+  it('must schedule cron triggers at "7,37 * * * *" (48 dispatches/day)', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const toml = parseSimpleToml(readFileSync(join(here, '..', 'wrangler.toml'), 'utf8'));
+    strictEqual(toml.name, 'huddlescope-dispatcher', 'worker name must not drift');
+    strictEqual(JSON.stringify(toml.crons), JSON.stringify(['7,37 * * * *']),
+      'cron schedule must stay 7,37 * * * * UTC (48 events/day, within the 50/day free-tier limit)');
+  });
+
+  it('must keep workers_dev = true (free tier, no paid domain)', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const toml = parseSimpleToml(readFileSync(join(here, '..', 'wrangler.toml'), 'utf8'));
+    strictEqual(toml.workers_dev, true,
+      'workers_dev must stay true: no paid Cloudflare product or custom domain is allowed (AC-6)');
+  });
+});
+
 // Issue #164 / HS-PORT-08 (AC-1): the worker must remain a pure export
 // *trigger*. It must not reference Turso, fetch RSS, run Hugo export, or take
 // any lock. This static guard pins that boundary forever: if someone adds
