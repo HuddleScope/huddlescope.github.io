@@ -299,10 +299,14 @@ func TestExportSubcommand(t *testing.T) {
 	assert.NotNil(t, exportCmd, "export command should exist")
 	assert.Contains(t, exportCmd.Short, "Export", "export short description should contain Export")
 
-	// Check subcommands
+	// Check subcommands (issue #249 / PUB-03 adds package/restore/validate;
+	// `run` semantics are unchanged).
 	subcommands := exportCmd.Commands()
-	assert.Len(t, subcommands, 1, "export should have one subcommand")
-	assert.Equal(t, "run", subcommands[0].Use, "export run should be the subcommand")
+	var uses []string
+	for _, sub := range subcommands {
+		uses = append(uses, sub.Use)
+	}
+	assert.ElementsMatch(t, []string{"run", "package", "restore", "validate"}, uses, "export subcommands")
 }
 
 func TestHeartbeatSubcommand(t *testing.T) {

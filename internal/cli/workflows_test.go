@@ -3,11 +3,14 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/HuddleScope/huddlescope.github.io/internal/snapshot"
 )
 
 // TestRefreshNewsWorkflow_Issue247 (issue #247 / PUB-01, AC-3, AC-8) parses
@@ -93,4 +96,72 @@ func TestWorkflows_NoNewsDataCommit(t *testing.T) {
 		// Neither workflow may `git add` a web/data path.
 		assert.NotContains(t, c, "git add web/data", wf+" must not commit web/data (AC-3)")
 	}
+}
+
+// TestRefreshNewsWorkflow_Issue249 (issue #249 / PUB-03, AC-3, AC-4) parses
+// refresh-news.yml and asserts the snapshot-artifact invariants: a
+// deterministic package/validate/upload step chain with the content-derived
+// artifact name, 7-day retention and if-no-files-found: error, the
+// pages-binding manifest/run-identity artifact, the manual-recovery
+// restore_artifact dispatch path with the DB steps gated off, and the
+// demo-marker list pinned to snapshot.DemoMarkers.
+func TestRefreshNewsWorkflow_Issue249(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "refresh-news.yml"))
+	require.NoError(t, err, "refresh-news.yml must exist")
+	c := string(data)
+
+	// AC-1/AC-2: package + independent validate before upload.
+	assert.Contains(t, c, "Package snapshot artifact", "package step must be present")
+	assert.Contains(t, c, "export package", "package step must call export package")
+	assert.Contains(t, c, "Validate snapshot artifact", "validate step must be present")
+	assert.Contains(t, c, "export validate", "validate step must call export validate")
+
+	// AC-3: the snapshot artifact is uploaded with the content-derived name,
+	// 7-day retention, and if-no-files-found: error (a missing package fails
+	// the job so the last-good Pages content is preserved).
+	assert.Contains(t, c, "Upload site-snapshot artifact", "site-snapshot upload step must be present")
+	assert.Contains(t, c, "name: site-snapshot-${{ steps.package-snapshot.outputs.snapshot_id }}", "artifact must be named by snapshotId")
+	assert.Contains(t, c, "retention-days: 7", "snapshot artifact must retain for 7 days")
+	assert.Contains(t, c, "if-no-files-found: error", "a missing snapshot package must fail the job")
+
+	// AC-3: the Pages binding artifact links the rendered output to the
+	// snapshot and the run identity.
+	assert.Contains(t, c, "Write Pages binding manifest", "pages-binding step must be present")
+	assert.Contains(t, c, "pages-${{ github.run_id }}", "binding artifact must be named by run id")
+	assert.Contains(t, c, "githubRunId", "binding must carry the run id")
+	assert.Contains(t, c, "githubSha", "binding must carry the commit sha")
+	assert.Contains(t, c, "indexHtmlSha256", "binding must carry the rendered index hash")
+
+	// AC-4: manual recovery path: dispatch input, download + restore steps,
+	// DB steps gated off when restoring, and the deploy bypass gated on
+	// publish=true AND restore_artifact set.
+	assert.Contains(t, c, "restore_artifact:", "restore_artifact dispatch input must be present")
+	assert.Contains(t, c, "Download snapshot artifact for restore", "restore download step must be present")
+	assert.Contains(t, c, "Restore snapshot workspace", "restore step must be present")
+	assert.Contains(t, c, "export restore", "restore step must call export restore")
+	assert.Contains(t, c, "--force", "restore must require explicit operator intent (--force)")
+	assert.Contains(t, c, "inputs.restore_artifact == ''", "DB steps must be gated off when restoring")
+	assert.Contains(t, c, "steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != ''",
+		"deploy must bypass the gate only for an explicit restore")
+
+	// The demo-marker grep in the workflow must stay in sync with the Go
+	// constant used by the snapshot validator (no drift between the two).
+	markerList := workflowDemoMarkers(t, c)
+	assert.ElementsMatch(t, snapshot.DemoMarkers, markerList, "workflow demo markers must match snapshot.DemoMarkers")
+}
+
+// workflowDemoMarkers extracts the MARKERS='a|b|c' list from the
+// "Verify no demo markers" step of refresh-news.yml (unescaping the regexp
+// dot escapes) so the guard test can pin it against snapshot.DemoMarkers.
+func workflowDemoMarkers(t *testing.T, yml string) []string {
+	t.Helper()
+	re := regexp.MustCompile(`MARKERS='([^']+)'`)
+	m := re.FindStringSubmatch(yml)
+	require.NotNil(t, m, "MARKERS grep list must exist in refresh-news.yml")
+	parts := strings.Split(m[1], "|")
+	for i := range parts {
+		parts[i] = strings.ReplaceAll(parts[i], `\.`, ".")
+	}
+	return parts
 }

@@ -443,6 +443,80 @@ These functions are now wired into the retention pipeline via the
 `huddlescope retention` CLI (issue #120) and the `run-retention` step in the
 `refresh-news.yml` workflow.
 
+## Snapshot recovery (issue #249 / PUB-03)
+
+Every successful `refresh-news.yml` run bundles the exported Hugo workspace
+files (`web/data` + the `web/content/stories/` story pages) into a
+deterministic, checksummed `site-snapshot-<snapshotId>.tar.gz` artifact (7-day
+retention) with a `manifest.json` (`huddlescope-site-snapshot` v1). The
+content-derived `snapshotId` excludes volatile `generatedAt` timestamps, so a
+specific content generation has one stable identifier. The rendered output is
+separately bound to its snapshot and run identity in a
+`pages-<githubRunId>` artifact (`dist/pages-binding.json`: snapshotId, archive
+sha256, run id/number, commit sha, rendered index hash). This run has no DB
+writes of its own (only the retention step may write, as it already does).
+
+### Inspecting / reproducing a deployment
+
+1. Find the run and its artifacts:
+   ```bash
+   gh run list -R HuddleScope/huddlescope.github.io --workflow refresh-news.yml --limit 5
+   gh run view <RUN_ID> --json jobs,databaseId
+   gh api repos/HuddleScope/huddlescope.github.io/actions/runs/<RUN_ID>/artifacts
+   ```
+2. Download `site-snapshot-<id>` and inspect:
+   ```bash
+   tar -tzf site-snapshot-<id>.tar.gz            # manifest.json, data/*.json, content/stories/*.md
+   ./dist/huddlescope export validate --artifact site-snapshot-<id>.tar.gz
+   ```
+3. The `pages-<runId>` artifact (`pages-binding.json`) records the exact
+   snapshotId + archive sha256 + commit sha behind the Pages deployment from
+   that run.
+
+### Manual recovery (Turso-down or data-corrupted)
+
+Recovery restores a previously published snapshot into the workspace, rebuilds
+the site, and deploys — **without touching the database at all** (DB steps are
+skipped when restoring; the restore is offline apart from the artifact
+download). It is a deliberate operator action, never automatic, and requires
+`publish=true`:
+
+```bash
+gh workflow dispatch refresh-news.yml \
+  -f publish=true \
+  -f restore_artifact=site-snapshot-<snapshotId>
+```
+
+What happens: the build job downloads the named artifact, re-validates it
+(fail closed), `export restore --force` atomically replaces the managed files
+and removes stale generated story pages **while preserving hand-authored files**
+(files not marked `generator: huddlescope`, including any new manual stories),
+Hugo rebuilds, and the deploy job publishes (the publish gate is bypassed only
+on this explicit path; the durable manifest still catches up via the existing
+put). Stale cleanup removes only `generator: huddlescope` story pages that are
+not in the restored set — hand-authored pages survive. No rollback to older
+snapshots happens automatically: operators choose the artifact explicitly.
+
+Local equivalents (offline, for testing):
+
+```bash
+./dist/huddlescope export package   --data-dir web/data --content-dir web/content/stories --out /tmp/site-snapshot
+./dist/huddlescope export validate  --artifact /tmp/site-snapshot.tar.gz
+./dist/huddlescope export restore   --artifact /tmp/site-snapshot.tar.gz --data-dir web/data --content-dir web/content/stories --force
+```
+
+Notes:
+- The snapshot contains **data + story pages only** (never the full `web/`:
+  config, static, images, templates are unchanged repo content) — keep the
+  package small and reviewable (PUB-02, issue #248).
+- Validation is fail-closed: truncated/corrupt archives, checksum mismatches,
+  undeclared or unsafe paths (absolute, `..` escapes, symlinks), mixed
+  generations, secret lookalikes, and `file://` links all fail; restore always
+  validates before writing and cleans up the staging dir on failure.
+- Artifacts expire after 7 days (free-tier budget); durable state remains in
+  Turso + the durable manifest, so recovery targets a *published* generation,
+  not a replacement for the database.
+
 ## Retention and archiving (HS-065 / issue #120)
 
 Hot tables (`articles`, `stories`, `ranking_snapshots`) are bounded to a

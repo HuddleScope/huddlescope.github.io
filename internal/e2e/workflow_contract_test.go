@@ -70,6 +70,31 @@ func findStepByID(t *testing.T, wf map[any]any, jobID, stepID string) map[string
 	return nil
 }
 
+// findStepByNameIn returns the step with the given name in the given job,
+// or nil if not found (non-fatal; callers decide how to report).
+func findStepByNameIn(t *testing.T, wf map[any]any, jobID, name string) map[string]any {
+	t.Helper()
+	jobs := strMap(t, wf["jobs"])
+	job, ok := jobs[jobID].(map[string]any)
+	if !ok {
+		return nil
+	}
+	steps, ok := job["steps"].([]any)
+	if !ok {
+		return nil
+	}
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n, ok := step["name"].(string); ok && n == name {
+			return step
+		}
+	}
+	return nil
+}
+
 // hasAlwaysIf reports whether a step's if expression contains "always()".
 func hasAlwaysIf(step map[string]any) bool {
 	ifCond, ok := step["if"]
@@ -184,14 +209,81 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		t.Error("ingest step must use --stale-after 75m")
 	}
 
-	// --- Build job: export step (no if, always runs) (AC-3) ---
+	// --- Build job: export step (issue #249 / PUB-03: gated only by the manual
+	// recovery path, which restores the workspace from a snapshot artifact
+	// instead of the DB) ---
 	exportStep := findStepByID(t, wf, "build", "export")
-	if _, hasIf := exportStep["if"]; hasIf {
-		t.Error("export step must NOT have an if condition (always runs)")
+	exportIf, ok := exportStep["if"].(string)
+	if !ok {
+		t.Fatal("export step must have an if condition (issue #249: restore gate)")
+	}
+	if !strings.Contains(exportIf, "inputs.restore_artifact == ''") {
+		t.Error("export step if must be gated off when restoring a snapshot (inputs.restore_artifact == '' )")
+	}
+	if hasAlwaysIf(exportStep) {
+		t.Error("export step must NOT use if: always()")
+	}
+	if _, hasCOE := exportStep["continue-on-error"]; hasCOE {
+		t.Error("export step must NOT have continue-on-error")
 	}
 	exportScript := stepRunScript(exportStep)
 	if !strings.Contains(exportScript, "export run") {
 		t.Error("export step must invoke 'export run'")
+	}
+
+	// --- Build job: snapshot package/validate/upload steps (issue #249 /
+	// PUB-03 AC-1..AC-3). Gated on export success; the upload names the
+	// artifact by the content-derived snapshotId with retention-days: 7 and
+	// if-no-files-found: error (missing package fails the job). ---
+	pkgStep := findStepByID(t, wf, "build", "package-snapshot")
+	pkgIf, ok := pkgStep["if"].(string)
+	if !ok || !strings.Contains(pkgIf, "steps.export.conclusion == 'success'") {
+		t.Error("package-snapshot step must gate on export success")
+	}
+	pkgScript := stepRunScript(pkgStep)
+	if !strings.Contains(pkgScript, "export package") {
+		t.Error("package-snapshot step must invoke 'export package'")
+	}
+	if !strings.Contains(pkgScript, "snapshotId") {
+		t.Error("package-snapshot step must echo snapshotId to GITHUB_OUTPUT")
+	}
+	validateStep := findStepByNameIn(t, wf, "build", "Validate snapshot artifact")
+	if _, hasIf := validateStep["if"]; !hasIf {
+		t.Error("Validate snapshot artifact step must have an if condition")
+	}
+	valScript := stepRunScript(validateStep)
+	if !strings.Contains(valScript, "export validate") {
+		t.Error("Validate snapshot artifact step must invoke 'export validate'")
+	}
+	uploadName := "Upload site-snapshot artifact"
+	uploadStep := findStepByNameIn(t, wf, "build", uploadName)
+	if uploadStep == nil {
+		t.Error(uploadName + " step must exist")
+	} else {
+		withBlock, _ := uploadStep["with"].(map[string]any)
+		if withBlock == nil {
+			t.Error("snapshot upload must have a with block")
+		} else {
+			nameVal, _ := withBlock["name"].(string)
+			if !strings.Contains(nameVal, "site-snapshot-${{ steps.package-snapshot.outputs.snapshot_id }}") {
+				t.Error("snapshot artifact must be named site-snapshot-<snapshotId>")
+			}
+			switch rd := withBlock["retention-days"].(type) {
+			case int:
+				if rd != 7 {
+					t.Error("snapshot artifact must retain for 7 days")
+				}
+			case float64:
+				if rd != 7 {
+					t.Error("snapshot artifact must retain for 7 days")
+				}
+			default:
+				t.Error("snapshot upload must set retention-days: 7")
+			}
+			if withBlock["if-no-files-found"] != "error" {
+				t.Error("snapshot upload must set if-no-files-found: error (fail closed)")
+			}
+		}
 	}
 
 	// --- Build job: publish-gate step gated on export success (AC-2, AC-3) ---
