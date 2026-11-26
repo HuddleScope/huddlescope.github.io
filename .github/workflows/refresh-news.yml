@@ -44,14 +44,12 @@ on:
         default: 'false'
         type: boolean
 
-# Cancel in-progress runs of this workflow on new dispatches
-# Safe-state: build job is cancelled if a new dispatch starts; deploy only runs
-# on a completed build, so no in-progress publish can be corrupted by a
-# subsequent run. The upload-pages-artifact step defaults to fail-if-empty
-# and artifacts have if-no-files-found: ignore only for diagnostics.
+# Issue #229 / AC-3: cancel-in-progress: false prevents a new dispatch from
+# cancelling a run inside the publish window (after the data PR is merged but
+# before the deploy job runs). Refreshes serialize instead of racing.
 concurrency:
-  group: refresh-news-${{ github.ref }}
-  cancel-in-progress: true
+  group: huddlescope-pages-deploy
+  cancel-in-progress: false
 
 # Least privilege: default read access. The build job needs contents:write for
 # the single site-data commit+push step (issue #163 / AC-7). GitHub Actions
@@ -73,7 +71,7 @@ jobs:
     environment:
       name: github-pages
     outputs:
-      deploy: ${{ steps.publish-decision.outputs.deploy }}
+      deploy: ${{ steps.publish-gate.outputs.deploy }}
     env:
       HSC_ENV: production
       HSC_STORAGE_BACKEND: turso
@@ -154,34 +152,41 @@ jobs:
           ./dist/huddlescope export run
           echo "Export completed"
 
-      # HS-056 publish decision: compare the freshly exported story count with
-      # the pre-export committed state (git show HEAD:). Gated on export
-      # success (no if: always() on a decision that drives commit/deploy).
-      - name: Publish decision
-        id: publish-decision
+      # Issue #229 / AC-2, AC-3: publish gate compares the freshly exported
+      # snapshot against the last DEPLOYED manifest (web/data/deployed.json),
+      # not the committed HEAD. This fixes the committed ≠ deployed mismatch.
+      # Exit codes: 0 allow/skip-identical, 3 deny, 1 invalid input.
+      - name: Publish gate
+        id: publish-gate
         if: steps.export.conclusion == 'success'
         run: |
-          # Decide whether to commit/deploy the freshly exported snapshot.
-          # STORY_COUNT reads the working tree (the new export); PREV_STORY_COUNT
-          # reads the pre-export committed state (git show HEAD:). After HS-056
-          # the homepage file is untracked until the first successful export
-          # commits it, so PREV < 1 means "never had a real snapshot".
-          STORY_COUNT=$(jq -r '.stories | length' web/data/homepage.json 2>/dev/null || echo 0)
-          PREV_STORY_COUNT=$(git show HEAD:web/data/homepage.json 2>/dev/null | jq -r '.stories | length' 2>/dev/null || echo 0)
-          echo "Stories in exported snapshot: $STORY_COUNT (committed: $PREV_STORY_COUNT)"
-          if [ "$STORY_COUNT" -ge 1 ]; then
-            DEPLOY=true
-          elif [ "$PREV_STORY_COUNT" -ge 1 ]; then
-            # Zero stories, but a prior real snapshot exists: retain the
-            # last-good deployed content and do not commit the zero-story file.
-            echo "::warning::Exported snapshot has no stories; retaining last-known-good homepage (no deploy)"
-            DEPLOY=false
+          set -euo pipefail
+          echo "Evaluating publish gate (candidate vs deployed manifest)..."
+          GATE_JSON=$(./dist/huddlescope publish gate --candidate web/data/homepage.json --manifest web/data/deployed.json --output json) || {
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -eq 3 ]; then
+              echo "$GATE_JSON"
+              echo "::warning::Publish gate denied: retaining last-known-good deployment"
+              echo "verdict=deny" >> "$GITHUB_OUTPUT"
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Publish gate failed (exit $EXIT_CODE): $GATE_JSON"
+            exit 1
+          }
+          echo "$GATE_JSON"
+          VERDICT=$(echo "$GATE_JSON" | jq -r '.verdict')
+          echo "Gate verdict: $VERDICT"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          if [ "$VERDICT" = "allow" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          elif [ "$VERDICT" = "skip-identical" ]; then
+            # Identical content: skip the deploy (quiesce the pipeline).
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
           else
-            # Zero stories and never a real snapshot: publish the clearly-
-            # labelled empty state ("No stories published yet").
-            DEPLOY=true
+            echo "::error::Unexpected gate verdict: $VERDICT"
+            exit 1
           fi
-          echo "deploy=$DEPLOY" >> "$GITHUB_OUTPUT"
 
       # Retention export (issue #120 / HS-065): runs after ingest + export
       # (all DB reads) and BEFORE the commit step so the exported package
@@ -229,7 +234,7 @@ jobs:
           # publish decision is deploy=true (so a zero-story export with a prior
           # real snapshot does not clobber the last-good committed snapshot).
           git add web/data/heartbeat.json web/data/feeds.json
-          if [ "${{ steps.publish-decision.outputs.deploy }}" = "true" ]; then
+          if [ "${{ steps.publish-gate.outputs.deploy }}" = "true" ]; then
             git add web/data/homepage.json
           fi
           CHANGED_DATA=0
@@ -407,11 +412,11 @@ jobs:
           if-no-files-found: ignore
 
       - name: Configure GitHub Pages
-        if: inputs.publish && steps.publish-decision.outputs.deploy == 'true'
+        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: inputs.publish && steps.publish-decision.outputs.deploy == 'true'
+        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
@@ -425,9 +430,59 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      contents: write
+      pull-requests: write
     environment:
       name: github-pages
     steps:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v5
+
+      # Issue #229 / AC-2: after a successful deploy, stamp the deployed
+      # manifest so subsequent gate evaluations compare against the actual
+      # deployed snapshot (not the committed one). The manifest is committed
+      # via a short-lived PR (same mechanism as site-data).
+      - name: Stamp deployed manifest
+        id: stamp-manifest
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
+        run: |
+          set -euo pipefail
+          echo "Stamping deployed manifest..."
+          COMMIT_SHA=$(git rev-parse HEAD)
+          ./dist/huddlescope publish stamp --candidate web/data/homepage.json --commit "$COMMIT_SHA" > web/data/deployed.json
+          echo "Manifest: $(cat web/data/deployed.json)"
+          git config user.name "HuddleScope CI"
+          git config user.email "ci@huddlescope.github.io"
+          git add web/data/deployed.json
+          if [ -z "$(git status --porcelain web/data/deployed.json)" ]; then
+            echo "Manifest unchanged, skipping commit"
+            exit 0
+          fi
+          BRANCH="ci/manifest-$(git rev-parse --short HEAD)-$$"
+          git checkout -b "$BRANCH"
+          git commit -m "Update deployed manifest (issue #229)"
+          git push origin "$BRANCH"
+          PR_URL=$(gh pr create --title "Update deployed manifest" --body "Automated manifest stamp by the Refresh news workflow after a successful Pages deploy." </dev/null)
+          PR_NUM="${PR_URL##*/}"
+          echo "Opened manifest PR $PR_NUM; waiting for the Build check..."
+          # Wait for the Build check to pass, then merge.
+          for _ in $(seq 1 60); do
+            SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
+            DATA=$(gh api repos/"$GITHUB_REPOSITORY"/commits/"$SHA"/check-runs)
+            COUNT=$(printf '%s' "$DATA" | jq '.total_count')
+            INCOMPLETE=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status != "completed")] | length')
+            FAILED=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::error::Manifest PR $PR_NUM has failing checks"
+              exit 1
+            fi
+            if [ "$COUNT" -ge 1 ] && [ "$INCOMPLETE" -eq 0 ]; then
+              break
+            fi
+            sleep 30
+          done
+          gh pr merge "$PR_NUM" --squash --delete-branch
+          echo "Manifest committed and merged via PR $PR_NUM"

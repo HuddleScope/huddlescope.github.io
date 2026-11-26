@@ -55,6 +55,7 @@ Available Commands:
   export      Export stories to Hugo site (generate homepage.json and story pages)
   heartbeat   Check heartbeat health and staleness
   retention   Run retention: export expiring rows to a package, archive, restore
+  publish     Publish gate and manifest operations (offline, no DB)
   config      Validate and display configuration
   version     Show CLI version information
 
@@ -95,6 +96,7 @@ For more information, visit https://huddlescope.github.io/
 	rootCmd.AddCommand(NewHeartbeatCommand(d))
 	rootCmd.AddCommand(NewRetentionCommand(d))
 	rootCmd.AddCommand(NewConfigCommand(d))
+	rootCmd.AddCommand(NewPublishCommand(d))
 	rootCmd.AddCommand(NewVersionCommand(d))
 
 	return rootCmd

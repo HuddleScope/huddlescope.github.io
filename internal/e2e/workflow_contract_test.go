@@ -194,17 +194,40 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		t.Error("export step must invoke 'export run'")
 	}
 
-	// --- Build job: publish-decision step gated on export success (AC-4) ---
-	publishDecisionStep := findStepByID(t, wf, "build", "publish-decision")
-	pdIf, ok := publishDecisionStep["if"].(string)
+	// --- Build job: publish-gate step gated on export success (AC-2, AC-3) ---
+	// Issue #229: the gate compares against the deployed manifest (not HEAD).
+	publishGateStep := findStepByID(t, wf, "build", "publish-gate")
+	gateIf, ok := publishGateStep["if"].(string)
 	if !ok {
-		t.Fatal("publish-decision step must have an if condition")
+		t.Fatal("publish-gate step must have an if condition")
 	}
-	if !strings.Contains(pdIf, "steps.export.conclusion == 'success'") {
-		t.Errorf("publish-decision if = %q, must gate on export success", pdIf)
+	if !strings.Contains(gateIf, "steps.export.conclusion == 'success'") {
+		t.Errorf("publish-gate if = %q, must gate on export success", gateIf)
 	}
-	if hasAlwaysIf(publishDecisionStep) {
-		t.Error("publish-decision step must NOT use if: always()")
+	if hasAlwaysIf(publishGateStep) {
+		t.Error("publish-gate step must NOT use if: always()")
+	}
+	gateScript := stepRunScript(publishGateStep)
+	if !strings.Contains(gateScript, "publish gate") {
+		t.Error("publish-gate step must invoke 'publish gate'")
+	}
+	if !strings.Contains(gateScript, "web/data/deployed.json") {
+		t.Error("publish-gate step must compare against web/data/deployed.json (not git show HEAD:)")
+	}
+
+	// --- Concurrency: shared group + cancel-in-progress: false (AC-3) ---
+	// Issue #229: the shared concurrency group serializes all Pages deploys
+	// across workflows; cancel-in-progress: false prevents cancellation
+	// inside the publish window.
+	concurrency, ok := wf["concurrency"].(map[string]any)
+	if !ok {
+		t.Fatal("refresh-news.yml: missing concurrency block")
+	}
+	if group, _ := concurrency["group"].(string); group != "huddlescope-pages-deploy" {
+		t.Errorf("concurrency.group = %q, want huddlescope-pages-deploy (shared with site.yml)", group)
+	}
+	if cancel, _ := concurrency["cancel-in-progress"].(bool); cancel != false {
+		t.Error("concurrency.cancel-in-progress must be false (AC-3: no cancel during publish)")
 	}
 
 	// --- Build job: exactly one commit+push step (AC-7) ---
@@ -471,5 +494,128 @@ func TestWorkflowContract_HeartbeatCheck_Structure(t *testing.T) {
 	}
 	if _, ok := env["TURSO_AUTH_TOKEN"]; !ok {
 		t.Error("heartbeat-check.yml: check job env must include TURSO_AUTH_TOKEN")
+	}
+}
+
+// TestWorkflowContract_Site_PublishGate validates the publish gate invariants
+// in site.yml (issue #229 / AC-2, AC-3).
+func TestWorkflowContract_Site_PublishGate(t *testing.T) {
+	t.Parallel()
+
+	wfPath := filepath.Join("..", "..", ".github", "workflows", "site.yml")
+	wf := loadWorkflow(t, wfPath)
+
+	// --- Concurrency: shared group + cancel-in-progress: false (AC-3) ---
+	concurrency, ok := wf["concurrency"].(map[string]any)
+	if !ok {
+		t.Fatal("site.yml: missing concurrency block")
+	}
+	if group, _ := concurrency["group"].(string); group != "huddlescope-pages-deploy" {
+		t.Errorf("site.yml concurrency.group = %q, want huddlescope-pages-deploy (shared with refresh-news.yml)", group)
+	}
+	if cancel, _ := concurrency["cancel-in-progress"].(bool); cancel != false {
+		t.Error("site.yml concurrency.cancel-in-progress must be false")
+	}
+
+	// --- Deploy job: pinned ref (AC-3) ---
+	jobs := strMap(t, wf["jobs"])
+	deployJob, ok := jobs["deploy"].(map[string]any)
+	if !ok {
+		t.Fatal("site.yml: missing deploy job")
+	}
+	steps := deployJob["steps"].([]any)
+	// Find the checkout step.
+	var checkoutStep map[string]any
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := step["name"].(string); name == "Checkout" {
+			checkoutStep = step
+			break
+		}
+	}
+	if checkoutStep == nil {
+		t.Fatal("site.yml deploy job: missing Checkout step")
+	}
+	withBlock, ok := checkoutStep["with"].(map[string]any)
+	if !ok {
+		t.Fatal("site.yml deploy job: Checkout step missing with block")
+	}
+	if ref, _ := withBlock["ref"].(string); !strings.Contains(ref, "workflow_run.head_sha") {
+		t.Errorf("site.yml deploy job: Checkout ref = %q, must pin to workflow_run.head_sha", ref)
+	}
+	if fetchDepth, ok := withBlock["fetch-depth"].(int); !ok || fetchDepth != 0 {
+		t.Error("site.yml deploy job: Checkout must use fetch-depth: 0 (for git archive restore)")
+	}
+
+	// --- Deploy job: publish gate step (AC-2) ---
+	var gateStep map[string]any
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := step["id"].(string); id == "publish-gate" {
+			gateStep = step
+			break
+		}
+	}
+	if gateStep == nil {
+		t.Fatal("site.yml deploy job: missing publish-gate step")
+	}
+	gateScript := stepRunScript(gateStep)
+	if !strings.Contains(gateScript, "publish gate") {
+		t.Error("site.yml publish-gate step must invoke 'publish gate'")
+	}
+	if !strings.Contains(gateScript, "web/data/deployed.json") {
+		t.Error("site.yml publish-gate step must compare against web/data/deployed.json")
+	}
+	// On deny, the gate must restore last-deployed data via git archive.
+	if !strings.Contains(gateScript, "git archive") {
+		t.Error("site.yml publish-gate step must restore last-deployed data via git archive on deny")
+	}
+
+	// --- Deploy job: skip-identical quiescence (AC-3) ---
+	// Deploy/build steps must be gated on verdict != 'skip-identical'.
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		uses, _ := step["uses"].(string)
+		if strings.Contains(uses, "deploy-pages") || strings.Contains(uses, "upload-pages-artifact") || strings.Contains(uses, "configure-pages") {
+			ifCond, _ := step["if"].(string)
+			if !strings.Contains(ifCond, "skip-identical") {
+				t.Errorf("site.yml Pages step %q must be gated on verdict != 'skip-identical'", uses)
+			}
+		}
+		// Hugo build must also be gated.
+		if name, _ := step["name"].(string); name == "Build Hugo site" {
+			ifCond, _ := step["if"].(string)
+			if !strings.Contains(ifCond, "skip-identical") {
+				t.Error("site.yml Build Hugo site step must be gated on verdict != 'skip-identical'")
+			}
+		}
+	}
+
+	// --- Deploy job: demo marker gate kept (AC-5) ---
+	var foundMarkerGate bool
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := step["name"].(string); name == "Verify no demo markers" {
+			foundMarkerGate = true
+			run := stepRunScript(step)
+			if !strings.Contains(run, "MARKERS") {
+				t.Error("site.yml demo marker gate must define MARKERS")
+			}
+		}
+	}
+	if !foundMarkerGate {
+		t.Error("site.yml: missing 'Verify no demo markers' step (AC-5)")
 	}
 }
