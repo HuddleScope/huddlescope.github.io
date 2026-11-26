@@ -1,0 +1,118 @@
+# GitHub Actions workflow to deploy the Cloudflare cron Worker
+# (scheduler/ — `huddlescope-dispatcher`). See docs/worker-deployment.md
+# ("Deployment via GitHub Actions") for the operator runbook.
+#
+# Security properties (issue #227 AC-2/AC-5/AC-7):
+# - ONLY trigger is workflow_dispatch (no push/PR-triggered deploys).
+# - validate_only defaults to true: a careless manual run never deploys.
+# - Least privilege: contents: read only (no actions/id-token/packages).
+# - Any failing step fails the run; a failed deploy never claims success.
+# - Secrets are referenced by name only and never printed.
+#
+# Required repository secrets (owner: repo admin; account-scoped,
+# "Workers Scripts — Edit" scope only):
+#   CLOUDFLARE_API_TOKEN   — Cloudflare API token (Workers Scripts: Edit)
+#   CLOUDFLARE_ACCOUNT_ID  — Cloudflare account ID
+#
+# The worker's GITHUB_TOKEN secret is NOT created or touched here: it is
+# provisioned once, manually, via `wrangler secret put GITHUB_TOKEN` during
+# first-time bootstrap (see docs/worker-deployment.md). This workflow only
+# verifies its presence.
+
+name: Deploy Cloudflare Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      validate_only:
+        description: >
+          true (default): run all checks and a dry-run bundle without
+          uploading. false: deploy after the checks pass.
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-cloudflare-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Validate and deploy (or validate only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Fail fast if Cloudflare secrets are missing
+        shell: bash
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository secrets:$missing"
+            echo "::error::Set them in repo Settings → Secrets and variables → Actions."
+            echo "::error::Create the token with account scope and 'Workers Scripts — Edit' permission only (docs/worker-deployment.md)."
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies (npm ci)
+        working-directory: scheduler
+        run: npm ci
+
+      - name: Run worker unit tests
+        working-directory: scheduler
+        run: npm test
+
+      - name: Verify Cloudflare authentication (wrangler whoami)
+        working-directory: scheduler
+        run: npx wrangler whoami
+
+      - name: Verify worker secret GITHUB_TOKEN exists
+        # Verifies presence only; never prints secret values.
+        working-directory: scheduler
+        run: |
+          npx wrangler secret list | grep -q 'GITHUB_TOKEN' \
+            || { echo "::error::Worker secret GITHUB_TOKEN is not set. Provision it once, manually: cd scheduler && npx wrangler secret put GITHUB_TOKEN (docs/worker-deployment.md)."; exit 1; }
+
+      - name: Validate worker bundle and config (wrangler deploy --dry-run)
+        working-directory: scheduler
+        run: npx wrangler deploy --dry-run
+
+      - name: Deploy worker
+        if: ${{ !inputs.validate_only }}
+        working-directory: scheduler
+        run: |
+          set -euo pipefail
+          out="$(npx wrangler deploy)"
+          echo "$out"
+          # Parse the deployed workers.dev subdomain for the smoke check.
+          subdomain="$(echo "$out" | grep -oE 'https://huddlescope-dispatcher\.[a-z0-9-]+\.workers\.dev' | head -n1 | sed -E 's#https://huddlescope-dispatcher\.##; s#\.workers\.dev##')"
+          if [ -z "$subdomain" ]; then
+            echo "::error::Could not parse the deployed workers.dev URL from wrangler output."
+            exit 1
+          fi
+          # Post-deploy smoke: /ping must answer with hasToken: true.
+          ping="$(curl -fsS "https://huddlescope-dispatcher.${subdomain}.workers.dev/ping")"
+          echo "$ping"
+          echo "$ping" | grep -q '"hasToken":true' \
+            || { echo "::error::Post-deploy /ping smoke check failed (expected hasToken:true)."; exit 1; }
+          echo "Post-deploy smoke check passed."
+
+      - name: Validate-only summary
+        if: ${{ inputs.validate_only }}
+        run: |
+          echo "Validation-only run: all checks passed; no deployment was performed."
+          echo "To deploy, re-run this workflow with validate_only set to false."
