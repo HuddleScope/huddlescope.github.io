@@ -762,3 +762,134 @@ func TestWorkflowContract_Site_PublishGate(t *testing.T) {
 		t.Error("site.yml: missing 'Verify no demo markers' step (AC-5)")
 	}
 }
+
+// TestWorkflowContract_RefreshNews_VerifyHTML (issue #250 / PUB-04 AC6, R7):
+// refresh-news.yml must have a verify-html step that fails closed, is ordered
+// after make-site and before Pages uploads, and the manifest put must pass
+// new v2 flags.
+func TestWorkflowContract_RefreshNews_VerifyHTML(t *testing.T) {
+	t.Parallel()
+	wf := loadWorkflow(t, filepath.Join("..", "..", ".github", "workflows", "refresh-news.yml"))
+
+	// Find the verify-html step in the build job.
+	verifyStep := findStepByID(t, wf, "build", "verify-html")
+	if verifyStep == nil {
+		t.Fatal("refresh-news.yml: build job must have a step with id 'verify-html' (issue #250)")
+	}
+	// verify-html must fail closed (no continue-on-error).
+	if coe, ok := verifyStep["continue-on-error"].(bool); ok && coe {
+		t.Error("verify-html step must NOT have continue-on-error: true (it must fail closed)")
+	}
+
+	// The manifest put must pass new v2 flags.
+	putStep := findStepByID(t, wf, "deploy", "stamp-manifest")
+	if putStep == nil {
+		t.Fatal("refresh-news.yml: deploy job must have a step with id 'stamp-manifest'")
+	}
+	runBlock, _ := putStep["run"].(string)
+	if !strings.Contains(runBlock, "--run-id") {
+		t.Error("manifest put must pass --run-id (issue #250)")
+	}
+	if !strings.Contains(runBlock, "--source-commit") {
+		t.Error("manifest put must pass --source-commit (issue #250)")
+	}
+
+	// A report upload step must be present in the build job.
+	jobs := strMap(t, wf["jobs"])
+	buildJob, ok := jobs["build"].(map[string]any)
+	if !ok {
+		t.Fatal("refresh-news.yml: missing build job")
+	}
+	steps, _ := buildJob["steps"].([]any)
+	var reportUploadFound bool
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := step["name"].(string)
+		uses, _ := step["uses"].(string)
+		if strings.Contains(uses, "upload-artifact") &&
+			(strings.Contains(name, "publish diagnostic") || strings.Contains(name, "report")) {
+			reportUploadFound = true
+			break
+		}
+	}
+	if !reportUploadFound {
+		t.Error("refresh-news.yml: build job must have a publish diagnostic report upload step (issue #250)")
+	}
+
+	// Concurrency invariants retained.
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "refresh-news.yml"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if !strings.Contains(string(raw), "cancel-in-progress: false") {
+		t.Error("refresh-news.yml: concurrency group must retain cancel-in-progress: false")
+	}
+}
+
+// TestWorkflowContract_Site_VerifyHTML (issue #250 / PUB-04 AC2, AC6, R7):
+// site.yml must have a verify-html step that fails closed, the gate must set
+// a deploy output (skip-identical quiesces), and the Pages steps must gate on
+// the deploy output.
+func TestWorkflowContract_Site_VerifyHTML(t *testing.T) {
+	t.Parallel()
+	wf := loadWorkflow(t, filepath.Join("..", "..", ".github", "workflows", "site.yml"))
+
+	// Find the verify-html step in the deploy job.
+	verifyStep := findStepByID(t, wf, "deploy", "verify-html")
+	if verifyStep == nil {
+		t.Fatal("site.yml: deploy job must have a step with id 'verify-html' (issue #250)")
+	}
+	if coe, ok := verifyStep["continue-on-error"].(bool); ok && coe {
+		t.Error("site.yml verify-html must NOT have continue-on-error: true")
+	}
+
+	// The gate must set a deploy output.
+	gateStep := findStepByID(t, wf, "deploy", "publish-gate")
+	if gateStep == nil {
+		t.Fatal("site.yml: deploy job must have a step with id 'publish-gate'")
+	}
+	gateRun, _ := gateStep["run"].(string)
+	if !strings.Contains(gateRun, "deploy=true") || !strings.Contains(gateRun, "deploy=false") {
+		t.Error("site.yml publish-gate must set deploy=true/false output (issue #250)")
+	}
+	if !strings.Contains(gateRun, "skip-identical") {
+		t.Error("site.yml publish-gate must handle skip-identical (quiesce deploy)")
+	}
+
+	// The Pages steps must gate on the deploy output.
+	jobs := strMap(t, wf["jobs"])
+	deployJob, ok := jobs["deploy"].(map[string]any)
+	if !ok {
+		t.Fatal("site.yml: missing deploy job")
+	}
+	steps, _ := deployJob["steps"].([]any)
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := step["name"].(string)
+		if strings.Contains(name, "upload artifact to github pages") || strings.Contains(name, "configure github pages") {
+			ifCond, _ := step["if"].(string)
+			if !strings.Contains(ifCond, "publish-gate.outputs.deploy") {
+				t.Errorf("site.yml %q must gate on publish-gate.outputs.deploy (issue #250)", name)
+			}
+		}
+	}
+
+	// The manifest put must pass new v2 flags.
+	putStep := findStepByNameIn(t, wf, "deploy", "Record deployed manifest in store")
+	if putStep == nil {
+		t.Fatal("site.yml: deploy job must have 'Record deployed manifest in store' step")
+	}
+	putRun, _ := putStep["run"].(string)
+	if !strings.Contains(putRun, "--run-id") {
+		t.Error("site.yml manifest put must pass --run-id (issue #250)")
+	}
+	if !strings.Contains(putRun, "--source-commit") {
+		t.Error("site.yml manifest put must pass --source-commit (issue #250)")
+	}
+}

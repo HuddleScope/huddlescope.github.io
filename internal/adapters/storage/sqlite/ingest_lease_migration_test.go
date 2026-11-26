@@ -18,8 +18,8 @@ func TestMigrate009CreatesIngestLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if len(versions) != 11 {
-		t.Fatalf("expected 11 migrations, got %d: %v", len(versions), versions)
+	if len(versions) != 12 {
+		t.Fatalf("expected 12 migrations, got %d: %v", len(versions), versions)
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
@@ -148,11 +148,11 @@ func TestMigrate009CarryOver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrateDB: %v", err)
 	}
-	// We expect migrations 9, 10, 11 applied (009 is under test; 010/011 are additive).
-	if len(versions) != 3 {
-		t.Errorf("expected migrations [9 10 11] applied, got %d: %v", len(versions), versions)
+	// We expect migrations 9, 10, 11, 12 applied (009 is under test; 010/011/012 are additive).
+	if len(versions) != 4 {
+		t.Errorf("expected migrations [9 10 11 12] applied, got %d: %v", len(versions), versions)
 	}
-	wantVersions := map[int]bool{9: true, 10: true, 11: true}
+	wantVersions := map[int]bool{9: true, 10: true, 11: true, 12: true}
 	for _, v := range versions {
 		if !wantVersions[v] {
 			t.Errorf("unexpected migration version applied: %d", v)

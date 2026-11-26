@@ -997,3 +997,106 @@ Because the rebuild is forward-only:
 
 Remote coordination is **database-only** (no local files/flock), per the issue.
 Writes are assumed to hit the single Turso primary node.
+
+## Publication safety contract (issue #250 / PUB-04)
+
+The last-known-good Pages deployment is protected by a multi-layer safety
+contract. Every failure mode is fail-closed: the live site is never
+downgraded, zeroed, or contaminated.
+
+### Layers of protection
+
+1. **Publish gate** (`publish gate`): compares the candidate snapshot (JSON
+   export) against the deployed manifest. Denies a zero-over-N replacement, a
+   stale candidate (older `generatedAt`), or a malformed manifest. Exits 0
+   (allow/skip-identical) or 3 (deny).
+
+2. **Rendered-HTML verification** (`publish verify-html`): compares the
+   rendered `web/public/index.html` against the candidate and the stored
+   manifest. Catches a skeleton/zero-story render from a valid JSON export
+   (the #229 failure mode). Checks: story-card count ≥ minimum, freshness
+   label matches `generatedAt`, no demo markers. Exits 0 (pass) or 3 (deny).
+
+3. **Monotonic manifest stamp** (`publish manifest put`): never lowers the
+   stored manifest's `generatedAt`. A late/delayed run with an older candidate
+   is a no-op with a warning — never a regression. The put records v2 binding
+   fields (`snapshotId`, `lastIngestAt`, `sourceCommit`, `runId`) so a
+   deployment is traceable to the exact validated artifact.
+
+4. **Bootstrap policy** (`publish manifest bootstrap`): the explicit, audited
+   path for seeding the manifest on a fresh store. Refuses to override an
+   existing manifest without `--acknowledge-override` + a recorded reason.
+
+5. **Diagnostic report** (`publish report`): a structured, secret-free JSON
+   report aggregating the gate verdict, verify result, manifest, and run
+   identity. Uploaded as a diagnostic artifact (7-day retention). Never
+   contains a DSN, token, or credential.
+
+### Failure modes (all fail closed)
+
+| Failure | Protection | Outcome |
+|---|---|---|
+| Empty/zero export (#229) | Gate deny | Build fails, last-good preserved |
+| Stale candidate (older timestamp) | Gate deny | Build fails, last-good preserved |
+| Skeleton render (0 cards, valid JSON) | verify-html deny | Build fails, last-good preserved |
+| Demo marker leak | verify-html deny + demo marker check | Build fails, last-good preserved |
+| Late/delayed run (older generatedAt) | Monotonic stamp skip | Put is a no-op; stored manifest unchanged |
+| Malformed manifest | Gate/verify fail closed | Build fails, last-good preserved |
+| Frontend-only merge (skip-identical) | Gate skip-identical → deploy=false | No redundant Pages write |
+| Fresh store (no manifest) | Bootstrap policy | Explicit audited seed |
+| Unknown manifest version | Validate() fail closed | Build fails, last-good preserved |
+
+### Rollout (v1 → v2 manifest)
+
+The manifest is upgraded from v1 to v2 additively:
+
+- **v1** (existing): `version`, `deployedAt`, `generatedAt`, `commit`,
+  `contentSha256`, `stories`, `latest`.
+- **v2** (new, issue #250): adds `snapshotId`, `lastIngestAt`, `sourceCommit`,
+  `runId`, `overrideReason`.
+
+The gate accepts v1 ∪ v2. The sqlite migration 012 adds the v2 columns
+(`ALTER TABLE ... ADD COLUMN`) without rewriting existing rows. A v1 row
+reads as v2 with empty binding fields. Rollback: removing the v2 flags from
+the workflow is safe (the columns persist with empty defaults).
+
+### Concurrency
+
+The `huddlescope-pages-deploy` concurrency group (shared by `refresh-news.yml`
+and `site.yml`) has `cancel-in-progress: false` — a new run waits for the
+in-flight deploy to finish, never cancels it. This prevents a concurrent
+deploy from overwriting the last-known-good content mid-upload.
+
+### Runbook: manual intervention
+
+To manually verify a deployed site:
+
+```bash
+# Read the deployed manifest from the durable store
+./dist/huddlescope publish manifest get --output json
+
+# Verify the rendered HTML against the candidate
+./dist/huddlescope publish verify-html \
+  --public web/public \
+  --candidate web/data/homepage.json \
+  --manifest web/data/deployed.json
+
+# Generate a diagnostic report
+./dist/huddlescope publish report \
+  --gate gate.json \
+  --verify verify.json \
+  --manifest web/data/deployed.json \
+  --run-id "$GITHUB_RUN_ID" \
+  --commit "$GITHUB_SHA"
+```
+
+To bootstrap a fresh store (initial deployment):
+
+```bash
+./dist/huddlescope publish manifest bootstrap \
+  --candidate web/data/homepage.json \
+  --commit "$COMMIT_SHA" \
+  --run-id "$RUN_ID" \
+  --acknowledge-override \
+  --override-reason "Initial deployment; no prior manifest exists"
+```

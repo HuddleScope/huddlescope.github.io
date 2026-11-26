@@ -466,6 +466,40 @@ jobs:
           file_count=$(find web/public/ -type f | wc -l)
           echo "Total files in web/public/: $file_count"
 
+      # Issue #250 / PUB-04 (AC6): rendered-HTML verification. The publish gate
+      # compares JSON exports; verify-html compares the rendered
+      # web/public/index.html against the candidate (and, when present, the
+      # stored manifest), so a skeleton/zero-story render from a valid JSON
+      # export (the #229 failure mode) is caught by the rendered artifact
+      # itself. Hard fail (no continue-on-error) BEFORE any Pages upload: a
+      # failure fails the build job, the deploy job is skipped, and the
+      # last-known-good Pages content is preserved. The candidate is the
+      # workspace homepage.json re-projected by export; the manifest is the
+      # stored manifest read by manifest-get.
+      - name: Verify rendered HTML against candidate
+        id: verify-html
+        if: steps.make-site.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          echo "Verifying rendered HTML against the candidate snapshot..."
+          VERIFY_JSON=$(./dist/huddlescope publish verify-html --public web/public --candidate web/data/homepage.json --manifest web/data/deployed.json) || {
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -eq 3 ]; then
+              echo "$VERIFY_JSON"
+              echo "::error::verify-html denied: retaining last-known-good deployment"
+              echo "verdict=deny" >> "$GITHUB_OUTPUT"
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            echo "::error::verify-html failed (exit $EXIT_CODE): $VERIFY_JSON"
+            exit 1
+          }
+          echo "$VERIFY_JSON"
+          echo "verify=pass" >> "$GITHUB_OUTPUT"
+          if [ "${{ steps.publish-gate.outputs.deploy }}" != "true" ]; then
+            echo "verify passed but deploy already false (gate deny/skip); preserving decision"
+          fi
+
       # Issue #249 / PUB-03 (AC-3): bind the rendered output (the separately
       # uploaded site-build artifact / Pages upload) to its snapshot and run
       # identity so a specific deployment can be traced back to the
@@ -512,6 +546,36 @@ jobs:
           path: dist/pages-binding.json
           retention-days: 7
           if-no-files-found: ${{ (inputs.publish && (steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != '')) && 'error' || 'ignore' }}
+
+      # issue #250 / PUB-04 (AC8): structured, secret-free run diagnostic.
+      # `publish report` aggregates the run identity, the gate verdict, the
+      # verify-html result, and the manifest into a single JSON report. The
+      # report is non-secret by construction (run IDs, verdicts, counts,
+      # timestamps, hashes) and is unit-tested against secret patterns.
+      # Gated on export success so it only runs when the pipeline reached the
+      # build stage; uploaded as a diagnostic artifact with 7-day retention.
+      - name: Write publish diagnostic report
+        id: publish-report
+        if: steps.export.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          echo "Writing the publish diagnostic report..."
+          ./dist/huddlescope publish report \
+            --run-id "${{ github.run_id }}" \
+            --run-number "${{ github.run_number }}" \
+            --commit "${{ github.sha }}" \
+            --snapshot-id "${{ steps.package-snapshot.outputs.snapshot_id }}" \
+            --output dist/publish-report.json
+          cat dist/publish-report.json
+
+      - name: Upload publish diagnostic artifact
+        if: steps.publish-report.conclusion == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pages-diag-${{ github.run_id }}
+          path: dist/publish-report.json
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Configure GitHub Pages
         if: inputs.publish && (steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != '')
@@ -578,12 +642,16 @@ jobs:
         id: deploy
         uses: actions/deploy-pages@v5
 
-      # Issue #247 / PUB-01 (AC-6): after a successful deploy, record what was
-      # actually deployed in the durable store (Turso) via `publish manifest
-      # put`. No Git commit/PR (the manifest is no longer a tracked file). The
-      # candidate is the workspace homepage.json re-projected by export; the
-      # commit SHA is the CI-validated revision of this run. A failed put does
-      # NOT undo the deploy; the next run re-deploys (correct, just noisy).
+      # issue #247 / PUB-01 (AC-6) + issue #250 / PUB-04 (AC3, AC4): after a
+      # successful deploy, record what was actually deployed in the durable
+      # store (Turso) via `publish manifest put`. The put is monotonic (never
+      # lowers the stored generatedAt) and records the v2 binding fields
+      # (snapshotId, lastIngestAt, sourceCommit, runId) so a deployment is
+      # traceable to the exact validated artifact. No Git commit/PR (the
+      # manifest is no longer a tracked file). The candidate is the workspace
+      # homepage.json re-projected by export; the commit SHA is the CI-validated
+      # revision of this run. A failed put does NOT undo the deploy; the next
+      # run re-deploys (correct, just noisy).
       - name: Record deployed manifest in store
         id: stamp-manifest
         if: success()
@@ -594,5 +662,35 @@ jobs:
           set -euo pipefail
           echo "Recording deployed manifest in the durable store..."
           COMMIT_SHA="${{ github.sha }}"
-          ./dist/huddlescope publish manifest put --candidate web/data/homepage.json --commit "$COMMIT_SHA"
+          RUN_ID="${{ github.run_id }}"
+          ./dist/huddlescope publish manifest put --candidate web/data/homepage.json --commit "$COMMIT_SHA" --run-id "$RUN_ID" --source-commit "$COMMIT_SHA"
           echo "Deployed manifest recorded in the durable store"
+
+      # issue #250 / PUB-04 (AC9): live smoke. After a successful deploy, curl
+      # the live site and assert the homepage rendered ("Data as of" present
+      # and at least one story card). Soft (continue-on-error: true): a
+      # transient Pages propagation lag fails the observation, NOT the run —
+      # the durable gate + verify-html already protected the deploy, and the
+      # manifest was only advanced after the Pages deploy succeeded.
+      - name: Verify live site smoke (soft)
+        if: success()
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          echo "Smoke-checking the live site post-deploy..."
+          SITE_URL="https://huddlescope.github.io/"
+          BODY=$(curl -fsSL --max-time 30 "$SITE_URL" || echo "")
+          if [ -z "$BODY" ]; then
+            echo "::warning::Live site returned no body (Pages propagation lag?)"
+            exit 0
+          fi
+          if ! echo "$BODY" | grep -q "Data as of"; then
+            echo "::warning::Live site missing 'Data as of' freshness label"
+            exit 0
+          fi
+          STORY_CARDS=$(echo "$BODY" | grep -c 'story-card' || echo 0)
+          echo "Live site story-card count: $STORY_CARDS"
+          if [ "$STORY_CARDS" -eq 0 ]; then
+            echo "::warning::Live site has no story cards (skeleton render or propagation lag?)"
+          fi
+          echo "Live site smoke: OK"

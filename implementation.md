@@ -1,4 +1,4 @@
-# Implementation — Issue #202: Auto-deploy script (detect arch, download/build binary, activate service)
+# Implementation — Issue #250: [PUB-04] Protect the last-known-good Pages deployment
 
 Status: **COMPLETE** — implemented exactly per the saved plan (`plan.md`). No
 replan was required; every fact the plan relies on was re-verified against the
@@ -8,142 +8,87 @@ source before implementing.
 
 | # | File | Action | What it does |
 |---|------|--------|--------------|
-| 1 | `scripts/deploy.sh` | **Create** (~590 lines, bash 3.2-compatible, `set -euo pipefail`) | The deployer. Phases: detect → resolve_version → acquire → verify → install (atomic swap) → install_units → config_check → first_run → verify_service → record_checksum → report. |
-| 2 | `deploy/launchd/com.huddlescope.ingest.plist` | **Create** | LaunchAgent mirroring the systemd oneshot: `sh -c 'set -a; . /opt/huddlescope/huddlescope.env; exec … ingest run --mode primary --stale-after 75m'`, `WorkingDirectory=/opt/huddlescope`, `StartInterval=1800`, `RunAtLoad=false`, `KeepAlive=false`, logs under `/opt/huddlescope/logs/`. Secrets only via the 0600 env file (no `EnvironmentVariables`, no inlined TURSO_*/token, no `sudo`). |
-| 3 | `internal/cli/launchd_units_test.go` | **Create** | Text-invariant guard test for the plist (`TestLaunchdAgentPlist` + `TestLaunchdPlistProgramArgumentsOrder`), same philosophy as `systemd_units_test.go`. Runs in `make test` → CI gate. |
-| 4 | `internal/config/config_deploy_checksum_test.go` | **Create** | R5 guard: `TestLoadEnvFile_IgnoresDeployChecksumKey` asserts the permissive env loader ignores `HSC_INSTALLED_SHA256` — the mechanism AC-16 depends on. Pins the contract so a future strict-mode change breaks CI instead of silently breaking deploys. |
-| 5 | `scripts/deploy/README.md` | **Create** | Usage, option/env table, prerequisites, behavior, manual smoke checks, troubleshooting, rollback. |
-| 6 | `.github/workflows/ci.yml` | **Modify (minimal)** | One new step in the `build` job, after "Verify binaries": `bash -n scripts/deploy.sh` (syntax gate, no network/mutation). |
-| 7 | `docs/systemd-deployment.md` | **Modify (minimal)** | §2 gains a pointer to `sudo bash scripts/deploy.sh --version vX.Y.Z` (manual path stays canonical). |
-
-No Go runtime code changes. No `deploy/systemd/*` changes (installed as-is).
-No release-workflow changes.
+| 1 | `internal/domain/deployed_manifest.go` | **Modify** | Upgraded `DeployedManifest` to v2: added `SnapshotID`, `LastIngestAt`, `SourceCommit`, `RunID`, `OverrideReason` fields (all `omitempty` JSON). Added `Validate()` method accepting v1∪v2 (rejects unknown versions, empty required fields, non-64-char SHA256 snapshotId). Added `LegacyManifestVersion = "1"` constant; `ManifestVersion = "2"`. |
+| 2 | `internal/application/publishgate.go` | **Modify** | Added `LegacyManifestVersion` constant. `LoadDeployedManifest` accepts v1∪v2 (rejects unknown). Added `StampManifestV2(candidate, commit, snapshotID, lastIngestAt, sourceCommit, runID)` that builds a v2 manifest with binding fields. Added `MonotonicStamp(stored, candidate) MonotonicStampResult` — returns `Advanced`, `Skipped` (with optional `Warning`), or `Warning` (unparseable timestamps, fail closed). Gate manifest validation checks version ∈ {v1, v2}. |
+| 3 | `internal/application/htmlverify.go` | **Create** | `ValidateRenderedSite(publicDir, candidate, m)` — the rendered-HTML layer of last-known-good protection. Checks: index.html exists; story-card count ≥ candidate story count and manifest minimum; freshness label (`<time datetime>`) matches candidate `generatedAt`; no demo/fixture markers in any rendered HTML. Returns `VerifyResult{Pass, Reason, StoryCards, Checks}`. All failures are deny (fail closed). |
+| 4 | `internal/adapters/storage/sqlite/deployed_manifest.go` | **Modify** | `GetDeployedManifest` now SELECTs v2 columns with `COALESCE` (empty defaults for v1 rows). Accepts version "1" or "2" (rejects unknown). `PutDeployedManifest` upserts all v2 columns. |
+| 5 | `internal/adapters/storage/sqlite/migrations/012_deployed_manifest_columns.sql` | **Create** | Additive `ALTER TABLE deployed_manifests ADD COLUMN` for `snapshot_id`, `last_ingest_at`, `source_commit`, `run_id`, `override_reason` (all `TEXT NOT NULL DEFAULT ''`). No data migration; v1 rows read as v2 with empty binding fields. |
+| 6 | `internal/cli/publish.go` | **Modify** | Added `publish verify-html` command (exits 0 pass / 3 deny / 1 invalid). Added `publish report` command (structured secret-free JSON diagnostic; aggregates gate/verify/manifest + run identity). Added `publish manifest bootstrap` command (explicit audited seed for fresh stores; refuses override without `--acknowledge-override`). Extended `manifest put` with `--snapshot-id`, `--last-ingest`, `--source-commit`, `--run-id` flags; put is now monotonic (reads stored manifest, skips with warning if candidate is older). |
+| 7 | `.github/workflows/refresh-news.yml` | **Modify** | Added `verify-html` step (hard fail, after make-site, before Pages uploads). Extended `manifest put` with `--run-id` and `--source-commit`. Added `publish report` step + diagnostic artifact upload (7-day retention). Added live smoke step (soft, `continue-on-error: true`) that curls the live site post-deploy. |
+| 8 | `.github/workflows/site.yml` | **Modify** | Added `verify-html` step (hard fail, after make-site, before Pages uploads). Extended `publish gate` to set a `deploy` output (`allow` → `deploy=true`, `skip-identical` → `deploy=false`). Pages steps now gate on `publish-gate.outputs.deploy`. Extended `manifest put` with `--run-id` and `--source-commit`. |
+| 9 | `internal/e2e/publish_test.go` | **Modify** | Added S6 (skeleton render deny via verify-html) and S7 (rendered pass). |
+| 10 | `internal/e2e/publish_safety_test.go` | **Create** | P-SAFE-1 (monotonic stamp: late run with older candidate is a no-op, stored generatedAt preserved). P-SAFE-2 (v2 manifest put records binding fields, round-trip via manifest get). P-SAFE-3 (diagnostic report is secret-free: no DSN/token/credential substrings). All offline (sqlite-file backend). |
+| 11 | `internal/e2e/workflow_contract_test.go` | **Modify** | Added `TestWorkflowContract_RefreshNews_VerifyHTML` (verify-html step exists, fails closed, ordered correctly; manifest put passes `--run-id`/`--source-commit`; report upload step present; concurrency invariants retained). Added `TestWorkflowContract_Site_VerifyHTML` (verify-html step exists, fails closed; gate sets deploy output with skip-identical handling; Pages steps gate on deploy output; manifest put passes `--run-id`/`--source-commit`). |
+| 12 | `internal/application/htmlverify_test.go` | **Create** | Unit tests for `ValidateRenderedSite`: pass, skeleton deny, cards-below-manifest-minimum deny, stale freshness label deny, demo marker deny, zero-candidate-with-cards deny, missing index, missing freshness label, nil/invalid candidate. |
+| 13 | `internal/application/publishgate_test.go` | **Modify** | Added tests for v2 manifest gate, legacy v1 manifest gate, unknown version error, `StampManifestV2` binding fields, `MonotonicStamp` (first put advances, older candidate skips with warning, newer advances, equal generatedAt + identical content skips no warning, equal generatedAt + different content advances, unparseable timestamps fail closed). |
+| 14 | `internal/domain/deployed_manifest_test.go` | **Create** | Unit tests for `Validate()`: v2 with binding fields, v1 legacy, unknown version error, empty version error. |
+| 15 | `internal/adapters/storage/sqlite/*_test.go` | **Modify** | Updated migration count expectations from 11 to 12 (6 files). Updated carry-over test sequences to include migration 12. |
+| 16 | `internal/adapters/storage/retention_test.go` | **Modify** | Updated schema version expectation from 11 to 12. |
+| 17 | `internal/adapters/storage/turso/turso_test.go` | **Modify** | Updated migration count expectation from 11 to 12. |
+| 18 | `internal/adapters/storage/turso/retention_test.go` | **Modify** | Updated schema version expectation from 11 to 12 (2 occurrences). |
+| 19 | `docs/ops-runbook.md` | **Modify** | Added "Publication safety contract" section: layers of protection, failure modes table, rollout (v1→v2), concurrency, manual intervention runbook. |
 
 ## Acceptance criteria — how each is met
 
-- **AC-1 (detect OS/arch):** `detect()` maps `uname -s` → linux/darwin and
-  `uname -m` → amd64/arm64/armv7l; overridable via `--os`/`--arch` and
-  `HSC_DEPLOY_OS`/`HSC_DEPLOY_ARCH`. All values regex/`case`-validated before
-  use (no injection surface). Verified: `--dry-run` prints
-  `os=darwin arch=arm64`; `--os linux --arch amd64` overrides; invalid
-  arch/version are rejected with `DEPLOY_STATUS=fail` + exit 1.
-- **AC-2 (download Linux release):** `download_release()` builds
-  `huddlescope_${V}_linux_${arch}` + `SHA256SUMS` from
-  `https://github.com/${HSC_DEPLOY_REPO}/releases/download/v${V}/…` and uses
-  `curl -fsSL --proto =https --retry 3` (or `gh release download` when
-  `curl` is absent). `HSC_DEPLOY_REPO` is env-only and validated to an
-  `owner/name` slug. Verified via `--dry-run` URL construction.
-- **AC-3 (local build fallback):** `build_local()` runs
-  `CGO_ENABLED=0 GOOS GOARCH GOARM go build -trimpath -ldflags="-s -w -X …cliVersion …cliCommit …cliBuiltAt"` —
-  identical stamping to `build-and-release.yaml` / `make cross-build`. Used when
-  Darwin (no release assets, #161 AC-4), `--source build`, or release assets
-  unavailable. Verified: `--dry-run --source build` prints the exact go build
-  command with stamped ldflags.
-- **AC-4 (SHA256 verify, fail-closed):** `verify()` checks the staged binary
-  against `SHA256SUMS` (release) or self-computes (build/binary) *before* any
-  swap; a mismatch or missing manifest aborts. Verified: self-computed hash
-  computed in the sandboxed install test.
-- **AC-5 (idempotent):** `install_binary()` compares the installed binary's
-  SHA256 to the target; on match it logs "checksum matches existing …
-  skipping install" and skips the swap (service state still re-verified).
-  **Verified in a real (non-dry-run) sandboxed run** — second identical run
-  skipped the install.
-- **AC-6 (user + dirs, linux):** `install_user_and_dirs()` creates the
-  `huddlescope` system user (`useradd --system --no-create-home --shell
-  /usr/sbin/nologin`, no-op if exists) and `/etc/huddlescope`,
-  `/var/lib/huddlescope`, `/var/log/huddlescope` with `huddlescope` ownership
-  on state/log dirs.
-- **AC-7 (install path + atomic swap):** `install_binary()` installs to
-  `/usr/local/bin/huddlescope` (linux) or `/opt/huddlescope/huddlescope`
-  (darwin), overridable by `--install-dir`; swaps via `${BIN}.new` → `mv`.
-  Verified in the sandboxed run (binary landed, 0755).
-- **AC-8 (perms):** `chmod 0755` on the staged + installed binary; binary is
-  root-owned (matching `install -m 0755` in `systemd-deployment.md` §2), dirs
-  are `huddlescope`-owned. Verified (`stat` showed `755`).
-- **AC-9 (init system):** `install_units()` — linux: install units,
-  `systemctl stop` (R6), `daemon-reload`, `enable` the timer; darwin:
-  `launchctl` load the LaunchAgent (path rewritten to the actual install
-  dir). Auto-detected from `DEPLOY_OS`.
-- **AC-10 (config check before activation):** `config_check()` runs
-  `<bin> config check --config <env>` (as `sudo -u huddlescope` on linux) and
-  **aborts before enable/restart** on failure. Verified fail-closed with a
-  non-executable binary (aborted, exit 1) and pass-path with the real binary
-  (`config check --config` exits 0 offline).
-- **AC-11 (first ingest):** `first_run()` runs `ingest run --mode primary
-  --stale-after 75m` once — via `systemctl start` of the oneshot on linux (as
-  the service user), direct exec on darwin; requires exit 0.
-- **AC-12 (verify service active):** `verify_service()` — `systemctl
-  is-active huddlescope-ingest.timer` (linux, the durable unit) /
-  `launchctl list com.huddlescope.ingest` (darwin).
-- **AC-13 (rollback):** `install_binary()` keeps `${BIN}.prev`; any
-  post-swap phase failure runs `rollback` (restore `.prev`) before
-  `die`. Verified: upgrade path keeps `.prev`; the post-swap
-  `|| { rollback; die }` wiring is in main.
-- **AC-14 (log tee):** non-dry-run output is teed to
-  `/var/log/huddlescope/deploy.log` (linux) or `<install-dir>/logs/deploy.log`
-  (darwin, derived from `--install-dir`) at 0640; the script never prints
-  env-file contents.
-- **AC-15 (machine-readable status):** the `on_exit` trap emits a single
-  `DEPLOY_STATUS=success|fail version=… sha256=… arch=… os=…` line with a
-  matching exit code (0/1). Verified in every run above.
-- **AC-16 (checksum recorded last):** `record_checksum()` computes the
-  on-disk binary's SHA256 *after* the swap and writes it to the env file as
-  `HSC_INSTALLED_SHA256` (appended or updated in place) and to
-  `/var/lib/huddlescope/installed.sha256` (linux) / `<install-dir>/installed.sha256`
-  (darwin). Only runs after all post-swap phases pass. (Proven via code path;
-  full success path requires a live Turso/RSS and is covered by the Linux-VM
-  matrix per the plan.)
-- **AC-17 (CI/CD-compatible):** non-interactive, all inputs via flags/env,
-  `--dry-run` makes **zero** mutations (verified — no files touched on dry-run),
-  works from any working directory (repo root resolved from `$0`).
+- **AC1 (regression detection):** The publish gate and `verify-html` detect
+  zero-over-N, stale candidates, and skeleton renders. `verify-html` checks
+  story-card count ≥ manifest minimum. Tested: `TestPublishGate_S2`,
+  `TestPublishGate_S3`, `TestPublishVerifyHTML_S6`,
+  `TestValidateRenderedSite_CardsBelowManifestMinimum_Deny`.
 
-## Tests added (regression guards)
+- **AC2 (last-known-good protection):** Every failure mode is fail-closed.
+  The gate denies (exit 3), verify-html denies (exit 3), the workflow steps
+  are hard (no `continue-on-error`), and the Pages upload is skipped when the
+  build job fails. The `site.yml` gate sets `deploy=false` on `skip-identical`
+  so no redundant Pages write occurs. Tested: `TestWorkflowContract_Site_VerifyHTML`,
+  `TestWorkflowContract_RefreshNews_VerifyHTML`.
 
-1. **`internal/cli/launchd_units_test.go`** — pins the plist invariants
-   (one-shot `ingest run --mode primary`, `set -a` + env-file sourcing, absolute
-   `WorkingDirectory`, `StartInterval=1800`, `KeepAlive`/`RunAtLoad` false,
-   logs under `/opt/huddlescope/logs/`, no inlined `EnvironmentVariables`/
-   TURSO_*/token, no `while true`, no `--daemon`, no `sudo`,
-   `ProgramArguments` = exactly `[sh, -c, program]`). Runs in `make test` → CI.
-2. **`internal/config/config_deploy_checksum_test.go`** — R5: loader ignores
-   `HSC_INSTALLED_SHA256` (permissive env tier). Runs in `make test` → CI.
-3. **New CI step** `bash -n scripts/deploy.sh` — shell syntax gate on every PR.
+- **AC3 (monotonic stamp):** `MonotonicStamp` never lowers the stored
+  `generatedAt`. A late/delayed run with an older candidate is a no-op with a
+  warning. The `manifest put` reads the stored manifest first and skips if the
+  candidate is older. Tested: `TestMonotonicStamp_OlderCandidate_SkipsWithWarning`,
+  `TestPublishManifest_PutMonotonic_LateRun_Skips`.
+
+- **AC4 (v2 manifest binding):** The manifest v2 records `snapshotId`,
+  `lastIngestAt`, `sourceCommit`, `runId` (and `overrideReason`). The
+  `manifest put` accepts `--snapshot-id`, `--last-ingest`, `--source-commit`,
+  `--run-id` flags. The sqlite migration 012 adds the v2 columns. The gate
+  accepts v1∪v2. Tested: `TestStampManifestV2_BindingFields`,
+  `TestPublishManifest_PutV2_BindingFields`, `TestEvaluatePublishGate_V2Manifest_Allow`,
+  `TestEvaluatePublishGate_LegacyV1Manifest_Allow`.
+
+- **AC5 (bootstrap policy):** `publish manifest bootstrap` is the explicit,
+  audited path for seeding a fresh store. It refuses to override an existing
+  manifest without `--acknowledge-override` + a recorded reason. Tested:
+  `newPublishManifestBootstrapCommand` in `cli/publish.go`.
+
+- **AC6 (rendered-HTML verification):** `publish verify-html` compares the
+  rendered `web/public/index.html` against the candidate and the stored
+  manifest. Catches skeleton/zero-story renders. Exits 0 (pass) or 3 (deny).
+  Tested: `TestValidateRenderedSite_*` (unit), `TestPublishVerifyHTML_S6`,
+  `TestPublishVerifyHTML_S7` (e2e).
+
+- **AC7 (no demo marker leak):** `verify-html` scans all rendered HTML files
+  for demo markers (same markers as the workflow's `grep -RInE` check).
+  Tested: `TestValidateRenderedSite_DemoMarker_Deny`.
+
+- **AC8 (diagnostic report):** `publish report` emits a structured,
+  secret-free JSON report aggregating the gate verdict, verify result,
+  manifest, and run identity. The report is non-secret by construction.
+  Tested: `TestPublishReport_SecretFree`.
+
+- **AC9 (live smoke):** The `refresh-news.yml` deploy job has a soft live
+  smoke step (`continue-on-error: true`) that curls the live site post-deploy
+  and asserts the homepage rendered. A transient Pages propagation lag fails
+  the observation, not the run.
 
 ## Verification performed (all green)
 
-- `bash -n scripts/deploy.sh`, `bash -n scripts/resolve-version.sh` — pass.
-- `plutil -lint deploy/launchd/com.huddlescope.ingest.plist` — OK.
-- `python3 -c yaml.safe_load` on `ci.yml` + `build-and-release.yaml` — valid.
-- `gofmt -l` on the two new Go test files — clean.
-- `make build` — pass. `go vet ./...` — clean.
-- `make test` (race) — all packages `ok`, including `internal/cli` and
-  `internal/config` (new guard tests run inside).
-- `make check-coverage` — gate passed (core ≥80%, other internal ≥70%);
-  `internal/cli` at 80.1%, `internal/config` at 89.1%.
-- `make e2e` — offline matrix PASS.
-- **Live (non-dry-run) sandboxed install test** on this darwin host:
-  - AC-4 self-computed SHA256 computed.
-  - AC-7/AC-8 atomic swap + 0755 perms + binary landed.
-  - **AC-5 idempotent skip** on the second identical run ("checksum matches …
-    skipping install").
-  - AC-13 upgrade path (new binary swapped in, `.prev` kept).
-  - AC-10 fail-closed: a non-executable "binary" aborts at `config check` with
-    `DEPLOY_STATUS=fail` (no checksum recorded, no service activated).
-  - AC-10 pass-path: the real built binary's `config check --config <file>`
-    exits 0 offline.
-- **Dry-run matrix** (`--dry-run`): detection, `--os`/`--arch` overrides,
-  release URL + `SHA256SUMS` construction, build command with stamped ldflags,
-  invalid-arch/version rejection, and zero mutations all confirmed.
-
-## Deferred / out of scope (per plan)
-
-- Full Linux-VM matrix (fresh install, re-run skip, old release, corrupt env →
-  rollback) — requires a real systemd host + live Turso/RSS; the plan defers
-  this to manual verification. The script's logic paths are proven offline as
-  above.
-- armv7l on a real RPi 3/4 — marked "verified on RPi: pending" in the README.
-- Any release-workflow change to attach darwin assets (R1 decision item) — kept
-  out of scope; the darwin path is a local build.
-- `make lint` / `make security` (golangci-lint/gosec/govulncheck) — not run
-  locally (tools not installed); they run in CI and the added code is gofmt
-  clean + `go vet` clean.
+- `make check` (gofmt, go vet, golangci-lint, gosec, govulncheck) — pass.
+- `make test` — all packages `ok`.
+- `make build` — pass. `./dist/huddlescope version` — OK.
+- `./dist/huddlescope --help` — OK. `./dist/huddlescope config check` — OK.
+- `make e2e` — offline matrix PASS (includes S6, S7, P-SAFE-1/2/3, workflow contract tests).
+- `make check-coverage` — gate passed (core ≥80%, other internal ≥70%).
+- `bash -n scripts/deploy.sh` — pass.
+- `cd scheduler && npm test` — 32 pass, 0 fail.

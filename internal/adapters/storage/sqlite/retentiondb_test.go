@@ -181,8 +181,8 @@ func TestSchemaVersionDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersionDB: %v", err)
 	}
-	if ver != 11 {
-		t.Errorf("schema version: want 11, got %d", ver)
+	if ver != 12 {
+		t.Errorf("schema version: want 12, got %d", ver)
 	}
 }
 
