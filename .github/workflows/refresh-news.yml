@@ -55,6 +55,11 @@ on:
         required: false
         default: 'false'
         type: boolean
+      restore_artifact:
+        description: 'Manual recovery (issue #249 / PUB-03): name of a site-snapshot-<id> artifact to restore into the workspace (empty = normal run; DB steps are skipped, deploy still requires publish=true)'
+        required: false
+        default: ''
+        type: string
 
 # Issue #229 / AC-3: cancel-in-progress: false prevents a new dispatch from
 # cancelling a run inside the publish window. Refreshes serialize instead of
@@ -119,6 +124,35 @@ jobs:
       - name: Build unified CLI
         run: make build-huddlescope
 
+      # Issue #249 / PUB-03 (AC-4): manual recovery. When the operator names a
+      # site-snapshot artifact, it is downloaded and restored into the Hugo
+      # workspace BEFORE any DB step; the DB steps (decision/ingest/export/
+      # package/manifest-get) are then skipped. Recovery works with Turso
+      # unavailable. Deploy still requires the explicit publish=true input; no
+      # automatic rollback to older snapshots is ever performed.
+      - name: Download snapshot artifact for restore
+        id: download-restore-artifact
+        if: inputs.restore_artifact != ''
+        uses: actions/download-artifact@v5
+        with:
+          name: ${{ inputs.restore_artifact }}
+          path: dist/restore
+
+      - name: Restore snapshot workspace
+        id: restore-artifact
+        if: inputs.restore_artifact != ''
+        run: |
+          set -euo pipefail
+          echo "Manual recovery: restoring workspace from ${{ inputs.restore_artifact }}..."
+          ARTIFACT_PATH=$(find dist/restore -name '*.tar.gz' -type f | head -n1)
+          if [ -z "$ARTIFACT_PATH" ]; then
+            echo "::error::No .tar.gz found in downloaded artifact ${{ inputs.restore_artifact }}"
+            exit 1
+          fi
+          ./dist/huddlescope export validate --artifact "$ARTIFACT_PATH"
+          ./dist/huddlescope export restore --artifact "$ARTIFACT_PATH" --data-dir web/data --content-dir web/content/stories --force
+          echo "Snapshot workspace restored"
+
       # Issue #163 / HS-PORT-07 (AC-1, AC-2, AC-5): freshness decision step.
       # `ingest should-run` exits 0 on a correct verdict regardless of the
       # true/false verdict; it exits non-zero (no verdict) on a DB error, which
@@ -126,6 +160,7 @@ jobs:
       # secret-free.
       - name: Decide whether backup ingest should run
         id: decision
+        if: inputs.restore_artifact == ''
         run: |
           set -euo pipefail
           echo "Querying Turso for ingest freshness (should-run)..."
@@ -133,15 +168,17 @@ jobs:
           echo "$JSON"
           SHOULD_RUN=$(echo "$JSON" | jq -r '.should_run')
           REASON=$(echo "$JSON" | jq -r '.reason')
-          echo "Decision: should_run=$SHOULD_RUN reason=$REASON"
+          LAST_INGEST_AT=$(echo "$JSON" | jq -r '.last_successful_ingest_at // empty')
+          echo "Decision: should_run=$SHOULD_RUN reason=$REASON last_ingest_at=${LAST_INGEST_AT:-unknown}"
           echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          echo "last_ingest_at=$LAST_INGEST_AT" >> "$GITHUB_OUTPUT"
 
       # Issue #163 / HS-PORT-07 (AC-1, AC-2, AC-6): backup ingest runs only
       # when the decision says should_run=true or the operator forced it.
       - name: Run backup ingest (when stale or forced)
         id: ingest
-        if: inputs.force_ingest == 'true' || steps.decision.outputs.should_run == 'true'
+        if: inputs.restore_artifact == '' && (inputs.force_ingest == 'true' || steps.decision.outputs.should_run == 'true')
         run: |
           echo "Running backup ingestion pipeline..."
           if [ "${{ inputs.force_ingest }}" = "true" ]; then
@@ -157,10 +194,46 @@ jobs:
       # workspace-only (untracked/ignored since issue #247).
       - name: Export snapshot to Hugo data
         id: export
+        if: inputs.restore_artifact == ''
         run: |
           echo "Running export pipeline..."
           ./dist/huddlescope export run
           echo "Export completed"
+
+      # Issue #249 / PUB-03 (AC-1, AC-2, AC-3): bundle the already-exported
+      # Hugo workspace files into a deterministic, validated site-snapshot
+      # artifact. The archive is packaged, independently re-validated, and
+      # uploaded with if-no-files-found: error so a missing package fails the
+      # job (the deploy job is skipped and the last-good Pages content is
+      # preserved). The content-derived snapshotId names the artifact so a
+      # specific deployment can be reproduced from it.
+      - name: Package snapshot artifact
+        id: package-snapshot
+        if: inputs.restore_artifact == '' && steps.export.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          echo "Packaging the exported Hugo workspace into a site-snapshot artifact..."
+          PKG_JSON=$(./dist/huddlescope export package --data-dir web/data --content-dir web/content/stories --out dist/site-snapshot --last-ingest "${{ steps.decision.outputs.last_ingest_at }}" --source-commit "${{ github.sha }}" --output json)
+          echo "$PKG_JSON"
+          SNAPSHOT_ID=$(echo "$PKG_JSON" | jq -r '.snapshotId')
+          echo "snapshot_id=$SNAPSHOT_ID" >> "$GITHUB_OUTPUT"
+          du -sh dist/site-snapshot.tar.gz
+
+      - name: Validate snapshot artifact
+        if: inputs.restore_artifact == '' && steps.package-snapshot.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          echo "Re-validating the site-snapshot artifact (independent pass)..."
+          ./dist/huddlescope export validate --artifact dist/site-snapshot.tar.gz
+
+      - name: Upload site-snapshot artifact
+        if: inputs.restore_artifact == '' && steps.package-snapshot.conclusion == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-snapshot-${{ steps.package-snapshot.outputs.snapshot_id }}
+          path: dist/site-snapshot.tar.gz
+          retention-days: 7
+          if-no-files-found: error
 
       # Issue #247 / PUB-01 (AC-6): read the deployed manifest from the durable
       # store (Turso) into web/data/deployed.json (an untracked, ignored
@@ -169,7 +242,7 @@ jobs:
       # on a DB read failure, which must fail closed (no deploy).
       - name: Load deployed manifest from store
         id: manifest-get
-        if: steps.export.conclusion == 'success'
+        if: inputs.restore_artifact == '' && steps.export.conclusion == 'success'
         run: |
           set -euo pipefail
           echo "Reading deployed manifest from the durable store..."
@@ -188,7 +261,7 @@ jobs:
       # Exit codes: 0 allow/skip-identical, 3 deny, 1 invalid input.
       - name: Publish gate
         id: publish-gate
-        if: steps.export.conclusion == 'success'
+        if: inputs.restore_artifact == '' && steps.export.conclusion == 'success'
         run: |
           set -euo pipefail
           echo "Evaluating publish gate (candidate vs deployed manifest, require-manifest)..."
@@ -226,7 +299,7 @@ jobs:
       # web/data — issue #247 removed the news-data commit).
       - name: Retention export
         id: retention-export
-        if: inputs.run-retention
+        if: inputs.restore_artifact == '' && inputs.run-retention
         run: |
           echo "Exporting rows older than the retention window..."
           ./dist/huddlescope retention export --output archive/retention
@@ -393,6 +466,34 @@ jobs:
           file_count=$(find web/public/ -type f | wc -l)
           echo "Total files in web/public/: $file_count"
 
+      # Issue #249 / PUB-03 (AC-3): bind the rendered output (the separately
+      # uploaded site-build artifact / Pages upload) to its snapshot and run
+      # identity so a specific deployment can be traced back to the
+      # site-snapshot artifact whose data produced it.
+      - name: Write Pages binding manifest
+        id: pages-binding
+        run: |
+          set -euo pipefail
+          SNAPSHOT_ID="${{ steps.package-snapshot.outputs.snapshot_id }}"
+          if [ -z "$SNAPSHOT_ID" ]; then
+            SNAPSHOT_ID="unknown"
+          fi
+          ARCHIVE_SHA=$(shasum -a 256 dist/site-snapshot.tar.gz 2>/dev/null | awk '{print $1}' || echo unknown)
+          INDEX_SHA=$(shasum -a 256 web/public/index.html 2>/dev/null | awk '{print $1}' || echo unknown)
+          PAGE_COUNT=$(find web/public/ -type f | wc -l | tr -d ' ')
+          cat > dist/pages-binding.json <<EOF
+          {
+            "snapshotId": "$SNAPSHOT_ID",
+            "snapshotArchiveSha256": "$ARCHIVE_SHA",
+            "githubRunId": "${{ github.run_id }}",
+            "githubRunNumber": "${{ github.run_number }}",
+            "githubSha": "${{ github.sha }}",
+            "pageFileCount": $PAGE_COUNT,
+            "indexHtmlSha256": "$INDEX_SHA"
+          }
+          EOF
+          cat dist/pages-binding.json
+
       # Diagnostic artifact upload: gated on the build succeeding.
       - name: Upload site artifacts
         if: steps.export.conclusion == 'success' || steps.make-site.conclusion == 'success'
@@ -403,12 +504,21 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Upload Pages binding artifact
+        if: steps.pages-binding.conclusion == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pages-${{ github.run_id }}
+          path: dist/pages-binding.json
+          retention-days: 7
+          if-no-files-found: ${{ (inputs.publish && (steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != '')) && 'error' || 'ignore' }}
+
       - name: Configure GitHub Pages
-        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
+        if: inputs.publish && (steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != '')
         uses: actions/configure-pages@v6
 
       - name: Upload artifact to GitHub Pages
-        if: inputs.publish && steps.publish-gate.outputs.deploy == 'true'
+        if: inputs.publish && (steps.publish-gate.outputs.deploy == 'true' || inputs.restore_artifact != '')
         uses: actions/upload-pages-artifact@v5
         with:
           path: web/public/
@@ -416,7 +526,11 @@ jobs:
   deploy:
     name: Deploy to Pages
     needs: build
-    if: inputs.publish && needs.build.outputs.deploy == 'true'
+    # Issue #249 / PUB-03 (AC-4): the manual-recovery path bypasses the
+    # publish gate ONLY when the operator explicitly set publish=true AND
+    # named a restore_artifact; the manifest put below still runs so the
+    # durable store catches up.
+    if: inputs.publish && (needs.build.outputs.deploy == 'true' || inputs.restore_artifact != '')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
