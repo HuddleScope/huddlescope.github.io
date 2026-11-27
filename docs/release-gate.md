@@ -141,7 +141,6 @@ build job:
   → install Hugo → **Run site verification** (continue-on-error)
   → **Build Hugo site** (make site)
   → **Verify no demo markers**
-  → retention (export → commit → apply, if inputs.run-retention)
   → **Verify Hugo build artifacts**
   → **Upload site artifacts** (diagnostic only; if: export or make-site success)
   → configure-pages → upload-pages-artifact (if: inputs.publish && deploy == 'true')

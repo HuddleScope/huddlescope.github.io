@@ -290,6 +290,42 @@ func TestImportRejectsMaliciousPackage(t *testing.T) {
 			wantErr: "unexpected format",
 		},
 		{
+			name: "wrong manifest version",
+			build: func(path string) error {
+				m := baseManifest
+				m.Version = 2
+				m.Tables = emptyTables()
+				return writeTestPackage(path, m, emptyFiles)
+			},
+			wantErr: "unexpected manifest version",
+		},
+		{
+			name: "non-whitelisted table member",
+			build: func(path string) error {
+				m := baseManifest
+				m.Tables = emptyTables()
+				return writeTestPackage(path, m, map[string]string{
+					"tables/articles.sql": "",
+					"tables/feeds.sql":    "",
+				})
+			},
+			wantErr: "not in the retention whitelist",
+		},
+		{
+			name: "INSERT targeting a different table",
+			build: func(path string) error {
+				m := baseManifest
+				// Declare the articles table with RowCount 1 so the row-count
+				// check passes and the table classifier (which runs per-statement
+				// before the count assertion) rejects the cross-table target.
+				m.Tables = []manifestTable{{Name: "articles", ColumnCount: 6, RowCount: 1, SQLFile: "tables/articles.sql"}}
+				return writeTestPackage(path, m, map[string]string{
+					"tables/articles.sql": "INSERT OR REPLACE INTO stories (story_id) VALUES ('s1')",
+				})
+			},
+			wantErr: `targets table "STORIES"`,
+		},
+		{
 			name: "row count mismatch",
 			build: func(path string) error {
 				m := baseManifest
@@ -328,6 +364,53 @@ func TestImportRejectsMaliciousPackage(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestImportRejectsOversizeAndTruncatedPackage (issue #252 / AC-4): the size
+// cap and tar/gzip integrity checks reject an oversized package and a
+// truncated (interrupted-write) archive.
+func TestImportRejectsOversizeAndTruncatedPackage(t *testing.T) {
+	db := newRetentionTestDB(t)
+	tmp := t.TempDir()
+
+	// 1) Oversize: build a valid package, then raise the cap below its size.
+	valid := filepath.Join(tmp, "valid.tar.gz")
+	m := manifest{
+		Format: RetentionPackageFormat, Version: 1, PackageID: "p1",
+		GeneratedAt: "2026-01-01T00:00:00Z", SchemaVersion: 7,
+		RetentionDays: 90, SourceBackend: "sqlite-file", BatchLimit: 500,
+		ExpiresBefore: "2025-10-02T00:00:00Z",
+		Tables:        []manifestTable{{Name: "articles", ColumnCount: 6, RowCount: 1, SQLFile: "tables/articles.sql"}},
+	}
+	if err := writeTestPackage(valid, m, map[string]string{
+		"tables/articles.sql": "INSERT OR REPLACE INTO articles (article_id) VALUES ('a')",
+	}); err != nil {
+		t.Fatalf("build valid: %v", err)
+	}
+
+	origCap := maxPackageBytes
+	t.Cleanup(func() { maxPackageBytes = origCap })
+	// Cap below the uncompressed member size: a 1-byte cap makes any real
+	// member exceed it (the cap is enforced on uncompressed member sizes).
+	maxPackageBytes = 1
+	if _, err := importForTest(db, valid); err == nil {
+		t.Error("oversize package should be rejected")
+	} else if !strings.Contains(err.Error(), "size cap") {
+		t.Errorf("expected size-cap error, got %q", err.Error())
+	}
+
+	// 2) Truncated: cut the gzip stream short (simulates an interrupted write).
+	truncated := filepath.Join(tmp, "truncated.tar.gz")
+	data, err := os.ReadFile(valid)
+	if err != nil {
+		t.Fatalf("read valid: %v", err)
+	}
+	if err := os.WriteFile(truncated, data[:len(data)/2], 0o600); err != nil {
+		t.Fatalf("write truncated: %v", err)
+	}
+	if _, err := importForTest(db, truncated); err == nil {
+		t.Error("truncated package should be rejected")
 	}
 }
 

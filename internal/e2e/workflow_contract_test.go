@@ -8,6 +8,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,20 @@ func findStepByNameIn(t *testing.T, wf map[any]any, jobID, name string) map[stri
 	return nil
 }
 
+// stepIdx returns the index of the step with the given id in the job's step
+// list, or -1 if absent.
+func stepIdx(steps []any, stepID string) int {
+	for i, s := range steps {
+		st, ok := s.(map[string]any)
+		if ok {
+			if id, ok := st["id"].(string); ok && id == stepID {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // hasAlwaysIf reports whether a step's if expression contains "always()".
 func hasAlwaysIf(step map[string]any) bool {
 	ifCond, ok := step["if"]
@@ -142,6 +157,7 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 
 	wfPath := filepath.Join("..", "..", ".github", "workflows", "refresh-news.yml")
 	wf := loadWorkflow(t, wfPath)
+	jobs := wf["jobs"].(map[string]any)
 
 	// --- Triggers: workflow_dispatch with force_ingest input (AC-6) ---
 	onSection := getOnSection(t, wf)
@@ -345,122 +361,32 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 		t.Error("concurrency.cancel-in-progress must be false (AC-3: no cancel during publish)")
 	}
 
-	// --- Build job: exactly one commit+push step (AC-7) ---
-	jobs := strMap(t, wf["jobs"])
+	// Issue #252 / PUB-06 (AC-1): retention/archival is isolated to the
+	// dedicated retention.yml workflow. The build job holds no job-level
+	// permissions (workflow-level contents:read only) and contains no step
+	// that mutates Git in any way: no git push, no git commit, no gh pr.
+	// (The 'Configure Git identity' step only sets local git config.)
 	buildJob := jobs["build"].(map[string]any)
 	steps := buildJob["steps"].([]any)
-	var pushSteps []string
+	if _, hasJobPerms := buildJob["permissions"]; hasJobPerms {
+		t.Error("build job must NOT have job-level permissions (issue #252: no contents:write)")
+	}
+	var gitMutatingSteps []string
 	for _, s := range steps {
 		step, ok := s.(map[string]any)
 		if !ok {
 			continue
 		}
 		run := stepRunScript(step)
-		if strings.Contains(run, "git push") {
+		if strings.Contains(run, "git push") || strings.Contains(run, "git commit") ||
+			strings.Contains(run, "gh pr") {
 			id, _ := step["id"].(string)
 			name, _ := step["name"].(string)
-			pushSteps = append(pushSteps, id+":"+name)
+			gitMutatingSteps = append(gitMutatingSteps, id+":"+name)
 		}
 	}
-	if len(pushSteps) != 1 {
-		t.Errorf("expected exactly one step with 'git push', got %d: %v", len(pushSteps), pushSteps)
-	}
-
-	// --- Build job: commit-and-push-retention step (AC-7, issue #247 / D5) ---
-	// Issue #247: the news-data commit step is removed; the only commit+push
-	// step is the retention-only commit, which stages ONLY archive/retention
-	// (never web/data). It is gated on run-retention AND the retention export
-	// succeeding (NOT on export success).
-	commitPushStep := findStepByID(t, wf, "build", "commit-and-push-retention")
-	cpsIf, ok := commitPushStep["if"].(string)
-	if !ok {
-		t.Fatal("commit-and-push-retention step must have an if condition")
-	}
-	if !strings.Contains(cpsIf, "inputs.run-retention") || !strings.Contains(cpsIf, "steps.retention-export.conclusion == 'success'") {
-		t.Errorf("commit-and-push-retention if = %q, must gate on run-retention AND retention-export success", cpsIf)
-	}
-	if hasAlwaysIf(commitPushStep) {
-		t.Error("commit-and-push-retention step must NOT use if: always()")
-	}
-	if _, hasCOE := commitPushStep["continue-on-error"]; hasCOE {
-		t.Error("commit-and-push-retention step must NOT have continue-on-error")
-	}
-	// Job-level permissions on build: contents: write (GitHub Actions does not
-	// support step-level permissions).
-	jobPerms, ok := buildJob["permissions"].(map[string]any)
-	if !ok {
-		t.Fatal("build job must have job-level permissions")
-	}
-	if contents, ok := jobPerms["contents"].(string); !ok || contents != "write" {
-		t.Errorf("build job permissions.contents = %v, want \"write\"", jobPerms["contents"])
-	}
-	if _, hasStepPerms := commitPushStep["permissions"]; hasStepPerms {
-		t.Error("commit-and-push-retention step must NOT have step-level permissions")
-	}
-	// The step must commit to a short-lived branch, open a PR, wait for the
-	// Build check, and squash-merge. It must stage archive/retention and
-	// NEVER web/data (issue #247 / AC-3).
-	cpsScript := stepRunScript(commitPushStep)
-	if strings.Contains(cpsScript, "[skip ci]") {
-		t.Error("commit-and-push-retention must NOT use [skip ci]: the Build check is required by the main ruleset")
-	}
-	if !strings.Contains(cpsScript, "git checkout -b") || !strings.Contains(cpsScript, "gh pr create") {
-		t.Error("commit-and-push-retention must commit to a short-lived branch and open a PR")
-	}
-	if !strings.Contains(cpsScript, "gh pr merge") {
-		t.Error("commit-and-push-retention must squash-merge the PR after the Build check passes")
-	}
-	if !strings.Contains(cpsScript, "git add archive/retention") {
-		t.Error("commit-and-push-retention must stage archive/retention")
-	}
-	// Issue #247 / AC-3: the retention step must NOT stage web/data.
-	if strings.Contains(cpsScript, "git add web/data") {
-		t.Error("commit-and-push-retention must NOT stage web/data (issue #247: no news-data commits)")
-	}
-	if !strings.Contains(cpsScript, "pr_num=") || !strings.Contains(cpsScript, "branch=") {
-		t.Error("commit-and-push-retention must write pr_num and branch to GITHUB_OUTPUT for the cleanup step")
-	}
-	// Conflict recovery: after the Build check, verify mergeability and
-	// re-base onto origin/main when main moved (bounded re-base attempts).
-	if !strings.Contains(cpsScript, "mergeable") || !strings.Contains(cpsScript, "git reset --hard origin/main") {
-		t.Error("commit-and-push-retention must check mergeability and re-base onto origin/main when main moved")
-	}
-
-	// --- Build job: retention steps (issue #120 / HS-065) ---
-	retExport := findStepByID(t, wf, "build", "retention-export")
-	if ri, ok := retExport["if"].(string); !ok || !strings.Contains(ri, "inputs.run-retention") {
-		t.Error("retention-export must be gated on inputs.run-retention")
-	}
-	retApply := findStepByID(t, wf, "build", "retention-apply")
-	ai, ok := retApply["if"].(string)
-	if !ok || !strings.Contains(ai, "inputs.run-retention") || !strings.Contains(ai, "steps.commit-and-push-retention.conclusion == 'success'") {
-		t.Errorf("retention-apply if = %q, must gate on run-retention AND the retention commit step success (package persisted before apply)", ai)
-	}
-	// The package must ship in the retention PR: export before the commit step.
-	stepIdx := func(stepID string) int {
-		for i, s := range steps {
-			st, ok := s.(map[string]any)
-			if ok {
-				if id, ok := st["id"].(string); ok && id == stepID {
-					return i
-				}
-			}
-		}
-		return -1
-	}
-	if ei, ci := stepIdx("retention-export"), stepIdx("commit-and-push-retention"); ei < 0 || ci < 0 || ei >= ci {
-		t.Error("retention-export must run before commit-and-push-retention so the package ships in the same PR")
-	}
-	// Cleanup step: closes the retention PR and deletes the branch when the run
-	// did not merge (cancelled or failed).
-	cleanup := findStepByID(t, wf, "build", "cleanup-retention-pr")
-	ciCond, ok := cleanup["if"].(string)
-	if !ok || !strings.Contains(ciCond, "always()") || !strings.Contains(ciCond, "steps.commit-and-push-retention.outcome != 'success'") || !strings.Contains(ciCond, "pr_num") {
-		t.Errorf("cleanup-retention-pr if = %q, must run on always() when the retention step did not succeed and a PR was opened", ciCond)
-	}
-	cr := stepRunScript(cleanup)
-	if !strings.Contains(cr, "gh pr close") {
-		t.Error("cleanup-retention-pr must close the orphaned PR")
+	if len(gitMutatingSteps) != 0 {
+		t.Errorf("build job must contain no Git-mutation steps, got %v (issue #252)", gitMutatingSteps)
 	}
 
 	// --- Build job: no if: always() on any commit/deploy step (AC-7) ---
@@ -537,6 +463,264 @@ func TestWorkflowContract_RefreshNews_Structure(t *testing.T) {
 	}
 	if !strings.Contains(deployIf, "deploy") {
 		t.Error("deploy job if must reference the build's deploy output")
+	}
+}
+
+// TestWorkflowContract_RefreshNews_RetentionAbsence (issue #252 / PUB-06
+// AC-1): normal news publication performs NO retention work and holds no
+// Git-mutation capability for it. The retention block of the old contract is
+// repurposed into this absence assertion set.
+func TestWorkflowContract_RefreshNews_RetentionAbsence(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "refresh-news.yml"))
+	if err != nil {
+		t.Fatalf("read refresh-news.yml: %v", err)
+	}
+	content := string(raw)
+
+	// No step id or name mentioning retention, no retention CLI invocations.
+	for _, banned := range []string{
+		"retention-export", "commit-and-push-retention", "cleanup-retention-pr", "retention-apply",
+		"run-retention", "retention export", "retention apply", "retention run",
+		"archive/retention", "SITE_DATA_PAT", "[skip ci]",
+	} {
+		if strings.Contains(content, banned) {
+			t.Errorf("refresh-news.yml must NOT contain %q (issue #252 / AC-1)", banned)
+		}
+	}
+
+	// No job may request contents:write (the retention-only commit was the
+	// sole consumer; the deploy job is pages:write + id-token:write only).
+	if strings.Contains(content, "contents: write") {
+		t.Error("refresh-news.yml must NOT grant contents: write anywhere (issue #252 / AC-1)")
+	}
+
+	// Structural: no step with a retention-related id in any job.
+	wf := loadWorkflow(t, filepath.Join("..", "..", ".github", "workflows", "refresh-news.yml"))
+	jobs := strMap(t, wf["jobs"])
+	for jobID, jv := range jobs {
+		job, ok := jv.(map[string]any)
+		if !ok {
+			continue
+		}
+		steps, ok := job["steps"].([]any)
+		if !ok {
+			continue
+		}
+		for _, s := range steps {
+			step, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := step["id"].(string)
+			name, _ := step["name"].(string)
+			if strings.Contains(strings.ToLower(id), "retention") || strings.Contains(strings.ToLower(name), "retention") {
+				t.Errorf("job %q: step %q (%q) mentions retention (issue #252 / AC-1)", jobID, id, name)
+			}
+		}
+	}
+}
+
+// TestWorkflowContract_Retention_Structure (issue #252 / PUB-06 AC-2, AC-3,
+// AC-5): the dedicated retention.yml workflow must be fail-closed:
+// dry-run by default, export -> verify -> persist -> apply ordering, apply
+// gated on persist success, no permission escalation (contents: read only),
+// no web/data writes, dedicated concurrency group.
+func TestWorkflowContract_Retention_Structure(t *testing.T) {
+	t.Parallel()
+
+	wfPath := filepath.Join("..", "..", ".github", "workflows", "retention.yml")
+	wf := loadWorkflow(t, wfPath)
+
+	// --- Triggers: weekly schedule + workflow_dispatch with apply input
+	// (default false = dry-run; AC-2, AC-5) ---
+	onSection := getOnSection(t, wf)
+	if _, hasSchedule := onSection["schedule"]; !hasSchedule {
+		t.Error("retention.yml must have a schedule trigger (weekly maintenance)")
+	}
+	dispatch, ok := onSection["workflow_dispatch"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: missing workflow_dispatch trigger")
+	}
+	inputs, ok := dispatch["inputs"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: workflow_dispatch missing inputs")
+	}
+	applyIn, ok := inputs["apply"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: missing 'apply' dispatch input")
+	}
+	if ft, ok := applyIn["type"].(string); !ok || ft != "boolean" {
+		t.Errorf("apply input type = %v, want \"boolean\"", applyIn["type"])
+	}
+	if fd, ok := applyIn["default"].(string); !ok || fd != "false" {
+		t.Errorf("apply input default = %v, want \"false\" (dry-run by default)", applyIn["default"])
+	}
+
+	// --- Concurrency: dedicated group, no in-progress cancel (AC-3) ---
+	concurrency, ok := wf["concurrency"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: missing concurrency block")
+	}
+	if group, _ := concurrency["group"].(string); group != "huddlescope-retention" {
+		t.Errorf("concurrency.group = %q, want huddlescope-retention (dedicated)", group)
+	}
+	if cancel, _ := concurrency["cancel-in-progress"].(bool); cancel != false {
+		t.Error("concurrency.cancel-in-progress must be false (never cut off a batch window)")
+	}
+
+	// --- Permissions: contents: read only (no escalation; AC-2) ---
+	jobPerms, ok := wf["permissions"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: missing workflow-level permissions")
+	}
+	if contents, ok := jobPerms["contents"].(string); !ok || contents != "read" {
+		t.Errorf("permissions.contents = %v, want \"read\" (no workflow permission escalation)", jobPerms["contents"])
+	}
+
+	// --- Job: maintenance job with the fixed step order ---
+	jobs := strMap(t, wf["jobs"])
+	job, ok := jobs["maintenance"].(map[string]any)
+	if !ok {
+		t.Fatal("retention.yml: missing 'maintenance' job")
+	}
+	// No job-level permissions block (workflow-level read only).
+	if _, has := job["permissions"]; has {
+		t.Error("maintenance job must NOT have job-level permissions (contents: read at workflow level only)")
+	}
+	steps, ok := job["steps"].([]any)
+	if !ok {
+		t.Fatal("retention.yml: maintenance job missing steps")
+	}
+
+	// Step order: export -> verify -> persist -> apply (AC-2).
+	exportIdx := stepIdx(steps, "retention-export")
+	verifyIdx := stepIdx(steps, "verify")
+	persistIdx := stepIdx(steps, "persist")
+	applyIdx := stepIdx(steps, "retention-apply")
+	if exportIdx < 0 || verifyIdx < 0 || persistIdx < 0 || applyIdx < 0 {
+		t.Fatalf("retention.yml: missing required steps (export=%d verify=%d persist=%d apply=%d)", exportIdx, verifyIdx, persistIdx, applyIdx)
+	}
+	if exportIdx >= verifyIdx || verifyIdx >= persistIdx || persistIdx >= applyIdx {
+		t.Errorf("step order must be export -> verify -> persist -> apply (got export=%d verify=%d persist=%d apply=%d)",
+			exportIdx, verifyIdx, persistIdx, applyIdx)
+	}
+
+	// Export: never deletes; no if: always(), no continue-on-error.
+	exportStep := findStepByID(t, wf, "maintenance", "retention-export")
+	exportScript := stepRunScript(exportStep)
+	if !strings.Contains(exportScript, "retention export") {
+		t.Error("export step must invoke 'retention export'")
+	}
+	if strings.Contains(exportScript, "retention apply") || strings.Contains(exportScript, "retention run") {
+		t.Error("export step must NOT invoke retention apply/run (export never deletes)")
+	}
+	if hasAlwaysIf(exportStep) {
+		t.Error("export step must NOT use if: always()")
+	}
+	if _, hasCOE := exportStep["continue-on-error"]; hasCOE {
+		t.Error("export step must NOT have continue-on-error")
+	}
+
+	// Verify: scratch-DB import against a temp sqlite-file DB (never Turso).
+	verifyStep := findStepByID(t, wf, "maintenance", "verify")
+	verifyScript := stepRunScript(verifyStep)
+	if !strings.Contains(verifyScript, "retention import --package") {
+		t.Error("verify step must invoke 'retention import --package' against a scratch DB")
+	}
+	if !strings.Contains(verifyScript, "HSC_STORAGE_BACKEND=sqlite-file") {
+		t.Error("verify step must run the import against a throwaway sqlite-file DB")
+	}
+	if !strings.Contains(verifyScript, "sha256") {
+		t.Error("verify step must record the package sha256")
+	}
+	if hasAlwaysIf(verifyStep) {
+		t.Error("verify step must NOT use if: always()")
+	}
+	if _, hasCOE := verifyStep["continue-on-error"]; hasCOE {
+		t.Error("verify step must NOT have continue-on-error (fail closed)")
+	}
+
+	// Persist: gated on apply=true AND verify success; uses the scoped PAT.
+	persistStep := findStepByID(t, wf, "maintenance", "persist")
+	persistIf, ok := persistStep["if"].(string)
+	if !ok {
+		t.Fatal("persist step must have an if condition")
+	}
+	if !strings.Contains(persistIf, "inputs.apply == 'true'") || !strings.Contains(persistIf, "steps.verify.conclusion == 'success'") {
+		t.Errorf("persist if = %q, must gate on apply=true AND verify success", persistIf)
+	}
+	persistEnv, ok := persistStep["env"].(map[string]any)
+	if !ok || !strings.Contains(fmt.Sprint(persistEnv["GH_TOKEN"]), "RETENTION_ARCHIVE_PAT") {
+		t.Error("persist step must set GH_TOKEN from secrets.RETENTION_ARCHIVE_PAT")
+	}
+	if hasAlwaysIf(persistStep) {
+		t.Error("persist step must NOT use if: always()")
+	}
+	if _, hasCOE := persistStep["continue-on-error"]; hasCOE {
+		t.Error("persist step must NOT have continue-on-error (a failed persist blocks apply)")
+	}
+
+	// Apply: the only delete path; gated on apply=true AND persist success.
+	applyStep := findStepByID(t, wf, "maintenance", "retention-apply")
+	applyIf, ok := applyStep["if"].(string)
+	if !ok {
+		t.Fatal("apply step must have an if condition")
+	}
+	if !strings.Contains(applyIf, "inputs.apply == 'true'") || !strings.Contains(applyIf, "steps.persist.conclusion == 'success'") {
+		t.Errorf("apply if = %q, must gate on apply=true AND persist success (fail closed)", applyIf)
+	}
+	applyScript := stepRunScript(applyStep)
+	if !strings.Contains(applyScript, "retention apply") {
+		t.Error("apply step must invoke 'retention apply'")
+	}
+	if hasAlwaysIf(applyStep) {
+		t.Error("apply step must NOT use if: always() (a failed persist must block the delete)")
+	}
+	if _, hasCOE := applyStep["continue-on-error"]; hasCOE {
+		t.Error("apply step must NOT have continue-on-error")
+	}
+
+	// No step may write web/data (retention never touches the site data).
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		run := stepRunScript(step)
+		if strings.Contains(run, "web/data") {
+			id, _ := step["id"].(string)
+			name, _ := step["name"].(string)
+			t.Errorf("step %q (%q) must NOT write web/data (issue #252)", id, name)
+		}
+	}
+
+	// No [skip ci] anywhere (no PRs are created by this workflow).
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.Contains(stepRunScript(step), "[skip ci]") {
+			id, _ := step["id"].(string)
+			name, _ := step["name"].(string)
+			t.Errorf("step %q (%q) must NOT use [skip ci] (no PRs in retention.yml)", id, name)
+		}
+	}
+
+	// The cleanup step (if: always()) is the ONLY always() step and is
+	// log-only best-effort (it must not fail the run).
+	for _, s := range steps {
+		step, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := step["id"].(string)
+		if hasAlwaysIf(step) && id != "" && id != "cleanup" && !strings.Contains(id, "cleanup") {
+			name, _ := step["name"].(string)
+			t.Errorf("step %q (%q) uses if: always() but is not the best-effort cleanup step", id, name)
+		}
 	}
 }
 

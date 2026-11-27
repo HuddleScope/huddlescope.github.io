@@ -16,24 +16,36 @@ import (
 // TestRefreshNewsWorkflow_Issue247 (issue #247 / PUB-01, AC-3, AC-8) parses
 // refresh-news.yml and asserts the structural invariants that make news data
 // repo-less: no news-data commit/PR step, an explicit manifest get before the
-// gate, the gate invoked with --require-manifest, a retention-only commit
-// step (never staging web/data), Turso env on the deploy job, and a manifest
-// put (no git) after deploy. The text-parse gate stands in for an Actions
-// run in CI (no Actions on check runs).
+// gate, the gate invoked with --require-manifest, Turso env on the deploy
+// job, and a manifest put (no git) after deploy. The text-parse gate stands
+// in for an Actions run in CI (no Actions on check runs).
+//
+// issue #252 / PUB-06 (AC-1) repurposes the retention assertions: the
+// retention-only commit step is REMOVED. Retention/archival is isolated to
+// the dedicated retention.yml workflow, so refresh-news.yml must contain no
+// retention step, no archive/retention staging, no contents:write, and no
+// SITE_DATA_PAT.
 func TestRefreshNewsWorkflow_Issue247(t *testing.T) {
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "refresh-news.yml"))
 	require.NoError(t, err, "refresh-news.yml must exist")
 	c := string(data)
 
-	// AC-3: no news-data commit/PR step remains. The old commit step staged
-	// web/data; the new retention-only step must NOT stage web/data.
+	// AC-3: no news-data commit/PR step remains.
 	assert.NotContains(t, c, "Commit and push site-data files", "old site-data commit step must be removed (AC-3)")
 	assert.NotContains(t, c, "Clean up site-data PR", "old site-data PR cleanup step must be removed (AC-3)")
 
-	// The retention-only commit step commits ONLY archive/retention (AC-7).
-	assert.Contains(t, c, "Commit and push retention package", "retention-only commit step must be present")
-	assert.Contains(t, c, "git add archive/retention", "retention commit must stage only archive/retention")
+	// issue #252 / AC-1: retention is isolated to retention.yml. refresh-news
+	// must contain NO retention commit/apply step, no archive/retention
+	// staging, no contents:write, and no retention PAT.
+	assert.NotContains(t, c, "Commit and push retention package", "retention-only commit step must be removed (issue #252 / AC-1)")
+	assert.NotContains(t, c, "git add archive/retention", "refresh-news must not stage archive/retention (issue #252 / AC-1)")
+	assert.NotContains(t, c, "Clean up retention PR", "retention PR cleanup step must be removed (issue #252 / AC-1)")
+	assert.NotContains(t, c, "retention apply", "refresh-news must not run retention apply (issue #252 / AC-1)")
+	assert.NotContains(t, c, "retention export", "refresh-news must not run retention export (issue #252 / AC-1)")
+	assert.NotContains(t, c, "run-retention", "refresh-news must not have a run-retention input (issue #252 / AC-1)")
+	assert.NotContains(t, c, "SITE_DATA_PAT", "refresh-news must not reference a retention PAT (issue #252 / AC-1)")
+	assert.NotContains(t, c, "contents: write", "refresh-news must not grant contents:write (issue #252 / AC-1)")
 
 	// AC-6: manifest get before the gate, and the gate uses --require-manifest.
 	assert.Contains(t, c, "publish manifest get", "manifest get step must be present (AC-6)")
@@ -49,10 +61,42 @@ func TestRefreshNewsWorkflow_Issue247(t *testing.T) {
 	// The deploy job must re-project the snapshot (web/data is untracked on a
 	// fresh checkout) before the manifest put.
 	assert.Contains(t, c, "Re-project production snapshot", "deploy job must re-project the snapshot")
+}
 
-	// The retention PR cleanup step is keyed to the retention commit (not the
-	// removed site-data step).
-	assert.Contains(t, c, "Clean up retention PR", "retention PR cleanup step must be present")
+// TestRetentionWorkflow_Issue252 (issue #252 / PUB-06, AC-1, AC-2) asserts the
+// dedicated retention.yml workflow exists and is fail-closed: dry-run by
+// default (apply input default false), export -> verify -> persist -> apply
+// ordering, apply gated on persist success, contents:read only, and the
+// scoped archive-repo PAT used only as the persist step's GH_TOKEN.
+func TestRetentionWorkflow_Issue252(t *testing.T) {
+	root := repoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "retention.yml"))
+	require.NoError(t, err, "retention.yml must exist (issue #252 / AC-1)")
+	c := string(data)
+
+	// AC-2: dry-run by default — the apply dispatch input defaults to false.
+	assert.Contains(t, c, "apply:", "retention.yml must have an 'apply' dispatch input (issue #252 / AC-2)")
+	assert.Contains(t, c, "default: 'false'", "apply input must default to false = dry-run (issue #252 / AC-2)")
+	assert.Contains(t, c, "schedule:", "retention.yml must have a schedule trigger (issue #252 / AC-5)")
+
+	// AC-3: dedicated concurrency group, no in-progress cancel.
+	assert.Contains(t, c, "group: huddlescope-retention", "dedicated concurrency group (issue #252 / AC-3)")
+	assert.Contains(t, c, "cancel-in-progress: false", "never cancel an in-flight retention run (issue #252 / AC-3)")
+
+	// AC-2: no permission escalation — contents: read only.
+	assert.Contains(t, c, "contents: read", "retention.yml must use contents: read (no escalation)")
+	assert.NotContains(t, c, "contents: write", "retention.yml must not grant contents: write (issue #252 / AC-2)")
+
+	// AC-2: the export step never deletes; verify uses a scratch DB.
+	assert.Contains(t, c, "retention export", "export step must be present")
+	assert.Contains(t, c, "retention import --package", "verify step must import the package into a scratch DB")
+	assert.Contains(t, c, "HSC_STORAGE_BACKEND=sqlite-file", "verify must run against a throwaway sqlite-file DB")
+
+	// AC-2: the scoped archive-repo PAT is used only as the persist step's
+	// GH_TOKEN; apply is gated on persist success.
+	assert.Contains(t, c, "RETENTION_ARCHIVE_PAT", "persist step must use the scoped archive-repo PAT")
+	assert.Contains(t, c, "inputs.apply == 'true'", "apply must be gated on the explicit apply input")
+	assert.Contains(t, c, "steps.persist.conclusion == 'success'", "apply must be gated on persist success (fail closed)")
 }
 
 // TestSiteWorkflow_Issue247 (issue #247 / PUB-01, AC-4, AC-6, AC-8) parses
@@ -85,8 +129,8 @@ func TestSiteWorkflow_Issue247(t *testing.T) {
 }
 
 // TestWorkflows_NoNewsDataCommit asserts neither workflow commits web/data.
-// The refresh-news retention step stages archive/retention; site.yml commits
-// editorial content (stories, docs) but never web/data.
+// refresh-news.yml performs no Git mutation of any kind (issue #252); site.yml
+// commits editorial content (stories, docs) but never web/data.
 func TestWorkflows_NoNewsDataCommit(t *testing.T) {
 	root := repoRoot(t)
 	for _, wf := range []string{"refresh-news.yml", "site.yml"} {
