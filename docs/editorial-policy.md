@@ -64,8 +64,11 @@ If a source publisher or content owner requests removal:
 
 - Rows older than the retention window (default 90 days, `HSC_RETENTION_DAYS`)
   are archived automatically into `*_archive` tables; they are not dropped.
-- Before archiving, expiring rows are exported to a portable package committed
-  to `archive/retention/` (see the ops runbook, "Retention and archiving").
+- Before archiving, expiring rows are exported to a portable package that is
+  persisted to a private, PAT-restricted archive repository before any
+  deletion (see the ops runbook, "Retention and archiving"). Retention runs in
+  the dedicated `retention.yml` workflow, isolated from news publication
+  (issue #252).
 - Restoring archived content uses `huddlescope retention import --package <file>`
   (idempotent). Opt-out removals also apply to archived rows: delete by primary
   key in both the hot and archive tables.
@@ -106,4 +109,6 @@ See `docs/ops-runbook.md` for detailed operational procedures:
 ## Known limitations
 
 - **Backups**: The in-repo `BackupToFile`, `RestoreFromFile`, `Dump`, and `ApplyRetention` functions are implemented in the sqlite package (HS-041); the operational backup path remains Turso Cloud console or `turso db shell`
-- **Retention**: Automatic archival implemented in sqlite package (HS-041), not yet wired into the pipeline; manual Turso queries required to archive rows older than 90 days
+- **Retention**: Automatic archival is wired to the dedicated `retention.yml`
+  workflow (issue #252); manual Turso queries can also archive rows older than
+  90 days

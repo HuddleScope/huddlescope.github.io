@@ -12,12 +12,11 @@
 # no stored manifest DENIES (fail closed) instead of deploying an empty site
 # (AC-6).
 #
-# The only remaining Git-mutation step is the retention-only commit (issue
-# #120 / HS-065, plan D5): it persists the exported retention package (only
-# archive/retention, never web/data) in a short-lived branch/PR BEFORE
-# `retention apply` deletes rows, preserving the persist-before-delete
-# invariant (AC-7). Contents:write is granted at job level on `build` for that
-# single step (GitHub Actions has no step-level permissions).
+# Issue #252 / PUB-06: retention/archival is ISOLATED to the dedicated
+# retention.yml maintenance workflow (weekly schedule + manual dispatch,
+# dry-run by default). This workflow never deletes rows, never exports a
+# retention package, and commits no archive files — it holds no Git-mutation
+# permission for retention (no contents:write, no PAT).
 #
 # HS-056: the legacy "data safety guard" is removed. An explicit publish
 # decision gates the Pages upload and the deploy job:
@@ -45,11 +44,6 @@ on:
         required: true
         default: 'true'
         type: boolean
-      run-retention:
-        description: 'Run retention (export package, persist it, archive rows)'
-        required: true
-        default: 'true'
-        type: boolean
       force_ingest:
         description: 'Force backup ingest even if Turso is fresh (maintenance only; still respects the distributed lease)'
         required: false
@@ -68,10 +62,9 @@ concurrency:
   group: huddlescope-pages-deploy
   cancel-in-progress: false
 
-# Least privilege: default read access. The build job needs contents:write ONLY
-# for the retention-only commit step (issue #120 / plan D5). GitHub Actions
-# only honors permissions at workflow and job level (never step level), so it
-# is granted on the whole build job. The deploy job needs pages:write +
+# Least privilege: default read access. This workflow performs NO Git
+# mutation (issue #252: retention-only commit removed; retention/archival is
+# isolated to retention.yml). The deploy job needs pages:write +
 # id-token:write for its OIDC Pages deploy.
 permissions:
   contents: read
@@ -81,10 +74,6 @@ jobs:
     name: Refresh and build
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      # contents:write is required ONLY for the retention-only commit step
-      # (plan D5). No news-data commit/PR step exists (issue #247 / AC-3, AC-8).
-      contents: write
     environment:
       name: github-pages
     outputs:
@@ -291,118 +280,6 @@ jobs:
             exit 1
           fi
 
-      # Retention export (issue #120 / HS-065): runs after ingest + export
-      # (all DB reads) and BEFORE the retention-only commit step so the
-      # exported package is persisted in Git before `retention apply` deletes
-      # rows (AC-2: export -> commit -> apply, plan D5 / AC-7). The package is
-      # persisted by a retention-only PR (only archive/retention, never
-      # web/data — issue #247 removed the news-data commit).
-      - name: Retention export
-        id: retention-export
-        if: inputs.restore_artifact == '' && inputs.run-retention
-        run: |
-          echo "Exporting rows older than the retention window..."
-          ./dist/huddlescope retention export --output archive/retention
-          echo "Retention export completed"
-
-      # Issue #120 / HS-065 (plan D5): exactly one Git-mutation step, limited
-      # to the retention package (archive/retention), NEVER web/data
-      # (issue #247 / AC-3). It commits to a short-lived branch, opens a PR,
-      # waits for the required Build check, and squash-merges — preserving the
-      # persist-before-delete invariant (package persisted in main before
-      # `retention apply` deletes rows). A no-op retention export (no expiring
-      # rows) stages nothing and skips the commit.
-      #
-      # The org disables the "Actions may create PRs" toggle, so GITHUB_TOKEN
-      # cannot create PRs here; gh authenticates with the fine-grained PAT in
-      # secret SITE_DATA_PAT (repo access: this repository; permissions:
-      # Contents read/write, Pull requests read/write). After issue #247 the
-      # PAT is used ONLY for this retention step (documented for revocation
-      # once the retention fallback is adopted; see docs/ops-runbook.md).
-      - name: Commit and push retention package
-        id: commit-and-push-retention
-        if: inputs.run-retention && steps.retention-export.conclusion == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
-        run: |
-          set -euo pipefail
-          CHANGED_RET=0
-          if [ -d archive/retention ] && [ -n "$(git status --porcelain archive/retention)" ]; then
-            git add archive/retention
-            CHANGED_RET=1
-          fi
-          if [ "$CHANGED_RET" -eq 0 ]; then
-            echo "Retention package unchanged, skipping commit"
-            exit 0
-          fi
-          COMMIT_MSG="Update retention archive"
-          PR_BODY="Automated retention refresh by the Refresh news workflow (issue #120 / AC-7; persistence decoupled from news data per issue #247)."
-          # Commit to a short-lived branch: direct pushes to main are rejected
-          # by the "Require CI before merging to main" ruleset (GH013).
-          BRANCH="ci/retention-$(git rev-parse --short HEAD)-$$"
-          git checkout -b "$BRANCH"
-          git commit -m "$COMMIT_MSG"
-          git push origin "$BRANCH"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          PR_URL=$(gh pr create --title "$COMMIT_MSG" --body "$PR_BODY" </dev/null)
-          PR_NUM="${PR_URL##*/}"
-          echo "pr_num=$PR_NUM" >> "$GITHUB_OUTPUT"
-          echo "Opened PR $PR_NUM; waiting for the required Build check..."
-          # Wait for the Build check to pass, then verify mergeable. Bounded to
-          # 3 re-base attempts if main moves while the PR waits.
-          REBASES=0
-          while :; do
-            SHA=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .head.sha)
-            for _ in $(seq 1 60); do
-              DATA=$(gh api repos/"$GITHUB_REPOSITORY"/commits/"$SHA"/check-runs)
-              COUNT=$(printf '%s' "$DATA" | jq '.total_count')
-              INCOMPLETE=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status != "completed")] | length')
-              FAILED=$(printf '%s' "$DATA" | jq '[.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length')
-              if [ "$FAILED" -gt 0 ]; then
-                echo "::error::PR $PR_NUM has failing checks"
-                exit 1
-              fi
-              if [ "$COUNT" -ge 1 ] && [ "$INCOMPLETE" -eq 0 ]; then
-                break
-              fi
-              sleep 30
-            done
-            MERGEABLE=$(gh api repos/"$GITHUB_REPOSITORY"/pulls/"$PR_NUM" --jq .mergeable)
-            if [ "$MERGEABLE" = "true" ]; then
-              break
-            fi
-            if [ "$REBASES" -ge 3 ]; then
-              echo "::error::PR $PR_NUM is not mergeable after $REBASES re-base attempts"
-              exit 1
-            fi
-            REBASES=$((REBASES + 1))
-            OLD_SHA=$(git rev-parse HEAD)
-            echo "PR $PR_NUM not mergeable (main moved); re-basing $BRANCH onto origin/main (attempt $REBASES)..."
-            git fetch origin main
-            git reset --hard origin/main
-            git diff --name-only origin/main "$OLD_SHA" | xargs -r git checkout "$OLD_SHA" --
-            git commit -m "$COMMIT_MSG"
-            git push --force-with-lease origin "$BRANCH"
-          done
-          gh pr merge "$PR_NUM" --squash --delete-branch
-          echo "Retention committed and merged to main via PR $PR_NUM"
-
-      - name: Clean up retention PR if the run did not merge
-        id: cleanup-retention-pr
-        # A cancelled or failed run can leave its PR open. Close it and delete
-        # the branch so the next run's PR does not conflict with stale changes.
-        # Commits nothing.
-        if: always() && steps.commit-and-push-retention.outcome != 'success' && steps.commit-and-push-retention.outputs.pr_num != ''
-        env:
-          GH_TOKEN: ${{ secrets.SITE_DATA_PAT }}
-        run: |
-          set -euo pipefail
-          PR_NUM="${{ steps.commit-and-push-retention.outputs.pr_num }}"
-          BRANCH="${{ steps.commit-and-push-retention.outputs.branch }}"
-          echo "Run did not merge PR $PR_NUM; closing it and deleting branch $BRANCH."
-          gh pr close "$PR_NUM" || true
-          gh api -X DELETE repos/"$GITHUB_REPOSITORY"/git/refs/heads/"$BRANCH" || true
-
       # Site verification first (soft): site-test overlays fixture data and
       # rebuilds web/public/, so the real-data `make site` build below must
       # happen afterwards to guarantee the deployed artifact is the production
@@ -442,18 +319,6 @@ jobs:
             exit 1
           fi
           echo "No demo markers in web/public/"
-
-      # Retention apply (issue #120 / HS-065, plan D5): the delete commits run
-      # only after the retention package is persisted in main (the retention
-      # PR merged) and after every DB read of this run (ingest, export, site
-      # build). Persist-before-delete (AC-2) holds.
-      - name: Retention apply
-        id: retention-apply
-        if: inputs.run-retention && steps.commit-and-push-retention.conclusion == 'success'
-        run: |
-          echo "Archiving rows older than the retention window..."
-          ./dist/huddlescope retention apply
-          echo "Retention apply completed"
 
       - name: Verify Hugo build artifacts
         run: |

@@ -440,8 +440,8 @@ The following functions are available in the sqlite package:
 - `ApplyRetention(dbPath)` — archive rows older than 90 days in bounded batches
 
 These functions are now wired into the retention pipeline via the
-`huddlescope retention` CLI (issue #120) and the `run-retention` step in the
-`refresh-news.yml` workflow.
+`huddlescope retention` CLI (issue #120) and the dedicated `retention.yml`
+maintenance workflow (issue #252).
 
 ## Snapshot recovery (issue #249 / PUB-03)
 
@@ -454,7 +454,7 @@ specific content generation has one stable identifier. The rendered output is
 separately bound to its snapshot and run identity in a
 `pages-<githubRunId>` artifact (`dist/pages-binding.json`: snapshotId, archive
 sha256, run id/number, commit sha, rendered index hash). This run has no DB
-writes of its own (only the retention step may write, as it already does).
+writes of any kind (issue #252: retention is isolated to retention.yml).
 
 ### Inspecting / reproducing a deployment
 
@@ -517,34 +517,90 @@ Notes:
   Turso + the durable manifest, so recovery targets a *published* generation,
   not a replacement for the database.
 
-## Retention and archiving (HS-065 / issue #120)
+## Retention and archiving (HS-065 / issue #120; isolated by issue #252 / PUB-06)
 
 Hot tables (`articles`, `stories`, `ranking_snapshots`) are bounded to a
 retention window (default **90 days**, `HSC_RETENTION_DAYS`). Rows older than
 the window are moved into `*_archive` mirrors (they stay in the same database;
-the archives are *not* dropped). Before archiving, the expiring rows are
-exported to a portable package that is committed to `archive/retention/` so
-nothing is ever lost.
+the archives are *not* dropped).
 
-### How the pipeline runs
+**Isolation (issue #252):** retention is a dedicated, separately scheduled
+maintenance process — `retention.yml`. The news publication workflow
+(`refresh-news.yml`) performs NO retention export/apply, deletes no rows, and
+commits no archive files (AC-1). All destructive lifecycle work is isolated,
+scheduled, and defaults to non-destructive dry-run (AC-2, AC-5).
 
-1. **Export** — `huddlescope retention export --output archive/retention`
-   writes rows older than the window to `retention-<UTC-stamp>.tar.gz`
-   (format `huddlescope-retention-package`, v1: `manifest.json` +
+### Durable storage (two layers, fail-closed before delete)
+
+1. **Primary archive of record** — the `*_archive` tables *inside* the Turso
+   database. `retention apply` moves each batch with `INSERT OR IGNORE` into
+   the archive mirror **and** `DELETE` from the hot table **in one
+   transaction**, re-evaluating the window per batch: every deleted row is
+   archived in-DB before its delete commits. `*_archive` rows are never
+   dropped.
+2. **Secondary durable copy (required before any deletion)** — the pre-delete
+   package, persisted to a **private archive repository on the same org**
+   (`HuddleScope/huddlescope-retention-archive`), using a fine-grained PAT
+   (repo secret `RETENTION_ARCHIVE_PAT`, Contents read/write on the archive
+   repo only) injected only as the persist step's `GH_TOKEN` (no workflow
+   permission escalation: the job stays `contents: read`).
+
+**Fail-closed gate (AC-2):** if `RETENTION_ARCHIVE_PAT` is unset, or the
+verify or persist step fails, **`retention apply` never runs** — no deletion
+without a durable copy. Until the operator provisions the archive repo +
+secret, the workflow runs **dry-run only** (export + verify, no persist, no
+apply). Generated packages are never committed to this repository's Git
+history (the issue forbids it) and never rely on short-lived Actions
+artifacts (this repo is a public Pages site; its artifacts are public and
+time-boxed). `archive/retention/` in this repo is a local-development
+convenience only.
+
+### How the pipeline runs (`retention.yml`)
+
+Schedule: weekly, `0 3 * * 1` UTC (Mondays 03:00). Manual dispatch is also
+available. Dedicated concurrency group `huddlescope-retention`
+(`cancel-in-progress: false`).
+
+1. **Status (pre)** — `retention status` against Turso; a DB error fails the
+   run (fail closed). Logs schema version, size, budget.
+2. **Export** — `retention export --output dist/retention` writes rows older
+   than the window to `retention-<UTC-stamp>.tar.gz` (format
+   `huddlescope-retention-package`, v1: `manifest.json` +
    `tables/{articles,stories,ranking_snapshots}.sql` with `INSERT OR REPLACE`
-   statements in bounded 500-row transactions). Export never deletes anything.
-   A run with no expiring rows writes nothing.
-2. **Commit** — the workflow commits the new package to `archive/retention/`
-   in Git *before* archiving. If the export or commit fails, the build job
-   fails and archiving never runs (packages must be persisted — AC-2).
-3. **Apply** — `huddlescope retention apply` archives the expiring rows in
-   bounded batches and checks the storage budget.
-4. **Import (restore)** — `huddlescope retention import --package <file>`
-   validates the package (format v1, whitelisted tables, statement classifier,
-   size cap) and restores rows into the hot tables. Import is idempotent:
-   re-importing the same package does not duplicate rows.
+   statements in bounded 500-row transactions). Export never deletes.
+   A no-op export (no rows expired) ends the run successfully.
+3. **Verify** — `shasum -a 256` of the package + a scratch-DB restore:
+   `retention import --package <pkg>` against a **throwaway sqlite-file DB**
+   (temp path; never Turso). Exercises the full v1 validation chain (format
+   pin, version pin, table whitelist, statement classifier, size cap) and
+   proves restorability (AC-4) without touching production.
+4. **Persist** — *only when the operator dispatches `apply=true`.* Pushes the
+   package + a secret-free `manifest.json` (sha256, run identity, timestamp)
+   to the private archive repo. Missing secret or failed push → non-zero exit
+   → apply never runs.
+5. **Apply** — `retention apply`; gated on `apply=true` AND persist success.
+   Archives expiring rows in bounded batches; checks the 1 GB free-tier
+   budget (`BudgetOK=false` warns).
+6. **Status (post) + report** — `retention status` plus a secret-free JSON run
+   report uploaded as a 90-day **diagnostic** artifact (explicitly NOT a
+   backup).
+7. **Cleanup** (best-effort, `if: always()`, log-only): on a failed run after
+   a successful persist, remove the pushed commit so an orphan package never
+   lingers. Packages are immutable and re-exportable, so a failed cleanup
+   never masks the real failure.
 
-### Local usage
+### Manual invocation
+
+```bash
+# Dry-run (default): status + export + verify, no deletion.
+gh workflow dispatch retention.yml
+# Authorize deletion (archive + delete rows):
+gh workflow dispatch retention.yml -f apply=true
+# Window override (days):
+gh workflow dispatch retention.yml -f apply=true -f window=120
+```
+
+Local usage:
 
 ```bash
 # Full local run (export + apply)
@@ -560,14 +616,66 @@ huddlescope retention status
 
 Disable retention locally or in CI with `HSC_RETENTION_ENABLED=false`.
 
-### Restore procedure (archive → hot)
+### Access controls
 
-1. Identify the package in `archive/retention/` (chronological by timestamp).
-2. Verify it: `./dist/huddlescope retention import --package archive/retention/<pkg>.tar.gz`
-   (idempotent; safe to run twice).
-3. If the restore must roll back, delete the restored rows by their primary
-   keys (the package manifest lists per-table row counts) — or restore the
-   database from a Turso Cloud backup taken before the import.
+- **Archive repo**: private; org-membership access only (HuddleScope org).
+- **PAT (`RETENTION_ARCHIVE_PAT`)**: fine-grained, Contents read/write on the
+  archive repo **only**; injected only as the persist/cleanup step's
+  `GH_TOKEN`; never echoed in logs or reports. Rotation procedure in the
+  Secret rotation section below.
+- **Turso**: the `*_archive` tables are token-restricted like the rest of the
+  database (`TURSO_AUTH_TOKEN`); `retention apply` is the only writer.
+
+### Expiry / retention of archives
+
+- `*_archive` tables: **never auto-dropped** (the durable archive of record).
+- Archive-repo packages: one immutable commit per package, under
+  `packages/<YYYY>/<MM>/`. Prune old packages only after confirming the rows
+  are already in `*_archive` (verify with `retention status` + a spot check),
+  and only in a deliberate operator action — never automatic.
+- Actions diagnostic artifacts: 90-day retention (explicitly not a backup).
+
+### Free-tier storage budget (1 GB) — evaluation
+
+- **Turso free tier**: 1 GB database total (hot + archive). The hot tables
+  are bounded to the 90-day window by retention; archives accumulate the
+  pre-window rows. `retention status` / `retention apply` report
+  `db_size` and `budget_ok`; a `BudgetOK=false` result warns (apply still
+  succeeds — archival only reduces hot size, but a sustained overage means the
+  window is too large for the tier).
+- **Per-package estimate**: a package contains only the expiring rows of the
+  three hot tables in one run, bounded by the 90-day window and the 500-row
+  batch limit. In steady state the weekly package is a fraction of the hot
+  set (only rows crossing the window that week); with ~3k ranked stories and
+  a few hundred articles, expect low-MB packages, well under the cap.
+- **Archive-repo cap**: the 1 GB shared org free tier applies to the private
+  archive repo too. If persist fails because of size, apply is blocked
+  (fail-closed); the remediation is pruning already-archived packages (above)
+  or enlarging the tier. A push failure is the *safe* failure: no rows are
+  deleted.
+- **Remediation on overage**: shrink `HSC_RETENTION_DAYS` (fewer hot rows),
+  prune archive-repo packages, or move to a paid tier. Documented alarm:
+  `retention status` shows `budget_ok=false`.
+
+### Recovery procedure (archive → hot)
+
+1. **From the archive repo**: clone `HuddleScope/huddlescope-retention-archive`
+   (needs org membership), locate the package under `packages/<YYYY>/<MM>/`,
+   verify its `manifest.json` sha256, then restore:
+   ```bash
+   huddlescope retention import --package <pkg>.tar.gz
+   ```
+   Import is idempotent (INSERT OR REPLACE with stable primary keys); re-import
+   duplicates nothing. The import runs against the configured backend
+   (sqlite-file locally; Turso in production).
+2. **From the in-Turso `*_archive` tables**: direct SQL `INSERT OR REPLACE`
+   from `*_archive` back into the hot table for a known set of rows (manual,
+   operator action).
+3. **Tertiary**: a Turso Cloud backup taken before the import (see Turso
+   backup/restore above).
+4. If a restore must roll back, delete the restored rows by primary key (the
+   package manifest lists per-table row counts) — or restore the database
+   from the Turso Cloud backup taken before the import.
 
 ### Safety properties
 
@@ -580,12 +688,28 @@ Disable retention locally or in CI with `HSC_RETENTION_ENABLED=false`.
   rejected rather than guessed.
 - Packages are portable: no absolute paths, no foreign keys, stable primary
   keys.
+- **Window-boundary invariant (AC-3)**: only rows strictly older than the
+  window are deletable. A row refreshed (`published_at` → now) between export
+  and apply no longer matches the window and is not deleted; and because
+  apply re-evaluates the window per batch in the same transaction as its
+  delete, any deleted row is always present in `*_archive` first.
+- **Concurrency (AC-3)**: a dedicated `concurrency` group per workflow
+  (`huddlescope-retention`) serializes retention runs; per-batch
+  archive-then-delete transactions + the publish gate (`--require-manifest`)
+  + `verify-html` prevent an empty-site deploy if retention races a
+  publication.
+- **Rollback**: retention is stateless in Git; reverting the workflow change
+  restores the prior behaviour. Packages already pushed to the private
+  archive repo remain valid inputs to `retention import`.
 
 ## Secret rotation
 
 ### GitHub Actions secrets
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN`
+- `RETENTION_ARCHIVE_PAT` — fine-grained PAT, Contents read/write on the
+  private archive repo (`HuddleScope/huddlescope-retention-archive`) only.
+  Used only by the persist/cleanup steps in `retention.yml` as `GH_TOKEN`.
 - `GITHUB_TOKEN` (provided automatically by Actions; not a manually stored secret)
 
 **Rotation procedure** (Turso pair):
@@ -595,6 +719,16 @@ Disable retention locally or in CI with `HSC_RETENTION_ENABLED=false`.
    (`gh secret set …`).
 3. Dispatch a refresh run (`gh workflow run refresh-news.yml … --field publish=false`)
    and verify the ingest step passes.
+
+**Rotation procedure** (`RETENTION_ARCHIVE_PAT`):
+1. Create a new fine-grained PAT scoped to Contents read/write on
+   `HuddleScope/huddlescope-retention-archive` only.
+2. `gh secret set RETENTION_ARCHIVE_PAT -R HuddleScope/huddlescope.github.io`
+   (use the new token) — the old token is then revoked.
+3. Dispatch a dry-run (`gh workflow dispatch retention.yml`) and confirm the
+   persist step still authenticates (it will skip if `apply=false`, but the
+   secret presence is logged). No re-deploy is required to change a repo
+   secret.
 
 ### Cloudflare Workers secrets
 - `GITHUB_TOKEN` (worker-specific, 90-day recommended)
@@ -704,13 +838,12 @@ account, token creation, `wrangler login`, verification).
 - Trigger: `workflow_dispatch` (manual or via Cloudflare Worker cron)
 - Parameters:
   - `publish` (boolean, default true): Deploy to Pages after successful build
-  - `run-retention` (boolean, default true): Run retention after build
   - `force_ingest` (boolean, default false): Force backup ingest even if Turso is fresh (maintenance only; still respects the distributed lease)
 - Jobs:
-  - `build`: checkout → setup Go → build → **Decide should-run** (Turso freshness) → **Backup ingest** (gated on should_run || force_ingest) → **Export** (always; re-publishes site-data to the workspace) → **Load deployed manifest** (`publish manifest get` from Turso) → **Publish gate** (`--require-manifest`; fail closed) → install Hugo → site verification → build site → demo-marker gate → **Retention export** → **Commit+push retention package** (only `archive/retention`, never `web/data`; plan D5) → retention apply → upload artifacts → Pages upload (gated)
-  - `deploy`: re-project snapshot → deploy to Pages → **Record deployed manifest** (`publish manifest put` to Turso; no git)
-- Permissions: least privilege; default `contents: read`; the `build` job gets `contents: write` (used only by the retention-only commit step); the deploy job requires `pages: write` and `id-token: write`
-- **Changed (issue #247 / PUB-01):** the old `commit-and-push-site-data` step (which committed `web/data`) is removed. The news snapshot is no longer committed to Git; the deployed manifest lives in Turso, read by `publish manifest get` and written by `publish manifest put`. The only Git-mutation step is the retention-only commit.
+  - `build`: checkout → setup Go → build → **Decide should-run** (Turso freshness) → **Backup ingest** (gated on should_run || force_ingest) → **Export** (always; re-publishes site-data to the workspace) → **Load deployed manifest** (`publish manifest get` from Turso) → **Publish gate** (`--require-manifest`; fail closed) → install Hugo → site verification → build site → demo-marker gate → **verify-html** → upload artifacts → Pages upload (gated)
+  - `deploy`: re-project snapshot → deploy to Pages → **Record deployed manifest** (`publish manifest put` to Turso; no git) → live smoke (soft)
+- Permissions: least privilege; workflow-level `contents: read` only; the build job holds NO job-level permissions (issue #252: no Git mutation, no retention); the deploy job requires `pages: write` and `id-token: write`
+- **Changed (issue #252 / PUB-06):** the `run-retention` dispatch input, the `retention-export` / `commit-and-push-retention` / `cleanup-retention-pr` / `retention-apply` steps, the build job's `contents: write`, and all `SITE_DATA_PAT` references are removed. Retention/archival is isolated to the dedicated `retention.yml` workflow (see "Retention and archiving"). This workflow never deletes rows or commits archive files. `SITE_DATA_PAT` is no longer referenced by refresh-news.yml (it remains in use by site.yml for editorial-content PRs).
 
 ### Publish decision step (issue #247 / PUB-01)
 After export, the workflow reads the deployed manifest from Turso (`publish
@@ -805,8 +938,13 @@ repo file) as a remote signal.
   committed to Git. The news snapshot is re-projected from Turso into the
   workspace (untracked/ignored) and the deployed manifest lives in Turso
   (`publish manifest get`/`put`), so a fresh checkout can deploy from the
-  database without any committed data. The only remaining Git-mutation step is
-  the retention-only commit (issue #120), which commits only `archive/retention`.
+  database without any committed data.
+- **Fixed (issue #252 / PUB-06):** Retention/archival is isolated from the
+  news publication workflow. `refresh-news.yml` no longer exports, commits,
+  or applies retention (no `run-retention` input, no `contents: write`, no
+  `SITE_DATA_PAT`); the dedicated `retention.yml` workflow runs it on a weekly
+  schedule + manual dispatch, dry-run by default, with a fail-closed persist
+  gate (no deletion without a durable, PAT-restricted copy).
 - **Fixed (issue #163):** The heartbeat check no longer reads checkout files;
   it uses Turso-backed `ingest should-run` and an HTTP fetch of the deployed
   site's `data/heartbeat.json`.
@@ -822,12 +960,13 @@ repo file) as a remote signal.
   runs can use `sqlite-file` or `memory`.
 - The `web/data/*.json` files are workspace-only (generated by `export run`,
   re-projected from Turso) and are gitignored/untracked since issue #247. The
-  refresh workflow does not push any news data back to the default branch; the
-  only commit is the retention package.
-- Backup/restore code implemented in sqlite package (HS-041), not yet wired
-  into the pipeline
-- Retention/archiving implemented in sqlite package (HS-041), not yet wired
-  into the pipeline
+  refresh workflow does not push any news data back to the default branch and
+  performs no Git mutation of any kind (issue #252: the retention-only commit
+  is removed).
+- Backup/restore code implemented in sqlite package (HS-041); the operational
+  backup path is Turso Cloud console or `turso db shell`
+- Retention/archival implemented in sqlite/Turso adapters (HS-065) and wired
+  to the dedicated `retention.yml` workflow (issue #252)
 
 ## Correction rules: story lifecycle and aliases (issue #26)
 

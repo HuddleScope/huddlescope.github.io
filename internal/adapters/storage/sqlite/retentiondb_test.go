@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/HuddleScope/huddlescope.github.io/internal/domain"
 )
 
 // newRetentionTestDB opens a temp-file sqlite database with migrations
@@ -213,5 +215,221 @@ func TestApplyRetentionPolicyDB_BudgetExceeded(t *testing.T) {
 	}
 	if ok {
 		t.Error("budget should be exceeded with FreeBytes=1")
+	}
+}
+
+// TestArchiveOldDB_WindowBoundary_RefreshedRowNotDeleted (issue #252 / AC-3):
+// a row refreshed (published_at -> now) between export and apply no longer
+// matches the window and must NOT be deleted; a genuinely old row is
+// archived before its delete (both tables consistent in the same pass).
+func TestArchiveOldDB_WindowBoundary_RefreshedRowNotDeleted(t *testing.T) {
+	db := newRetentionTestDB(t)
+	old := oldDateStr(t, 120)
+	if _, err := seedStory(db, "old-s", "Old story", old); err != nil {
+		t.Fatalf("seed old: %v", err)
+	}
+	refreshedID, err := seedStory(db, "refreshed-s", "Refreshed story", old)
+	if err != nil {
+		t.Fatalf("seed refreshed: %v", err)
+	}
+
+	// Simulate a refresh (e.g., by a concurrent ingest/export) that moves the
+	// row back into the window before apply runs.
+	if _, err := db.Exec(`UPDATE stories SET published_at = ? WHERE story_id = ?`,
+		timestampToString(time.Now().UTC()), refreshedID); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	counts, err := ArchiveOldDB(db, RetentionWindow, ArchiveBatchLimit)
+	if err != nil {
+		t.Fatalf("ArchiveOldDB: %v", err)
+	}
+	if counts["stories"] != 1 {
+		t.Errorf("stories archived: want 1 (only the genuinely old row), got %d", counts["stories"])
+	}
+	// The refreshed row survives in hot; the old one is in archive.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM stories WHERE story_key = 'refreshed-s'`).Scan(&n); err != nil {
+		t.Fatalf("count refreshed: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("refreshed story must survive (exit the window), hot stories for refreshed-s: want 1, got %d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM stories WHERE story_key = 'old-s'`).Scan(&n); err != nil {
+		t.Fatalf("count old: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("old story must leave hot after apply, got %d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM stories_archive WHERE story_key = 'old-s'`).Scan(&n); err != nil {
+		t.Fatalf("count archive: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("old story must be in archive before/with its delete, got %d", n)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM stories_archive WHERE story_key = 'refreshed-s'`).Scan(&n); err != nil {
+		t.Fatalf("count refreshed archive: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("refreshed story must NOT be archived, got %d", n)
+	}
+}
+
+// TestArchiveOldDB_ArchiveBeforeDeleteInvariant (issue #252 / AC-3):
+// every deleted hot row is present in its *_archive mirror afterwards, and
+// hot + archive counts are complementary (no row is lost or duplicated).
+func TestArchiveOldDB_ArchiveBeforeDeleteInvariant(t *testing.T) {
+	db := newRetentionTestDB(t)
+	// Seed 3 old + 2 fresh stories, 2 old + 1 fresh articles, 1 old + 1 fresh snapshot.
+	for i, key := range []string{"o1", "o2", "o3"} {
+		if _, err := seedStory(db, key, "Old "+key, oldDateStr(t, 100+i*10)); err != nil {
+			t.Fatalf("seed story %s: %v", key, err)
+		}
+	}
+	for _, key := range []string{"f1", "f2"} {
+		if _, err := seedStory(db, key, "Fresh "+key, timestampToString(time.Now().UTC())); err != nil {
+			t.Fatalf("seed fresh story %s: %v", key, err)
+		}
+	}
+	if err := seedArticle(db, "a123456789abcdef", "src-a", "Old A", oldDateStr(t, 100)); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	if err := seedArticle(db, "b123456789abcdef", "src-b", "Old B", oldDateStr(t, 110)); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	if err := seedArticle(db, "c123456789abcdef", "src-c", "Fresh C", timestampToString(time.Now().UTC())); err != nil {
+		t.Fatalf("seed fresh article: %v", err)
+	}
+	if err := seedSnapshot(db, oldDateStr(t, 100)[:10], "nyg", 1); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	if err := seedSnapshot(db, time.Now().UTC().Format("2006-01-02"), "nyg", 2); err != nil {
+		t.Fatalf("seed fresh snapshot: %v", err)
+	}
+
+	counts, err := ArchiveOldDB(db, RetentionWindow, ArchiveBatchLimit)
+	if err != nil {
+		t.Fatalf("ArchiveOldDB: %v", err)
+	}
+	if counts["stories"] != 3 || counts["articles"] != 2 || counts["ranking_snapshots"] != 1 {
+		t.Errorf("archived counts wrong: %v", counts)
+	}
+	// Invariant: hot + archive == total seeded, for each table.
+	want := map[string]int{"stories": 5, "articles": 3, "ranking_snapshots": 2}
+	for table, total := range want {
+		var hot, arc int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&hot); err != nil {
+			t.Fatalf("count hot %s: %v", table, err)
+		}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + `_archive`).Scan(&arc); err != nil {
+			t.Fatalf("count archive %s: %v", table, err)
+		}
+		if hot+arc != total {
+			t.Errorf("%s: hot(%d)+archive(%d) = %d, want %d (no loss, no duplication)", table, hot, arc, hot+arc, total)
+		}
+	}
+}
+
+// TestExportApplyImportRoundTrip (issue #252 / AC-4): representative dataset
+// round-trip — seed in-window and expired rows per hot table, export, apply,
+// then import the package into a FRESH database and verify row counts match.
+// Re-apply archives 0 (idempotent); double import duplicates nothing.
+func TestExportApplyImportRoundTrip(t *testing.T) {
+	db := newRetentionTestDB(t)
+	old := oldDateStr(t, 120)
+	fresh := timestampToString(time.Now().UTC())
+
+	// Representative seed: 2 expired + 1 fresh per hot table.
+	for _, key := range []string{"old-a", "old-b"} {
+		if _, err := seedStory(db, key, "Story "+key, old); err != nil {
+			t.Fatalf("seed story: %v", err)
+		}
+	}
+	if _, err := seedStory(db, "new-c", "Story new-c", fresh); err != nil {
+		t.Fatalf("seed story: %v", err)
+	}
+	if err := seedArticle(db, "a123456789abcdef", "src-a", "Old article", old); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	if err := seedArticle(db, "b123456789abcdef", "src-b", "Old article 2", oldDateStr(t, 110)); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	if err := seedArticle(db, "c123456789abcdef", "src-c", "Fresh article", fresh); err != nil {
+		t.Fatalf("seed article: %v", err)
+	}
+	if err := seedSnapshot(db, "2025-01-01", "nyg", 1); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	if err := seedSnapshot(db, time.Now().UTC().Format("2006-01-02"), "nyg", 2); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+
+	// 1) Export: captures the expired rows only (2 stories, 2 articles, 1 snapshot).
+	outPath := filepath.Join(t.TempDir(), "pkg.tar.gz")
+	rep, err := exportForTest(db, outPath, domain.NewRetentionPolicy())
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if rep.Rows["stories"] != 2 || rep.Rows["articles"] != 2 || rep.Rows["ranking_snapshots"] != 1 {
+		t.Errorf("export rows: %v (want stories=2 articles=2 ranking_snapshots=1)", rep.Rows)
+	}
+	if rep.TotalRows != 5 {
+		t.Errorf("export total: want 5, got %d", rep.TotalRows)
+	}
+
+	// 2) Apply: archive the expired rows; fresh rows stay hot.
+	counts, err := ArchiveOldDB(db, RetentionWindow, ArchiveBatchLimit)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if counts["stories"] != 2 || counts["articles"] != 2 || counts["ranking_snapshots"] != 1 {
+		t.Errorf("archived: %v", counts)
+	}
+	if n := countTable(t, db, "stories"); n != 1 {
+		t.Errorf("hot stories after apply: want 1 (fresh), got %d", n)
+	}
+	if n := countTable(t, db, "stories_archive"); n != 2 {
+		t.Errorf("stories_archive after apply: want 2, got %d", n)
+	}
+
+	// 3) Import the package into a FRESH database; row counts must match.
+	freshDB := newRetentionTestDB(t)
+	rep2, err := importForTest(freshDB, outPath)
+	if err != nil {
+		t.Fatalf("import into fresh db: %v", err)
+	}
+	if rep2.TotalRows != 5 {
+		t.Errorf("imported rows: want 5, got %d", rep2.TotalRows)
+	}
+	if n := countTable(t, freshDB, "stories"); n != 2 {
+		t.Errorf("fresh-db stories: want 2, got %d", n)
+	}
+	if n := countTable(t, freshDB, "articles"); n != 2 {
+		t.Errorf("fresh-db articles: want 2, got %d", n)
+	}
+	if n := countTable(t, freshDB, "ranking_snapshots"); n != 1 {
+		t.Errorf("fresh-db snapshots: want 1, got %d", n)
+	}
+
+	// 4) Re-apply on the original db: idempotent (archives 0).
+	counts2, err := ArchiveOldDB(db, RetentionWindow, ArchiveBatchLimit)
+	if err != nil {
+		t.Fatalf("re-apply: %v", err)
+	}
+	for table, n := range counts2 {
+		if n != 0 {
+			t.Errorf("re-apply %s: want 0 archived, got %d", table, n)
+		}
+	}
+
+	// 5) Double import on the fresh db: duplicates nothing.
+	if _, err := importForTest(freshDB, outPath); err != nil {
+		t.Fatalf("double import: %v", err)
+	}
+	if n := countTable(t, freshDB, "stories"); n != 2 {
+		t.Errorf("fresh-db stories after double import: want 2, got %d", n)
+	}
+	if n := countTable(t, freshDB, "articles"); n != 2 {
+		t.Errorf("fresh-db articles after double import: want 2, got %d", n)
 	}
 }

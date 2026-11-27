@@ -1,0 +1,307 @@
+# GitHub Actions workflow: dedicated database retention and archival
+# (issue #252 / PUB-06; engine from issue #120 / HS-065).
+#
+# This workflow is the ONLY place `retention apply` runs in CI. The news
+# publication workflow (refresh-news.yml) never exports, archives, or deletes
+# rows (AC-1). All destructive work is isolated here, scheduled weekly and
+# manual-dispatchable, and defaults to non-destructive dry-run (AC-2, AC-5).
+#
+# Fail-closed persistence before delete (AC-2):
+#   1. `retention export` — writes the expiring rows to a portable v1 package
+#      under dist/retention. NEVER deletes anything. A no-op export (no rows
+#      expired) ends the run successfully.
+#   2. `verify` — sha256 of the package + a full scratch-DB restore:
+#      `retention import --package <pkg>` against a throwaway sqlite-file DB
+#      (temp path). This exercises the complete v1 validation chain (format
+#      pin, version pin, table whitelist, statement classifier, size cap) and
+#      proves restorability without touching production (AC-4).
+#   3. `persist` — runs only when the operator dispatches apply=true. The
+#      package + a secret-free manifest.json are pushed to the private
+#      archive repository (org HuddleScope/huddlescope-retention-archive)
+#      using the fine-grained PAT in secret RETENTION_ARCHIVE_PAT (Contents
+#      read/write on the archive repo only) via `gh api`. No workflow
+#      permission escalation: the job stays `contents: read` and the PAT is
+#      injected only as this step's GH_TOKEN env. If apply=true but the secret
+#      is missing, or the push fails, the step exits non-zero and `retention
+#      apply` NEVER runs (the durable copy must exist before any delete).
+#   4. `retention apply` — gated on apply=true AND persist success. Archives
+#      the expiring rows into the *_archive tables (in-Turso, the primary
+#      archive of record; every deleted row is archived in the same
+#      transaction as its delete) and checks the 1 GB free-tier budget.
+#   5. Post `retention status` + a secret-free JSON run report uploaded as a
+#      90-day diagnostic artifact (explicitly NOT a backup).
+#
+# Safety boundaries (AC-3): a row refreshed (published_at -> now) between
+# export and apply no longer matches the window and is not deleted; per-batch
+# archive-then-delete transactions guarantee that any deleted row is in
+# *_archive before its delete commits. A dedicated concurrency group
+# serializes retention runs against each other (cancel-in-progress: false).
+#
+# Storage: the in-Turso *_archive tables are the durable archive of record.
+# The pushed package is a secondary durable copy (private, PAT-restricted).
+# archive/retention/ in this repo is a local-development convenience only;
+# CI never writes or commits it (issue #252).
+
+name: Retention
+
+on:
+  # Weekly maintenance, off-peak (03:00 UTC, Mondays).
+  schedule:
+    - cron: "0 3 * * 1"
+  # Manual dispatch. apply defaults to FALSE: a plain dispatch is a dry-run
+  # (status + export + verify, no persist, no apply). The operator must
+  # explicitly set apply=true to authorize deletion (AC-2).
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Authorize retention apply (archive + delete rows). Default false = dry-run (export + verify only)'
+        required: true
+        default: 'false'
+        type: boolean
+      window:
+        description: 'Override the retention window in days (empty = default 90)'
+        required: false
+        default: ''
+        type: string
+
+# Dedicated group: retention runs serialize against each other.
+# cancel-in-progress: false so an in-flight batch window is never cut off.
+concurrency:
+  group: huddlescope-retention
+  cancel-in-progress: false
+
+# Least privilege: contents read only. Persistence to the private archive
+# repo uses the scoped PAT (RETENTION_ARCHIVE_PAT) as the persist step's
+# GH_TOKEN — no workflow permission escalation, no pages/id-token grants.
+permissions:
+  contents: read
+
+jobs:
+  maintenance:
+    name: Retention maintenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+    env:
+      HSC_ENV: production
+      HSC_STORAGE_BACKEND: turso
+      HSC_RETENTION_ENABLED: "true"
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      HSC_USER_AGENT: huddlescope-ci/0.1 (+https://huddlescope.github.io/)
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build unified CLI
+        run: make build-huddlescope
+
+      # Fail closed on a DB error: a status that cannot read the database
+      # means no retention operation of any kind proceeds (logs schema
+      # version, size, budget).
+      - name: Retention status (pre)
+        id: status-pre
+        run: |
+          set -euo pipefail
+          echo "Checking retention state against Turso (fail closed on DB error)..."
+          ./dist/huddlescope retention status
+          echo "status-pre=ok" >> "$GITHUB_OUTPUT"
+
+      # Export never deletes. Writes nothing when no rows expired; the
+      # window override (workflow input) is applied when non-empty.
+      - name: Retention export
+        id: retention-export
+        run: |
+          set -euo pipefail
+          WINDOW_ARGS=()
+          if [ -n "${{ inputs.window }}" ]; then
+            WINDOW_ARGS=("--window" "${{ inputs.window }}")
+          fi
+          echo "Exporting rows older than the retention window to dist/retention..."
+          ./dist/huddlescope retention export --output dist/retention "${WINDOW_ARGS[@]}"
+          PKG=$(find dist/retention -name 'retention-*.tar.gz' -type f 2>/dev/null | head -n1 || true)
+          if [ -z "$PKG" ]; then
+            echo "No expiring rows: no-op export. Nothing to persist or apply."
+            echo "noop=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Exported package: $PKG"
+          du -sh "$PKG"
+          echo "package=$PKG" >> "$GITHUB_OUTPUT"
+          echo "noop=false" >> "$GITHUB_OUTPUT"
+
+      # Verify (AC-2, AC-4): checksum + scratch-DB restore of the package.
+      # The import runs against a throwaway sqlite-file DB in a temp dir, so
+      # the production Turso database is never written during verification.
+      # Any validation failure (format/version pin, table whitelist,
+      # statement classifier, size cap, truncation) exits non-zero and blocks
+      # persist/apply.
+      - name: Verify package (checksum + scratch-DB import)
+        id: verify
+        if: steps.retention-export.outputs.noop == 'false'
+        run: |
+          set -euo pipefail
+          PKG="${{ steps.retention-export.outputs.package }}"
+          SHA256=$(shasum -a 256 "$PKG" | awk '{print $1}')
+          echo "package sha256: $SHA256"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+          # Scratch restore into a throwaway local DB (never Turso).
+          SCRATCH_DB="$(mktemp -d)/scratch.db"
+          echo "Verifying restorability into scratch DB: $SCRATCH_DB"
+          HSC_ENV=local HSC_STORAGE_BACKEND=sqlite-file HSC_DB_PATH="$SCRATCH_DB" \
+            ./dist/huddlescope retention import --package "$PKG"
+          rm -rf "$(dirname "$SCRATCH_DB")"
+          echo "verify=pass" >> "$GITHUB_OUTPUT"
+
+      # Persist (AC-2): durable restricted storage BEFORE any delete. Runs
+      # only when the operator authorized apply. The package + manifest.json
+      # (secret-free: path, sha256, run identity, timestamp) are pushed to the
+      # private archive repo as a single commit. Missing secret or failed
+      # push => non-zero exit => apply never runs.
+      - name: Persist package to private archive repo
+        id: persist
+        if: inputs.apply == 'true' && steps.verify.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.RETENTION_ARCHIVE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::apply=true but RETENTION_ARCHIVE_PAT is not configured; refusing to delete without a durable copy"
+            exit 1
+          fi
+          ARCHIVE_REPO="${RETENTION_ARCHIVE_REPO:-HuddleScope/huddlescope-retention-archive}"
+          PKG="${{ steps.retention-export.outputs.package }}"
+          SHA256="${{ steps.verify.outputs.sha256 }}"
+          PKG_NAME=$(basename "$PKG")
+
+          # Build the archive commit locally (detached, no branch checkout of
+          # this repo), then push it via the GitHub API (single atomic ref
+          # update). The PAT grants Contents read/write on the archive repo
+          # only; it is never echoed.
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${ARCHIVE_REPO}.git" archive-clone 2>/dev/null || {
+            echo "::error::cannot clone archive repo ${ARCHIVE_REPO} (repo not provisioned or PAT lacks access); persist blocked"
+            exit 1
+          }
+          cd archive-clone
+          git config user.name "HuddleScope CI"
+          git config user.email "ci@huddlescope.github.io"
+          mkdir -p "packages/$(date -u +%Y/%m)"
+          cp "$PKG" "packages/$(date -u +%Y/%m)/$PKG_NAME"
+          cat > "packages/$(date -u +%Y/%m)/$PKG_NAME.manifest.json" <<EOF
+          {
+            "package": "$PKG_NAME",
+            "sha256": "$SHA256",
+            "githubRunId": "${{ github.run_id }}",
+            "githubRunNumber": "${{ github.run_number }}",
+            "githubSha": "${{ github.sha }}",
+            "workflow": "retention",
+            "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          git add .
+          if git diff --cached --quiet; then
+            echo "Archive content unchanged; nothing to push."
+            echo "persisted=unchanged" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "retention package $PKG_NAME (run ${{ github.run_id }}, sha256 ${SHA256:0:16})"
+          git push origin HEAD
+          echo "persisted=true" >> "$GITHUB_OUTPUT"
+          cd ..
+
+      # Apply (AC-2): the only delete path. Gated on the explicit operator
+      # input AND a successful persist. No continue-on-error, no if: always().
+      - name: Retention apply
+        id: retention-apply
+        if: inputs.apply == 'true' && steps.persist.conclusion == 'success'
+        run: |
+          set -euo pipefail
+          echo "Archiving rows older than the retention window (persisted copy verified)..."
+          ./dist/huddlescope retention apply
+          echo "Retention apply completed"
+
+      # Dry-run acknowledgement: when apply is not authorized, spell out that
+      # export + verify succeeded and no deletion occurred.
+      - name: Dry-run summary
+        if: inputs.apply != 'true'
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.retention-export.outputs.noop }}" = "true" ]; then
+            echo "Dry-run complete: no expiring rows; nothing to persist or apply."
+          else
+            echo "Dry-run complete: package exported and verified; no deletion performed (apply was not authorized)."
+          fi
+
+      # Post status + secret-free run report (diagnostic only, NOT a backup).
+      - name: Retention status (post) and run report
+        id: report
+        run: |
+          set -euo pipefail
+          echo "Post-run retention state:"
+          ./dist/huddlescope retention status
+          cat > dist/retention-report.json <<EOF
+          {
+            "workflow": "retention",
+            "githubRunId": "${{ github.run_id }}",
+            "githubRunNumber": "${{ github.run_number }}",
+            "githubSha": "${{ github.sha }}",
+            "applyAuthorized": ${{ inputs.apply == 'true' }},
+            "exportNoop": ${{ steps.retention-export.outputs.noop == 'true' }},
+            "package": ${{ toJSON(steps.retention-export.outputs.package) }},
+            "packageSha256": ${{ toJSON(steps.verify.outputs.sha256) }},
+            "persistOutcome": ${{ toJSON(steps.persist.outcome) }},
+            "applyOutcome": ${{ toJSON(steps.retention-apply.outcome) }},
+            "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat dist/retention-report.json
+
+      - name: Upload retention diagnostic artifact
+        if: steps.report.conclusion == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: retention-diag-${{ github.run_id }}
+          path: dist/retention-report.json
+          retention-days: 90
+          if-no-files-found: error
+
+      # Best-effort cleanup: if a persist push succeeded but the run then
+      # failed (e.g., apply failed), remove the pushed commit so an orphan
+      # package never lingers in the archive repo. Log-only (never fails the
+      # run): packages are immutable and re-exportable, and a failed cleanup
+      # must not mask the real failure.
+      - name: Clean up orphaned archive push (best-effort)
+        if: always() && steps.persist.outcome == 'success' && !success()
+        env:
+          GH_TOKEN: ${{ secrets.RETENTION_ARCHIVE_PAT }}
+        run: |
+          set -uo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::cleanup skipped: no token available"
+            exit 0
+          fi
+          ARCHIVE_REPO="${RETENTION_ARCHIVE_REPO:-HuddleScope/huddlescope-retention-archive}"
+          echo "Run failed after a successful persist; removing the pushed commit (best-effort)..."
+          HEAD_SHA=$(gh api repos/"$ARCHIVE_REPO"/commits/HEAD --jq .sha 2>/dev/null || true)
+          if [ -n "$HEAD_SHA" ]; then
+            PARENT_SHA=$(gh api repos/"$ARCHIVE_REPO"/commits --jq '.[1].sha' 2>/dev/null || true)
+            if [ -n "$PARENT_SHA" ]; then
+              gh api -X POST repos/"$ARCHIVE_REPO"/git/refs \
+                -f ref="refs/heads/$(gh api repos/"$ARCHIVE_REPO" --jq .default_branch)" \
+                -f sha="$PARENT_SHA" 2>/dev/null \
+                || echo "::warning::could not reset archive repo ref; orphan commit remains (packages are immutable and re-exportable)"
+            fi
+          else
+            echo "::warning::could not read archive repo HEAD; leaving as-is"
+          fi
+          echo "Cleanup attempt complete (log-only)"
